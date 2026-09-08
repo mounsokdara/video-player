@@ -14,6 +14,7 @@ class AppSettings {
   bool rememberPlayback = true;
   bool confirmDelete = true;
   bool scanOnStart = true;
+  bool autoRefresh = false;
   bool showHiddenFolders = false;
   int thumbnailQuality = 2;
   bool vibrateOnLongPress = true;
@@ -48,6 +49,7 @@ class AppSettings {
   bool doubleTapSeek = true;
   bool autoPlayNext = true;
   bool gestureControl = true;
+  bool allowZoom = true;
   String preferredAudio = 'auto';
   bool rememberHdr = false;
   bool hdrOn = true;
@@ -86,40 +88,48 @@ class AppSettings {
   double hueRotate = 0;
   double sharpness = 0;
   bool mirror = false;
-  bool hideNavBar = false;
-  bool showAppNav = true;
+  bool colorCorrection = false;
+  bool alwaysHideNavBar = false;
 
-  static const allQuickActions = <String>[
-    'lock',
-    'aspect',
-    'audio',
-    'subtitle',
-    'speed',
-    'background',
-    'popup',
-    'hidenav',
-    'cast',
-    'delete',
-    'bookmark',
-    'playopt',
-    'ab',
-    'eq',
-    'night',
-    'mirror',
-    'invert',
-    'color',
-    'rotate',
-    'brightness',
-    'timer',
-    'songs',
-    'repeat',
-    'decoder',
-    'screenshot',
-    'share',
-    'properties',
-  ];
+  /// Tab ids hidden from the bottom bar and moved into the overflow menu.
+  /// Valid: videos, folders, settings. At least one tab must stay visible.
+  List<String> hiddenTabs = [];
 
-  List<String> quickActions = List<String>.from(allQuickActions);
+  static const tabIds = <String>['videos', 'folders', 'settings'];
+
+  static const tabLabels = <String, String>{
+    'videos': 'Videos',
+    'folders': 'Folders',
+    'settings': 'Settings',
+  };
+
+  static const defaultQuickActions = <String>['screenshot', 'background', 'speed'];
+
+  List<String> quickActions = List<String>.from(defaultQuickActions);
+
+  static const eqBandHz = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+  static const eqPresets = <String, List<int>>{
+    'Flat': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    'Bass': [900, 700, 400, 150, 0, 0, -50, 0, 0, 0],
+    'Treble': [0, 0, 0, 0, 50, 150, 350, 550, 750, 850],
+    'Vocal': [-200, -100, 80, 420, 560, 420, 120, 0, -80, -160],
+    'Rock': [450, 320, 180, 0, -120, 80, 280, 420, 320, 220],
+    'Pop': [-80, 180, 380, 280, 0, -80, 220, 320, 220, 40],
+    'Jazz': [280, 180, 40, 180, 280, 180, 40, 180, 280, 180],
+    'Classical': [420, 280, 40, 0, 0, 0, 40, 220, 320, 420],
+    'Dance': [520, 400, 120, 0, 180, 280, 400, 280, 180, 80],
+    'Electronic': [520, 400, 0, -180, 180, 380, 180, 0, 380, 520],
+  };
+
+  // Equalizer
+  bool eqEnabled = false;
+  List<int> eqBands = List<int>.filled(10, 0);
+  String eqPreset = 'Flat';
+  bool bassBoostOn = false;
+  int bassBoost = 0;
+  bool surroundOn = false;
+  int surround = 0;
 
   Map<String, double> resumeMap = {};
   Map<String, double> speedMap = {};
@@ -127,21 +137,43 @@ class AppSettings {
 
   Color get seed => Color(seedColor);
 
+  List<String> get visibleTabs {
+    final vis = tabIds.where((t) => !hiddenTabs.contains(t)).toList();
+    return vis.isEmpty ? ['videos'] : vis;
+  }
+
+  bool hideTab(String id, bool hide) {
+    if (!tabIds.contains(id)) return false;
+    if (hide) {
+      final remaining = tabIds.where((t) => t != id && !hiddenTabs.contains(t)).length;
+      if (remaining < 1) return false;
+      if (!hiddenTabs.contains(id)) hiddenTabs = [...hiddenTabs, id];
+    } else {
+      hiddenTabs = hiddenTabs.where((t) => t != id).toList();
+    }
+    return true;
+  }
+
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    themeMode = ThemeModePref.values[p.getInt('themeMode') ?? 0];
+    themeMode = ThemeModePref.values[(p.getInt('themeMode') ?? 0).clamp(0, ThemeModePref.values.length - 1)];
     seedColor = p.getInt('seedColor') ?? 0xFF8BA3B8;
     dynamicColor = p.getBool('dynamicColor') ?? true;
     rememberPlayback = p.getBool('rememberPlayback') ?? true;
     confirmDelete = p.getBool('confirmDelete') ?? true;
     scanOnStart = p.getBool('scanOnStart') ?? true;
+    autoRefresh = p.getBool('autoRefresh') ?? false;
     showHiddenFolders = p.getBool('showHiddenFolders') ?? false;
     vibrateOnLongPress = p.getBool('vibrateOnLongPress') ?? true;
+    thumbnailQuality = p.getInt('thumbnailQuality') ?? 2;
     showRemaining = p.getBool('showRemaining') ?? true;
     showClock = p.getBool('showClock') ?? true;
     showBattery = p.getBool('showBattery') ?? true;
-    rotation = RotationLock.values[p.getInt('rotation') ?? 1];
-    decoder = DecoderMode.values[p.getInt('decoder') ?? 1];
+    showSeekPreview = p.getBool('showSeekPreview') ?? true;
+    showBrightnessOverlay = p.getBool('showBrightnessOverlay') ?? true;
+    showVolumeOverlay = p.getBool('showVolumeOverlay') ?? true;
+    rotation = RotationLock.values[(p.getInt('rotation') ?? 1).clamp(0, RotationLock.values.length - 1)];
+    decoder = DecoderMode.values[(p.getInt('decoder') ?? 1).clamp(0, DecoderMode.values.length - 1)];
     hwPriority = p.getBool('hwPriority') ?? true;
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
     autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
@@ -153,7 +185,7 @@ class AppSettings {
     rememberBackgroundPlay = p.getBool('rememberBackgroundPlay') ?? false;
     backgroundPlay = p.getBool('backgroundPlay') ?? false;
     rememberAspect = p.getBool('rememberAspect') ?? true;
-    aspect = AspectMode.values[p.getInt('aspect') ?? 0];
+    aspect = AspectMode.values[(p.getInt('aspect') ?? 0).clamp(0, AspectMode.values.length - 1)];
     resumePlayback = p.getBool('resumePlayback') ?? true;
     rememberSpeed = p.getBool('rememberSpeed') ?? false;
     speed = p.getDouble('speed') ?? 1;
@@ -164,11 +196,12 @@ class AppSettings {
     doubleTapSeek = p.getBool('doubleTapSeek') ?? true;
     autoPlayNext = p.getBool('autoPlayNext') ?? true;
     gestureControl = p.getBool('gestureControl') ?? true;
+    allowZoom = p.getBool('allowZoom') ?? true;
     preferredAudio = p.getString('preferredAudio') ?? 'auto';
     rememberHdr = p.getBool('rememberHdr') ?? false;
     hdrOn = p.getBool('hdrOn') ?? true;
     pitchShift = p.getBool('pitchShift') ?? false;
-    playMode = PlayMode.values[p.getInt('playMode') ?? 0];
+    playMode = PlayMode.values[(p.getInt('playMode') ?? 0).clamp(0, PlayMode.values.length - 1)];
     captions = p.getBool('captions') ?? false;
     captionSize = p.getDouble('captionSize') ?? 1;
     highContrast = p.getBool('highContrast') ?? false;
@@ -185,28 +218,58 @@ class AppSettings {
     boldText = p.getBool('boldText') ?? false;
     uiScale = p.getDouble('uiScale') ?? 1;
     hapticFeedback = p.getBool('hapticFeedback') ?? true;
+    liveCaptions = p.getBool('liveCaptions') ?? false;
+    audioDescription = p.getBool('audioDescription') ?? false;
+    focusHighlight = p.getBool('focusHighlight') ?? false;
+    stereoFix = p.getBool('stereoFix') ?? false;
+    monochrome = p.getBool('monochrome') ?? false;
     contrast = p.getDouble('contrast') ?? 1;
     saturation = p.getDouble('saturation') ?? 1;
     gamma = p.getDouble('gamma') ?? 1;
     hueRotate = p.getDouble('hueRotate') ?? 0;
+    sharpness = p.getDouble('sharpness') ?? 0;
     mirror = p.getBool('mirror') ?? false;
-    hideNavBar = p.getBool('hideNavBar') ?? false;
-    showAppNav = p.getBool('showAppNav') ?? true;
-    final qa = p.getStringList('quickActions');
-    if (qa == null || qa.isEmpty) {
-      quickActions = List<String>.from(allQuickActions);
-    } else {
-      quickActions = [...qa];
-      for (final a in allQuickActions) {
-        if (!quickActions.contains(a)) quickActions.add(a);
-      }
+    colorCorrection = p.getBool('colorCorrection') ?? false;
+    alwaysHideNavBar = p.getBool('alwaysHideNavBar') ?? false;
+    hiddenTabs = List<String>.from(p.getStringList('hiddenTabs') ?? const []);
+    hiddenTabs.removeWhere((t) => !tabIds.contains(t));
+    if (hiddenTabs.length >= tabIds.length) {
+      hiddenTabs = hiddenTabs.take(tabIds.length - 1).toList();
     }
+
+    quickActions = List<String>.from(defaultQuickActions);
+    await p.setStringList('quickActions', quickActions);
+
+    eqEnabled = p.getBool('eqEnabled') ?? false;
+    eqPreset = p.getString('eqPreset') ?? 'Flat';
+    bassBoostOn = p.getBool('bassBoostOn') ?? false;
+    bassBoost = (p.getInt('bassBoost') ?? 0).clamp(0, 1000);
+    surroundOn = p.getBool('surroundOn') ?? false;
+    surround = (p.getInt('surround') ?? 0).clamp(0, 1000);
+    final bandsRaw = p.getString('eqBands');
+    if (bandsRaw != null) {
+      try {
+        eqBands = (jsonDecode(bandsRaw) as List).map((e) => (e as num).toInt()).toList();
+      } catch (_) {}
+    }
+    while (eqBands.length < 10) {
+      eqBands.add(0);
+    }
+    if (eqBands.length > 10) eqBands = eqBands.take(10).toList();
+
     final resume = p.getString('resumeMap');
     if (resume != null) {
-      resumeMap = (jsonDecode(resume) as Map).map((k, v) => MapEntry('$k', (v as num).toDouble()));
+      try {
+        resumeMap = (jsonDecode(resume) as Map).map((k, v) => MapEntry('$k', (v as num).toDouble()));
+      } catch (_) {}
     }
-    final bm = p.getStringList('bookmarks') ?? [];
-    bookmarks = bm.toSet();
+    final speeds = p.getString('speedMap');
+    if (speeds != null) {
+      try {
+        speedMap = (jsonDecode(speeds) as Map).map((k, v) => MapEntry('$k', (v as num).toDouble()));
+      } catch (_) {}
+    }
+    bookmarks = (p.getStringList('bookmarks') ?? []).toSet();
   }
 
   Future<void> save() async {
@@ -217,11 +280,16 @@ class AppSettings {
     await p.setBool('rememberPlayback', rememberPlayback);
     await p.setBool('confirmDelete', confirmDelete);
     await p.setBool('scanOnStart', scanOnStart);
+    await p.setBool('autoRefresh', autoRefresh);
     await p.setBool('showHiddenFolders', showHiddenFolders);
     await p.setBool('vibrateOnLongPress', vibrateOnLongPress);
+    await p.setInt('thumbnailQuality', thumbnailQuality);
     await p.setBool('showRemaining', showRemaining);
     await p.setBool('showClock', showClock);
     await p.setBool('showBattery', showBattery);
+    await p.setBool('showSeekPreview', showSeekPreview);
+    await p.setBool('showBrightnessOverlay', showBrightnessOverlay);
+    await p.setBool('showVolumeOverlay', showVolumeOverlay);
     await p.setInt('rotation', rotation.index);
     await p.setInt('decoder', decoder.index);
     await p.setBool('hwPriority', hwPriority);
@@ -241,6 +309,7 @@ class AppSettings {
     await p.setBool('doubleTapSeek', doubleTapSeek);
     await p.setBool('autoPlayNext', autoPlayNext);
     await p.setBool('gestureControl', gestureControl);
+    await p.setBool('allowZoom', allowZoom);
     await p.setString('preferredAudio', preferredAudio);
     await p.setBool('rememberHdr', rememberHdr);
     await p.setBool('hdrOn', hdrOn);
@@ -262,15 +331,37 @@ class AppSettings {
     await p.setBool('boldText', boldText);
     await p.setDouble('uiScale', uiScale);
     await p.setBool('hapticFeedback', hapticFeedback);
+    await p.setBool('liveCaptions', liveCaptions);
+    await p.setBool('audioDescription', audioDescription);
+    await p.setBool('focusHighlight', focusHighlight);
+    await p.setBool('stereoFix', stereoFix);
+    await p.setBool('monochrome', monochrome);
     await p.setDouble('contrast', contrast);
     await p.setDouble('saturation', saturation);
     await p.setDouble('gamma', gamma);
     await p.setDouble('hueRotate', hueRotate);
+    await p.setDouble('sharpness', sharpness);
     await p.setBool('mirror', mirror);
-    await p.setBool('hideNavBar', hideNavBar);
-    await p.setBool('showAppNav', showAppNav);
-    await p.setStringList('quickActions', quickActions);
+    await p.setBool('colorCorrection', colorCorrection);
+    await p.setBool('alwaysHideNavBar', alwaysHideNavBar);
+    await p.setStringList('hiddenTabs', hiddenTabs);
+    await p.setStringList('quickActions', defaultQuickActions);
+    await p.setBool('eqEnabled', eqEnabled);
+    await p.setString('eqPreset', eqPreset);
+    await p.setString('eqBands', jsonEncode(eqBands));
+    await p.setBool('bassBoostOn', bassBoostOn);
+    await p.setInt('bassBoost', bassBoost);
+    await p.setBool('surroundOn', surroundOn);
+    await p.setInt('surround', surround);
     await p.setString('resumeMap', jsonEncode(resumeMap));
+    await p.setString('speedMap', jsonEncode(speedMap));
     await p.setStringList('bookmarks', bookmarks.toList());
+  }
+
+  void applyPreset(String name) {
+    final bands = eqPresets[name];
+    if (bands == null) return;
+    eqPreset = name;
+    eqBands = List<int>.from(bands);
   }
 }

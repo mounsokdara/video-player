@@ -5,6 +5,14 @@ import 'models.dart';
 class AndroidBridge {
   AndroidBridge._();
   static const _ch = MethodChannel('app.videoplayer/android');
+  static const _ev = EventChannel('app.videoplayer/events');
+
+  static Stream<Map<String, dynamic>> events() {
+    return _ev.receiveBroadcastStream().map((e) {
+      if (e is Map) return Map<String, dynamic>.from(e);
+      return <String, dynamic>{'type': '$e'};
+    });
+  }
 
   static Future<bool> hasAllFilesAccess() async {
     try {
@@ -109,15 +117,76 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> setEqBands(List<int> levels) async {
+    try {
+      await _ch.invokeMethod('setEqBands', {'levels': levels});
+    } catch (_) {}
+  }
+
   static Future<void> setEqPreset(int preset) async {
     try {
       await _ch.invokeMethod('setEqPreset', {'preset': preset});
     } catch (_) {}
   }
 
-  static Future<void> startBackground(String title) async {
+  static Future<void> setEqEnabled(bool on) async {
     try {
-      await _ch.invokeMethod('startBackground', {'title': title});
+      await _ch.invokeMethod('setEqEnabled', {'on': on});
+    } catch (_) {}
+  }
+
+  static Future<void> setBassBoost({required bool on, required int strength}) async {
+    try {
+      await _ch.invokeMethod('setBassBoost', {'on': on, 'strength': strength});
+    } catch (_) {}
+  }
+
+  static Future<void> setSurround({required bool on, required int strength}) async {
+    try {
+      await _ch.invokeMethod('setVirtualizer', {'on': on, 'strength': strength});
+    } catch (_) {}
+  }
+
+  static Future<void> setPlaybackParams({required double speed, required bool pitchShift}) async {
+    try {
+      await _ch.invokeMethod('setPlaybackParams', {
+        'speed': speed,
+        'pitchShift': pitchShift,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> startBackground({
+    required String title,
+    String? artist,
+    bool playing = true,
+    int positionMs = 0,
+    int durationMs = 0,
+  }) async {
+    try {
+      await _ch.invokeMethod('startBackground', {
+        'title': title,
+        'artist': artist ?? 'Video Player',
+        'playing': playing,
+        'positionMs': positionMs,
+        'durationMs': durationMs,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> updateBackground({
+    required bool playing,
+    int? positionMs,
+    int? durationMs,
+    String? title,
+  }) async {
+    try {
+      await _ch.invokeMethod('updateBackground', {
+        'playing': playing,
+        if (positionMs != null) 'positionMs': positionMs,
+        if (durationMs != null) 'durationMs': durationMs,
+        if (title != null) 'title': title,
+      });
     } catch (_) {}
   }
 
@@ -125,6 +194,34 @@ class AndroidBridge {
     try {
       await _ch.invokeMethod('stopBackground');
     } catch (_) {}
+  }
+
+  static Future<String?> screenshot({required String path, required int positionMs, String? title}) async {
+    try {
+      return await _ch.invokeMethod<String>('screenshot', {
+        'path': path,
+        'positionMs': positionMs,
+        'title': title ?? 'frame',
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> mediaInfo(String path) async {
+    try {
+      final raw = await _ch.invokeMethod('mediaInfo', {'path': path});
+      if (raw is Map) return Map<String, dynamic>.from(raw);
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<String?> pendingOpen() async {
+    try {
+      return await _ch.invokeMethod<String>('pendingOpen');
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> toast(String msg) async {

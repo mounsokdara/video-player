@@ -21,6 +21,41 @@ import 'settings.dart';
 import 'settings_ui.dart';
 import 'widgets.dart';
 
+class PlaybackSession {
+  static VideoPlayerController? controller;
+  static VideoItem? item;
+  static List<VideoItem> playlist = [];
+  static int index = 0;
+  static bool keepAlive = false;
+  static double speed = 1;
+  static AspectMode aspect = AspectMode.fit;
+
+  static bool get active => keepAlive && controller != null && item != null;
+
+  static Future<void> stop() async {
+    keepAlive = false;
+    try {
+      await controller?.pause();
+    } catch (_) {}
+    try {
+      controller?.removeListener(() {});
+      await controller?.dispose();
+    } catch (_) {}
+    controller = null;
+    item = null;
+    playlist = [];
+    await AndroidBridge.stopBackground();
+  }
+}
+
+class _Burst {
+  _Burst({required this.id, required this.pos, required this.label, required this.icon});
+  final int id;
+  final Offset pos;
+  final String label;
+  final IconData icon;
+}
+
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.playlist, required this.index, required this.onChanged});
   final List<VideoItem> playlist;
@@ -31,7 +66,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   late int index;
   VideoPlayerController? vc;
   bool ready = false;
@@ -48,12 +83,12 @@ class _PlayerPageState extends State<PlayerPage> {
   Timer? sleepTimer;
   Duration? sleepLeft;
   Timer? clockTimer;
+  Timer? persistTimer;
   DateTime now = DateTime.now();
   int battery = 100;
   bool hdr = true;
   late AspectMode aspect;
   double speed = 1;
-  int skipFlash = 0; // -1 left, 1 right
   Offset? panStart;
   String panKind = '';
   double panBase = 0;
@@ -61,6 +96,10 @@ class _PlayerPageState extends State<PlayerPage> {
   bool mirror = false;
   bool invert = false;
   bool _lastPlaying = false;
+  final bursts = <_Burst>[];
+  int _burstSeq = 0;
+  final zoom = TransformationController();
+  StreamSubscription<Map<String, dynamic>>? events;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -68,6 +107,7 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     index = widget.index.clamp(0, widget.playlist.length - 1);
     aspect = appSettings.aspect;
     speed = appSettings.rememberSpeed ? appSettings.speed : 1;
@@ -75,11 +115,66 @@ class _PlayerPageState extends State<PlayerPage> {
     night = appSettings.nightMode;
     mirror = appSettings.mirror;
     invert = appSettings.invertColors;
-    _boot();
+    final kept = PlaybackSession.active &&
+        PlaybackSession.controller != null &&
+        PlaybackSession.controller!.value.isInitialized &&
+        PlaybackSession.item?.path == widget.playlist[index].path;
+    if (kept) {
+      vc = PlaybackSession.controller;
+      ready = true;
+      speed = PlaybackSession.speed;
+      aspect = PlaybackSession.aspect;
+      PlaybackSession.keepAlive = false;
+      vc?.addListener(_tick);
+      _lastPlaying = vc?.value.isPlaying ?? false;
+      _applySystemUi();
+      _applyRotation();
+      _applySpeed();
+      _syncBackground();
+      _armHide();
+    } else {
+      if (PlaybackSession.controller != null && PlaybackSession.controller != vc) {
+        PlaybackSession.stop();
+      }
+      _boot();
+    }
     clockTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       setState(() => now = DateTime.now());
-      Battery().batteryLevel.then((v) { if (mounted) setState(() => battery = v); });
+      Battery().batteryLevel.then((v) {
+        if (mounted) setState(() => battery = v);
+      });
     });
+    persistTimer = Timer.periodic(const Duration(seconds: 4), (_) => _persistProgress());
+    events = AndroidBridge.events().listen((e) {
+      if (e['type'] == 'media') {
+        switch (e['action']) {
+          case 'play':
+            vc?.play();
+          case 'pause':
+            vc?.pause();
+          case 'next':
+            _next();
+          case 'prev':
+            _prev();
+        }
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _persistProgress();
+      if (!appSettings.backgroundPlay) {
+        vc?.pause();
+        AndroidBridge.stopBackground();
+      } else {
+        _syncBackground();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      _applySystemUi();
+      if (appSettings.backgroundPlay) _syncBackground();
+    }
   }
 
   Future<void> _boot() async {
@@ -98,7 +193,9 @@ class _PlayerPageState extends State<PlayerPage> {
     } catch (_) {}
     if (appSettings.rememberBrightness && appSettings.brightness >= 0) {
       brightness = appSettings.brightness;
-      try { await ScreenBrightness().setApplicationScreenBrightness(brightness); } catch (_) {}
+      try {
+        await ScreenBrightness().setApplicationScreenBrightness(brightness);
+      } catch (_) {}
     }
     await _openCurrent();
   }
@@ -119,10 +216,17 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _applySystemUi() {
-    if (appSettings.hideNavBar) {
+    final hide = appSettings.alwaysHideNavBar || !showUi || locked;
+    if (hide) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
+        systemStatusBarContrastEnforced: false,
+      ));
     }
   }
 
@@ -132,8 +236,50 @@ class _PlayerPageState extends State<PlayerPage> {
     AndroidBridge.setPipEnabled(appSettings.autoMiniplayer && playing);
   }
 
+  Future<void> _applySpeed() async {
+    final rate = speeding ? 2.0 : speed;
+    await vc?.setPlaybackSpeed(rate);
+    await AndroidBridge.setPlaybackParams(speed: rate, pitchShift: appSettings.pitchShift);
+    Future<void>.delayed(const Duration(milliseconds: 180), () {
+      AndroidBridge.setPlaybackParams(speed: speeding ? 2 : speed, pitchShift: appSettings.pitchShift);
+    });
+  }
+
+  Future<void> _syncBackground() async {
+    if (!appSettings.backgroundPlay) {
+      await AndroidBridge.stopBackground();
+      return;
+    }
+    final c = vc;
+    await AndroidBridge.startBackground(
+      title: item.title,
+      artist: item.folderName,
+      playing: c?.value.isPlaying ?? false,
+      positionMs: c?.value.position.inMilliseconds ?? 0,
+      durationMs: c?.value.duration.inMilliseconds ?? 0,
+    );
+    await AndroidBridge.updateBackground(
+      playing: c?.value.isPlaying ?? false,
+      positionMs: c?.value.position.inMilliseconds ?? 0,
+      durationMs: c?.value.duration.inMilliseconds ?? 0,
+      title: item.title,
+    );
+  }
+
+  Future<void> _persistProgress() async {
+    final c = vc;
+    if (c == null || !c.value.isInitialized) return;
+    final dur = c.value.duration.inMilliseconds;
+    if (dur <= 0) return;
+    final p = (c.value.position.inMilliseconds / dur).clamp(0.0, 1.0).toDouble();
+    item.progress = p;
+    appSettings.resumeMap[item.path] = p;
+    await appSettings.save();
+  }
+
   Future<void> _openCurrent() async {
     await vc?.dispose();
+    zoom.value = Matrix4.identity();
     setState(() {
       ready = false;
       vc = null;
@@ -141,7 +287,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final file = File(item.path);
     final c = VideoPlayerController.file(
       file,
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: appSettings.backgroundPlay),
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true, allowBackgroundPlayback: appSettings.backgroundPlay),
     );
     vc = c;
     try {
@@ -152,15 +298,19 @@ class _PlayerPageState extends State<PlayerPage> {
           await c.seekTo(c.value.duration * p);
         }
       }
-      await c.setPlaybackSpeed(speed);
       c.addListener(_tick);
       c.setLooping(appSettings.playMode == PlayMode.repeatOne);
       await c.play();
       _lastPlaying = true;
       _syncPip();
-      if (appSettings.backgroundPlay) {
-        await AndroidBridge.startBackground(item.title);
-      }
+      await _syncBackground();
+      await _applySpeed();
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await AndroidBridge.initEqualizer(0);
+      await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
+      await AndroidBridge.setEqBands(appSettings.eqBands);
+      await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
+      await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
       _armHide();
       setState(() => ready = true);
     } catch (e) {
@@ -185,6 +335,7 @@ class _PlayerPageState extends State<PlayerPage> {
     if (playing != _lastPlaying) {
       _lastPlaying = playing;
       _syncPip();
+      _syncBackground();
     }
     if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
       _onEnded();
@@ -237,11 +388,19 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  void _setUi(bool on) {
+    setState(() => showUi = on);
+    _applySystemUi();
+    if (on) _armHide();
+  }
+
   void _armHide() {
     hideTimer?.cancel();
     if (locked) return;
     hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && (vc?.value.isPlaying ?? false) && !locked) setState(() => showUi = false);
+      if (mounted && (vc?.value.isPlaying ?? false) && !locked) {
+        _setUi(false);
+      }
     });
   }
 
@@ -253,33 +412,51 @@ class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
+  void _ripple(Offset pos, String label, IconData icon) {
+    final burst = _Burst(id: _burstSeq++, pos: pos, label: label, icon: icon);
+    setState(() => bursts.add(burst));
+    Future.delayed(const Duration(milliseconds: 520), () {
+      if (mounted) setState(() => bursts.removeWhere((b) => b.id == burst.id));
+    });
+  }
+
   Future<void> _seekBy(int seconds) async {
     final c = vc;
     if (c == null) return;
     final next = c.value.position + Duration(seconds: seconds);
     final d = c.value.duration;
     await c.seekTo(next < Duration.zero ? Duration.zero : (next > d ? d : next));
-    _flash('${seconds > 0 ? '+' : ''}${seconds}s');
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     hideTimer?.cancel();
     overlayTimer?.cancel();
     clockTimer?.cancel();
+    persistTimer?.cancel();
     sleepTimer?.cancel();
+    events?.cancel();
     vc?.removeListener(_tick);
-    final c = vc;
-    if (c != null && c.value.isInitialized) {
-      final p = c.value.position.inMilliseconds / c.value.duration.inMilliseconds.clamp(1, 1 << 30);
-      appSettings.resumeMap[item.path] = p;
-      item.progress = p;
-      appSettings.save();
+    _persistProgress();
+    final keep = appSettings.backgroundPlay && (vc?.value.isPlaying ?? false);
+    if (keep && vc != null) {
+      PlaybackSession.keepAlive = true;
+      PlaybackSession.controller = vc;
+      PlaybackSession.item = item;
+      PlaybackSession.playlist = List<VideoItem>.from(list);
+      PlaybackSession.index = index;
+      PlaybackSession.speed = speed;
+      PlaybackSession.aspect = aspect;
+      _syncBackground();
+    } else {
+      PlaybackSession.keepAlive = false;
+      vc?.dispose();
+      AndroidBridge.stopBackground();
     }
-    vc?.dispose();
+    zoom.dispose();
     WakelockPlus.disable();
     AndroidBridge.setKeepScreenOn(false);
-    AndroidBridge.stopBackground();
     AndroidBridge.setPlaying(false);
     AndroidBridge.setPipEnabled(false);
     AndroidBridge.setOrientation('auto');
@@ -291,44 +468,47 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     final c = vc;
     final size = MediaQuery.sizeOf(context);
+    final pad = MediaQuery.paddingOf(context);
+    final insets = MediaQuery.viewInsetsOf(context);
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
           if (locked) return;
-          setState(() => showUi = !showUi);
-          if (showUi) _armHide();
+          _setUi(!showUi);
         },
         onDoubleTapDown: (d) {
-          if (locked || !appSettings.doubleTapSeek) return;
+          if (locked) return;
           final x = d.localPosition.dx;
-          if (x < size.width * 0.33) {
-            setState(() => skipFlash = -1);
+          if (x < size.width * 0.33 && appSettings.doubleTapSeek) {
+            _ripple(d.localPosition, '-${appSettings.seekStepSeconds}s', Icons.replay);
             _seekBy(-appSettings.seekStepSeconds);
-            Future.delayed(const Duration(milliseconds: 400), () { if (mounted) setState(() => skipFlash = 0); });
-          } else if (x > size.width * 0.67) {
-            setState(() => skipFlash = 1);
+          } else if (x > size.width * 0.67 && appSettings.doubleTapSeek) {
+            _ripple(d.localPosition, '+${appSettings.seekStepSeconds}s', Icons.forward);
             _seekBy(appSettings.seekStepSeconds);
-            Future.delayed(const Duration(milliseconds: 400), () { if (mounted) setState(() => skipFlash = 0); });
           } else {
+            final playing = vc?.value.isPlaying ?? false;
+            _ripple(d.localPosition, playing ? 'Paused' : 'Playing', playing ? Icons.pause : Icons.play_arrow);
             _togglePlay();
           }
         },
         onLongPressStart: (_) async {
           if (locked || !appSettings.longPress2x || c == null) return;
           speeding = true;
-          await c.setPlaybackSpeed(2);
+          await _applySpeed();
           if (appSettings.longPressVibration) {
-            try { if (await Vibration.hasVibrator()) Vibration.vibrate(duration: 20); } catch (_) {}
+            try {
+              if (await Vibration.hasVibrator()) Vibration.vibrate(duration: 20);
+            } catch (_) {}
           }
-          _flash('2.0×');
           setState(() {});
         },
         onLongPressEnd: (_) async {
           if (!speeding) return;
           speeding = false;
-          await c?.setPlaybackSpeed(speed);
+          await _applySpeed();
           setState(() {});
         },
         onPanStart: (d) {
@@ -359,14 +539,18 @@ class _PlayerPageState extends State<PlayerPage> {
             _flash(formatDuration(Duration(milliseconds: next.round())));
           } else if (panKind == 'brightness') {
             brightness = (panBase - dy / size.height).clamp(0.0, 1.0);
-            try { await ScreenBrightness().setApplicationScreenBrightness(brightness); } catch (_) {}
+            try {
+              await ScreenBrightness().setApplicationScreenBrightness(brightness);
+            } catch (_) {}
             if (appSettings.rememberBrightness) {
               appSettings.brightness = brightness;
             }
             _flash('Brightness ${(brightness * 100).round()}%');
           } else if (panKind == 'volume') {
             volume = (panBase - dy / size.height).clamp(0.0, 1.0);
-            try { await VolumeController.instance.setVolume(volume); } catch (_) {}
+            try {
+              await VolumeController.instance.setVolume(volume);
+            } catch (_) {}
             _flash('Volume ${(volume * 100).round()}%');
           }
           setState(() {});
@@ -376,16 +560,49 @@ class _PlayerPageState extends State<PlayerPage> {
           fit: StackFit.expand,
           children: [
             ColoredBox(color: Colors.black, child: ready && c != null ? _video(c, size) : const Center(child: CircularProgressIndicator())),
-            if (skipFlash != 0)
-              Align(
-                alignment: skipFlash < 0 ? Alignment.centerLeft : Alignment.centerRight,
-                child: Container(
-                  width: size.width * 0.28,
-                  color: Colors.white.withValues(alpha: 0.08),
-                  child: Icon(skipFlash < 0 ? Icons.replay_10 : Icons.forward_10, color: Colors.white, size: 42),
+            for (final b in bursts)
+              Positioned(
+                left: b.pos.dx - 72,
+                top: b.pos.dy - 72,
+                child: IgnorePointer(
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.15, end: 1),
+                    duration: appSettings.reduceMotion ? Duration.zero : const Duration(milliseconds: 480),
+                    builder: (_, t, child) {
+                      return Opacity(
+                        opacity: (1 - t).clamp(0, 1),
+                        child: Transform.scale(scale: 0.7 + t * 0.7, child: child),
+                      );
+                    },
+                    child: Container(
+                      width: 144,
+                      height: 144,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.16),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 2),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(b.icon, color: Colors.white, size: 34),
+                          const SizedBox(height: 4),
+                          Text(b.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            if (overlay.isNotEmpty)
+            if (speeding)
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.72), borderRadius: BorderRadius.circular(999)),
+                  child: const Text('2.0×', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                ),
+              ),
+            if (overlay.isNotEmpty && !speeding)
               Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -395,14 +612,17 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
             if (locked)
               Positioned(
-                right: 16,
-                bottom: 24,
+                right: 16 + pad.right,
+                bottom: 24 + pad.bottom + insets.bottom,
                 child: IconButton.filledTonal(
-                  onPressed: () => setState(() {
-                    locked = false;
-                    showUi = true;
+                  onPressed: () {
+                    setState(() {
+                      locked = false;
+                      showUi = true;
+                    });
+                    _applySystemUi();
                     _armHide();
-                  }),
+                  },
                   icon: const Icon(Icons.lock_open),
                 ),
               ),
@@ -416,13 +636,23 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget _video(VideoPlayerController c, Size screen) {
     Widget player = VideoPlayer(c);
     player = _fit(player, c, screen);
+    if (appSettings.allowZoom) {
+      player = InteractiveViewer(
+        transformationController: zoom,
+        minScale: 1,
+        maxScale: 5,
+        panEnabled: false,
+        scaleEnabled: true,
+        child: player,
+      );
+    }
     if (mirror) player = Transform.flip(flipX: true, child: player);
     final filters = <ColorFilter>[];
     if (invert) filters.add(const ColorFilter.matrix(_invert));
     if (appSettings.grayscale || appSettings.monochrome) {
       filters.add(const ColorFilter.matrix(_gray));
     }
-    if (appSettings.contrast != 1 || appSettings.saturation != 1) {
+    if (appSettings.colorCorrection && (appSettings.contrast != 1 || appSettings.saturation != 1)) {
       filters.add(ColorFilter.matrix(_cs(appSettings.contrast, appSettings.saturation)));
     }
     if (appSettings.colorBlindDeuteranopia) filters.add(const ColorFilter.matrix(_deut));
@@ -454,10 +684,9 @@ class _PlayerPageState extends State<PlayerPage> {
       case AspectMode.stretch:
         return SizedBox(width: screen.width, height: screen.height, child: child);
       case AspectMode.original:
-        final scale = 1.0;
         return OverflowBox(
-          maxWidth: vw * scale,
-          maxHeight: vh * scale,
+          maxWidth: vw,
+          maxHeight: vh,
           child: SizedBox(width: vw, height: vh, child: child),
         );
       case AspectMode.ratio16_9:
@@ -480,13 +709,17 @@ class _PlayerPageState extends State<PlayerPage> {
     final dur = c?.value.duration ?? Duration.zero;
     final playing = c?.value.isPlaying ?? false;
     final remain = dur - pos;
+    final pad = MediaQuery.paddingOf(context);
+    final insets = MediaQuery.viewInsetsOf(context);
+    final iconSize = appSettings.largeControls ? 40.0 : 32.0;
+    final playSize = appSettings.largeControls ? 68.0 : 56.0;
     return [
       Positioned(
         top: 0,
         left: 0,
         right: 0,
         child: Container(
-          padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+          padding: EdgeInsets.only(top: pad.top),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent]),
           ),
@@ -501,6 +734,20 @@ class _PlayerPageState extends State<PlayerPage> {
                   TextButton(
                     onPressed: () => setState(() => hdr = !hdr),
                     child: Text(hdr ? 'HDR' : 'SDR', style: TextStyle(color: hdr ? Colors.white : Colors.white54, fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    tooltip: appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off',
+                    onPressed: () async {
+                      appSettings.eqEnabled = !appSettings.eqEnabled;
+                      await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
+                      await appSettings.save();
+                      setState(() {});
+                      _flash(appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off');
+                    },
+                    onLongPress: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+                    },
+                    icon: Icon(Icons.equalizer, color: appSettings.eqEnabled ? Colors.white : Colors.white54),
                   ),
                   IconButton(onPressed: _playlist, icon: const Icon(Icons.queue_music, color: Colors.white)),
                   IconButton(onPressed: _more, icon: const Icon(Icons.more_vert, color: Colors.white)),
@@ -527,7 +774,7 @@ class _PlayerPageState extends State<PlayerPage> {
         right: 0,
         bottom: 0,
         child: Container(
-          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + MediaQuery.paddingOf(context).bottom),
+          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom + insets.bottom),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
           ),
@@ -551,29 +798,47 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ],
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton(onPressed: _prev, icon: const Icon(Icons.skip_previous, color: Colors.white, size: 32)),
-                  IconButton(
-                    onPressed: _togglePlay,
-                    icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: 56),
-                  ),
-                  IconButton(onPressed: _next, icon: const Icon(Icons.skip_next, color: Colors.white, size: 32)),
-                  IconButton(
-                    onPressed: () => setState(() {
-                      locked = true;
-                      showUi = false;
-                    }),
-                    icon: const Icon(Icons.lock_outline, color: Colors.white),
-                    tooltip: 'Lock',
-                  ),
-                  IconButton(
-                    onPressed: _aspectSheet,
-                    icon: const Icon(Icons.aspect_ratio, color: Colors.white),
-                    tooltip: 'Screen mode',
-                  ),
-                ],
+              SizedBox(
+                height: playSize + 12,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(onPressed: _prev, icon: Icon(Icons.skip_previous, color: Colors.white, size: iconSize)),
+                        IconButton(
+                          onPressed: _togglePlay,
+                          icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
+                        ),
+                        IconButton(onPressed: _next, icon: Icon(Icons.skip_next, color: Colors.white, size: iconSize)),
+                      ],
+                    ),
+                    Positioned(
+                      right: 0,
+                      child: Row(
+                        children: [
+                          IconButton(
+                            onPressed: () {
+                              setState(() {
+                                locked = true;
+                                showUi = false;
+                              });
+                              _applySystemUi();
+                            },
+                            icon: const Icon(Icons.lock_outline, color: Colors.white),
+                            tooltip: 'Lock',
+                          ),
+                          IconButton(
+                            onPressed: _aspectSheet,
+                            icon: const Icon(Icons.aspect_ratio, color: Colors.white),
+                            tooltip: 'Screen mode',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -586,56 +851,34 @@ class _PlayerPageState extends State<PlayerPage> {
     Widget chip(String id) {
       final on = switch (id) {
         'background' => appSettings.backgroundPlay,
-        'popup' => appSettings.autoMiniplayer,
-        'hidenav' => appSettings.hideNavBar,
-        'bookmark' => item.bookmarked,
-        'night' => night,
-        'mirror' => mirror,
-        'invert' => invert,
-        'subtitle' => appSettings.captions,
         _ => false,
       };
       final icon = switch (id) {
-        'lock' => Icons.lock_outline,
-        'aspect' => Icons.aspect_ratio,
         'speed' => Icons.speed,
-        'rotate' => Icons.screen_rotation,
-        'audio' => Icons.audiotrack_outlined,
-        'subtitle' => Icons.subtitles_outlined,
         'background' => Icons.headphones_outlined,
-        'popup' => Icons.picture_in_picture_alt,
-        'hidenav' => Icons.navigation_outlined,
-        'cast' => Icons.cast,
-        'delete' => Icons.delete_outline,
-        'bookmark' => item.bookmarked ? Icons.bookmark : Icons.bookmark_border,
-        'playopt' => Icons.tune,
-        'ab' => Icons.repeat,
-        'eq' => Icons.equalizer,
-        'night' => Icons.nights_stay_outlined,
-        'mirror' => Icons.flip,
-        'invert' => Icons.invert_colors,
-        'color' => Icons.color_lens_outlined,
-        'brightness' => Icons.brightness_6_outlined,
-        'timer' => Icons.timer_outlined,
-        'songs' => Icons.library_music_outlined,
-        'repeat' => Icons.queue_music,
-        'decoder' => Icons.memory,
         'screenshot' => Icons.camera_alt_outlined,
-        'share' => Icons.share_outlined,
-        'properties' => Icons.info_outline,
         _ => Icons.tune,
       };
-      return IconButton(
-        tooltip: id,
-        onPressed: () => _runAction(id),
-        icon: Icon(icon, color: on ? Colors.white : Colors.white70, size: 22),
+      final label = switch (id) {
+        'speed' => 'Speed',
+        'background' => 'Background',
+        'screenshot' => 'Screenshot',
+        _ => id,
+      };
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: TextButton.icon(
+          onPressed: () => _runAction(id),
+          icon: Icon(icon, color: on ? Colors.white : Colors.white70, size: 20),
+          label: Text(label, style: TextStyle(color: on ? Colors.white : Colors.white70, fontSize: 12)),
+        ),
       );
     }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(children: [for (final a in AppSettings.allQuickActions) chip(a)]),
+      child: Row(children: [for (final a in AppSettings.defaultQuickActions) chip(a)]),
     );
   }
 
@@ -646,6 +889,7 @@ class _PlayerPageState extends State<PlayerPage> {
           locked = true;
           showUi = false;
         });
+        _applySystemUi();
       case 'aspect':
         await _aspectSheet();
       case 'speed':
@@ -661,12 +905,8 @@ class _PlayerPageState extends State<PlayerPage> {
         await _toggleBackground(!appSettings.backgroundPlay);
       case 'popup':
         await _togglePopup(!appSettings.autoMiniplayer);
-      case 'hidenav':
-        setState(() => appSettings.hideNavBar = !appSettings.hideNavBar);
-        await appSettings.save();
-        _applySystemUi();
       case 'cast':
-        await _simple('Cast', 'Use Android wireless display / Cast from the system quick settings. Built-in route picker appears when a session is available.');
+        await _simple('Cast', 'Use Android wireless display / Cast from the system quick settings.');
       case 'delete':
         final ok = await confirm(context, 'Delete this video?', item.title);
         if (ok) {
@@ -703,9 +943,7 @@ class _PlayerPageState extends State<PlayerPage> {
       case 'color':
         await _colorSheet();
       case 'brightness':
-        try {
-          await AndroidBridge.toast('Swipe the left side of the screen to adjust brightness');
-        } catch (_) {}
+        await _brightnessSheet();
       case 'timer':
         await _timerSheet();
       case 'songs':
@@ -763,12 +1001,9 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _toggleBackground(bool on) async {
     appSettings.backgroundPlay = on;
     await appSettings.save();
-    if (on) {
-      await AndroidBridge.startBackground(item.title);
-    } else {
-      await AndroidBridge.stopBackground();
-    }
+    await _syncBackground();
     setState(() {});
+    _flash(on ? 'Background play on' : 'Background play off');
   }
 
   Future<void> _togglePopup(bool on) async {
@@ -793,6 +1028,7 @@ class _PlayerPageState extends State<PlayerPage> {
     } else {
       await c.play();
     }
+    await _syncBackground();
     setState(() {});
     _armHide();
   }
@@ -810,66 +1046,71 @@ class _PlayerPageState extends State<PlayerPage> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
+        final pad = MediaQuery.paddingOf(ctx);
+        final insets = MediaQuery.viewInsetsOf(ctx);
         return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.7,
           builder: (_, sc) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-                  child: Row(
-                    children: [
-                      const Expanded(child: Text('Playlist', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-                      IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                    ],
+            return Padding(
+              padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('Playlist', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                      ],
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    children: [
-                      for (final m in PlayMode.values)
-                        ChoiceChip(
-                          label: Text(switch (m) {
-                            PlayMode.order => 'Order',
-                            PlayMode.loopAll => 'Loop all',
-                            PlayMode.repeatOne => 'Repeat current',
-                            PlayMode.shuffle => 'Shuffle all',
-                            PlayMode.noAutoplay => 'No autoplay',
-                          }),
-                          selected: appSettings.playMode == m,
-                          onSelected: (_) {
-                            setState(() => appSettings.playMode = m);
-                            appSettings.save();
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final m in PlayMode.values)
+                          ChoiceChip(
+                            label: Text(switch (m) {
+                              PlayMode.order => 'Order',
+                              PlayMode.loopAll => 'Loop all',
+                              PlayMode.repeatOne => 'Repeat current',
+                              PlayMode.shuffle => 'Shuffle all',
+                              PlayMode.noAutoplay => 'No autoplay',
+                            }),
+                            selected: appSettings.playMode == m,
+                            onSelected: (_) {
+                              setState(() => appSettings.playMode = m);
+                              appSettings.save();
+                              Navigator.pop(ctx);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: sc,
+                      itemCount: list.length,
+                      itemBuilder: (_, i) {
+                        final v = list[i];
+                        return ListTile(
+                          selected: i == index,
+                          leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: v, radius: 6)),
+                          title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(formatDuration(v.duration)),
+                          onTap: () {
                             Navigator.pop(ctx);
+                            index = i;
+                            _openCurrent();
                           },
-                        ),
-                    ],
+                        );
+                      },
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: sc,
-                    itemCount: list.length,
-                    itemBuilder: (_, i) {
-                      final v = list[i];
-                      return ListTile(
-                        selected: i == index,
-                        leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: v, radius: 6)),
-                        title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(formatDuration(v.duration)),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          index = i;
-                          _openCurrent();
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
+                ],
+              ),
             );
           },
         );
@@ -888,88 +1129,98 @@ class _PlayerPageState extends State<PlayerPage> {
             setState(() {});
           }
 
-          Widget go(IconData i, String t, String id) => ListTile(
+          Widget go(IconData i, String t, String id, {String? sub}) => ListTile(
                 leading: Icon(i),
                 title: Text(t),
+                subtitle: sub == null ? null : Text(sub),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _runAction(id);
                 },
               );
 
-          Widget tog(IconData i, String t, bool v, Future<void> Function(bool) on) => SwitchListTile(
+          Widget tog(IconData i, String t, bool v, Future<void> Function(bool) on, {String? sub}) => SwitchListTile(
                 secondary: Icon(i),
                 title: Text(t),
+                subtitle: sub == null ? null : Text(sub),
                 value: v,
                 onChanged: (n) async {
                   await on(n);
+                  await appSettings.save();
                   refresh();
                 },
               );
 
+          Widget head(String t) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Text(t, style: TextStyle(color: Theme.of(ctx).colorScheme.primary, fontWeight: FontWeight.w600)),
+              );
+
+          final pad = MediaQuery.paddingOf(ctx);
+          final insets = MediaQuery.viewInsetsOf(ctx);
           return DraggableScrollableSheet(
             expand: false,
-            initialChildSize: 0.85,
+            initialChildSize: 0.86,
             builder: (_, sc) => ListView(
               controller: sc,
+              padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom + 16),
               children: [
                 const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+                head('Playback'),
                 go(Icons.lock_outline, 'Lock', 'lock'),
                 go(Icons.aspect_ratio, 'Screen mode', 'aspect'),
-                go(Icons.audiotrack_outlined, 'Audio track', 'audio'),
-                tog(Icons.subtitles_outlined, 'Subtitle', appSettings.captions, (n) async {
-                  appSettings.captions = n;
-                  await appSettings.save();
-                }),
-                go(Icons.speed, 'Speed', 'speed'),
-                tog(Icons.headphones_outlined, 'Background play', appSettings.backgroundPlay, _toggleBackground),
-                tog(Icons.picture_in_picture_alt, 'Pop-up', appSettings.autoMiniplayer, _togglePopup),
-                tog(Icons.navigation_outlined, 'Hide navigation bar', appSettings.hideNavBar, (n) async {
-                  appSettings.hideNavBar = n;
-                  await appSettings.save();
-                  _applySystemUi();
-                }),
-                go(Icons.cast, 'Cast', 'cast'),
-                go(Icons.delete_outline, 'Delete', 'delete'),
-                tog(item.bookmarked ? Icons.bookmark : Icons.bookmark_border, 'Bookmark', item.bookmarked, (n) async {
-                  _toggleBookmark();
-                }),
+                go(Icons.speed, 'Speed', 'speed', sub: '${speed.toStringAsFixed(2)}×'),
                 go(Icons.tune, 'Play option', 'playopt'),
                 go(Icons.repeat, 'AB Repeat', 'ab'),
-                go(Icons.equalizer, 'Equalizer', 'eq'),
+                go(Icons.queue_music, 'Repeat mode', 'repeat'),
+                go(Icons.memory, 'Decoder', 'decoder', sub: appSettings.decoder.name.toUpperCase()),
+                head('Audio'),
+                go(Icons.audiotrack_outlined, 'Audio track', 'audio'),
+                tog(Icons.headphones_outlined, 'Background play', appSettings.backgroundPlay, _toggleBackground, sub: 'Music-style notification, keeps audio going'),
+                tog(Icons.graphic_eq, 'Pitch shift', appSettings.pitchShift, (n) async {
+                  appSettings.pitchShift = n;
+                  await _applySpeed();
+                }, sub: 'On: pitch follows speed. Off: time-stretch.'),
+                go(Icons.equalizer, 'Equalizer', 'eq', sub: appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off'),
+                head('Picture'),
+                tog(Icons.subtitles_outlined, 'Subtitle', appSettings.captions, (n) async {
+                  appSettings.captions = n;
+                }),
                 tog(Icons.nights_stay_outlined, 'Night mode', night, (n) async {
                   night = n;
                   appSettings.nightMode = n;
-                  await appSettings.save();
                 }),
                 tog(Icons.flip, 'Mirror', mirror, (n) async {
                   mirror = n;
                   appSettings.mirror = n;
-                  await appSettings.save();
                 }),
                 tog(Icons.invert_colors, 'Invert filter', invert, (n) async {
                   invert = n;
                   appSettings.invertColors = n;
-                  await appSettings.save();
                 }),
-                go(Icons.color_lens_outlined, 'Color correction', 'color'),
+                tog(Icons.color_lens_outlined, 'Color correction', appSettings.colorCorrection, (n) async {
+                  appSettings.colorCorrection = n;
+                }, sub: 'Contrast, saturation, gamma, hue'),
+                go(Icons.tune, 'Color correction sliders', 'color'),
                 go(Icons.screen_rotation, 'Rotation control', 'rotate'),
                 go(Icons.brightness_6_outlined, 'Brightness', 'brightness'),
+                head('System'),
+                tog(Icons.picture_in_picture_alt, 'Pop-up', appSettings.autoMiniplayer, _togglePopup, sub: 'Only while playing'),
+                tog(Icons.navigation_outlined, 'Always hide navigation bar', appSettings.alwaysHideNavBar, (n) async {
+                  appSettings.alwaysHideNavBar = n;
+                  _applySystemUi();
+                }, sub: 'Otherwise the system bar follows the controller'),
                 go(Icons.timer_outlined, 'Timer', 'timer'),
-                go(Icons.library_music_outlined, 'Songs', 'songs'),
-                go(Icons.queue_music, 'Repeat mode', 'repeat'),
-                go(Icons.memory, 'Decoder (${appSettings.decoder.name.toUpperCase()})', 'decoder'),
-                ListTile(
-                  leading: const Icon(Icons.dashboard_customize_outlined),
-                  title: const Text('Customize quick actions'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _quickEdit();
-                  },
-                ),
-                go(Icons.camera_alt_outlined, 'Screenshot', 'screenshot'),
+                go(Icons.cast, 'Cast', 'cast'),
+                head('File'),
+                tog(item.bookmarked ? Icons.bookmark : Icons.bookmark_border, 'Bookmark', item.bookmarked, (n) async {
+                  _toggleBookmark();
+                }),
+                go(Icons.camera_alt_outlined, 'Screenshot', 'screenshot', sub: 'Saves the current frame to DCIM/Screenshots'),
                 go(Icons.share_outlined, 'Share', 'share'),
+                go(Icons.delete_outline, 'Delete', 'delete'),
                 go(Icons.info_outline, 'Properties', 'properties'),
+                go(Icons.library_music_outlined, 'Songs', 'songs'),
               ],
             ),
           );
@@ -991,15 +1242,25 @@ class _PlayerPageState extends State<PlayerPage> {
     final box = TextEditingController(text: speed.toStringAsFixed(2));
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) {
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        final pad = MediaQuery.paddingOf(ctx);
         return StatefulBuilder(builder: (ctx, ss) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('Speed', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-                Slider(min: 0.25, max: 4, value: local, onChanged: (v) { ss(() => local = v); box.text = v.toStringAsFixed(2); }),
+                Slider(
+                    min: 0.25,
+                    max: 4,
+                    value: local,
+                    onChanged: (v) {
+                      ss(() => local = v);
+                      box.text = v.toStringAsFixed(2);
+                    }),
                 Row(
                   children: [
                     Expanded(
@@ -1017,7 +1278,11 @@ class _PlayerPageState extends State<PlayerPage> {
                     FilterChip(
                       label: const Text('Pitch shift'),
                       selected: appSettings.pitchShift,
-                      onSelected: (v) => ss(() => appSettings.pitchShift = v),
+                      onSelected: (v) async {
+                        ss(() => appSettings.pitchShift = v);
+                        await appSettings.save();
+                        await _applySpeed();
+                      },
                     ),
                   ],
                 ),
@@ -1026,7 +1291,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   onPressed: () async {
                     speed = local;
                     appSettings.speed = local;
-                    await vc?.setPlaybackSpeed(speed);
+                    await _applySpeed();
                     await appSettings.save();
                     if (ctx.mounted) Navigator.pop(ctx);
                     setState(() {});
@@ -1037,6 +1302,48 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
           );
         });
+      },
+    );
+  }
+
+  Future<void> _brightnessSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: StatefulBuilder(builder: (ctx, ss) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Brightness', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      const Icon(Icons.brightness_low),
+                      Expanded(
+                        child: Slider(
+                          value: brightness,
+                          onChanged: (v) async {
+                            ss(() => brightness = v);
+                            try {
+                              await ScreenBrightness().setApplicationScreenBrightness(v);
+                            } catch (_) {}
+                            if (appSettings.rememberBrightness) {
+                              appSettings.brightness = v;
+                            }
+                          },
+                          onChangeEnd: (_) => appSettings.save(),
+                        ),
+                      ),
+                      Text('${(brightness * 100).round()}%'),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+        );
       },
     );
   }
@@ -1059,21 +1366,23 @@ class _PlayerPageState extends State<PlayerPage> {
                 Navigator.pop(ctx);
               },
             );
-        return ListView(
-          shrinkWrap: true,
-          children: [
-            const ListTile(title: Text('Screen mode', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-            item(AspectMode.fit, 'Fit', 'Contain the full frame'),
-            item(AspectMode.zoom, 'Zoomed full screen', 'Cover the display, crop overflow'),
-            item(AspectMode.original, 'Original size', '1:1 video pixels on this screen'),
-            item(AspectMode.stretch, 'Stretch', 'Fill without preserving ratio'),
-            item(AspectMode.ratio16_9, '16:9', 'Force 16:9'),
-            item(AspectMode.ratio4_3, '4:3', 'Force 4:3'),
-            item(AspectMode.ratio21_9, '21:9', 'Force 21:9'),
-            item(AspectMode.ratio2_35, '2.35:1', 'Cinema'),
-            item(AspectMode.ratio1_1, '1:1', 'Square'),
-            item(AspectMode.ratio9_16, '9:16', 'Portrait'),
-          ],
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(title: Text('Screen mode', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+              item(AspectMode.fit, 'Fit', 'Contain the full frame'),
+              item(AspectMode.zoom, 'Zoomed full screen', 'Cover the display, crop overflow'),
+              item(AspectMode.original, 'Original size', '1:1 video pixels on this screen'),
+              item(AspectMode.stretch, 'Stretch', 'Fill without preserving ratio'),
+              item(AspectMode.ratio16_9, '16:9', 'Force 16:9'),
+              item(AspectMode.ratio4_3, '4:3', 'Force 4:3'),
+              item(AspectMode.ratio21_9, '21:9', 'Force 21:9'),
+              item(AspectMode.ratio2_35, '2.35:1', 'Cinema'),
+              item(AspectMode.ratio1_1, '1:1', 'Square'),
+              item(AspectMode.ratio9_16, '9:16', 'Portrait'),
+            ],
+          ),
         );
       },
     );
@@ -1083,32 +1392,34 @@ class _PlayerPageState extends State<PlayerPage> {
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
-        return ListView(
-          shrinkWrap: true,
-          children: [
-            for (final e in RotationLock.values)
-              RadioListTile<RotationLock>(
-                value: e,
-                groupValue: appSettings.rotation,
-                title: Text(switch (e) {
-                  RotationLock.auto => 'Auto rotate sensor',
-                  RotationLock.autoVideo => 'Auto rotate to video resolution',
-                  RotationLock.landscape => 'Lock landscape',
-                  RotationLock.portrait => 'Lock portrait',
-                  RotationLock.landscapeNormal => 'Lock normal landscape',
-                  RotationLock.landscapeReverse => 'Lock upside-down landscape',
-                  RotationLock.portraitNormal => 'Lock portrait normal',
-                  RotationLock.portraitReverse => 'Lock portrait upside-down',
-                  RotationLock.locked => 'Lock current',
-                }),
-                onChanged: (v) {
-                  appSettings.rotation = v!;
-                  appSettings.save();
-                  _applyRotation();
-                  Navigator.pop(ctx);
-                },
-              ),
-          ],
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final e in RotationLock.values)
+                RadioListTile<RotationLock>(
+                  value: e,
+                  groupValue: appSettings.rotation,
+                  title: Text(switch (e) {
+                    RotationLock.auto => 'Auto rotate sensor',
+                    RotationLock.autoVideo => 'Auto rotate to video resolution',
+                    RotationLock.landscape => 'Lock landscape',
+                    RotationLock.portrait => 'Lock portrait',
+                    RotationLock.landscapeNormal => 'Lock normal landscape',
+                    RotationLock.landscapeReverse => 'Lock upside-down landscape',
+                    RotationLock.portraitNormal => 'Lock portrait normal',
+                    RotationLock.portraitReverse => 'Lock portrait upside-down',
+                    RotationLock.locked => 'Lock current',
+                  }),
+                  onChanged: (v) {
+                    appSettings.rotation = v!;
+                    appSettings.save();
+                    _applyRotation();
+                    Navigator.pop(ctx);
+                  },
+                ),
+            ],
+          ),
         );
       },
     );
@@ -1117,23 +1428,40 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _colorSheet() async {
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, ss) {
-          return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Color correction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-                _sl('Contrast', appSettings.contrast, 0.4, 2, (v) => ss(() => appSettings.contrast = v)),
-                _sl('Saturation', appSettings.saturation, 0, 2, (v) => ss(() => appSettings.saturation = v)),
-                _sl('Gamma', appSettings.gamma, 0.4, 2.2, (v) => ss(() => appSettings.gamma = v)),
-                _sl('Hue', appSettings.hueRotate, -180, 180, (v) => ss(() => appSettings.hueRotate = v)),
-                FilledButton(onPressed: () { appSettings.save(); Navigator.pop(ctx); setState(() {}); }, child: const Text('Done')),
-              ],
-            ),
-          );
-        });
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        return SafeArea(
+          child: StatefulBuilder(builder: (ctx, ss) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + insets.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Color correction', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Enable'),
+                    value: appSettings.colorCorrection,
+                    onChanged: (v) => ss(() => appSettings.colorCorrection = v),
+                  ),
+                  _sl('Contrast', appSettings.contrast, 0.4, 2, (v) => ss(() => appSettings.contrast = v)),
+                  _sl('Saturation', appSettings.saturation, 0, 2, (v) => ss(() => appSettings.saturation = v)),
+                  _sl('Gamma', appSettings.gamma, 0.4, 2.2, (v) => ss(() => appSettings.gamma = v)),
+                  _sl('Hue', appSettings.hueRotate, -180, 180, (v) => ss(() => appSettings.hueRotate = v)),
+                  FilledButton(
+                    onPressed: () {
+                      appSettings.save();
+                      Navigator.pop(ctx);
+                      setState(() {});
+                    },
+                    child: const Text('Done'),
+                  ),
+                ],
+              ),
+            );
+          }),
+        );
       },
     );
   }
@@ -1149,36 +1477,38 @@ class _PlayerPageState extends State<PlayerPage> {
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final m in [15, 30, 45, 60, 90])
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in [15, 30, 45, 60, 90])
+                ListTile(
+                  title: Text('Stop in $m min'),
+                  onTap: () {
+                    sleepTimer?.cancel();
+                    var left = Duration(minutes: m);
+                    sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+                      left -= const Duration(seconds: 1);
+                      if (left <= Duration.zero) {
+                        t.cancel();
+                        vc?.pause();
+                      }
+                      if (mounted) setState(() => sleepLeft = left);
+                    });
+                    Navigator.pop(ctx);
+                    _flash('Timer $m min');
+                  },
+                ),
               ListTile(
-                title: Text('Stop in $m min'),
+                title: const Text('Cancel timer'),
                 onTap: () {
                   sleepTimer?.cancel();
-                  var left = Duration(minutes: m);
-                  sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-                    left -= const Duration(seconds: 1);
-                    if (left <= Duration.zero) {
-                      t.cancel();
-                      vc?.pause();
-                    }
-                    if (mounted) setState(() => sleepLeft = left);
-                  });
+                  sleepLeft = null;
                   Navigator.pop(ctx);
-                  _flash('Timer $m min');
                 },
               ),
-            ListTile(
-              title: const Text('Cancel timer'),
-              onTap: () {
-                sleepTimer?.cancel();
-                sleepLeft = null;
-                Navigator.pop(ctx);
-              },
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -1188,67 +1518,55 @@ class _PlayerPageState extends State<PlayerPage> {
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SwitchListTile(
-              title: const Text('Auto play next'),
-              value: appSettings.autoPlayNext,
-              onChanged: (v) { setState(() => appSettings.autoPlayNext = v); appSettings.save(); Navigator.pop(ctx); },
-            ),
-            SwitchListTile(
-              title: const Text('Resume from last position'),
-              value: appSettings.resumePlayback,
-              onChanged: (v) { setState(() => appSettings.resumePlayback = v); appSettings.save(); Navigator.pop(ctx); },
-            ),
-            SwitchListTile(
-              title: const Text('Background play'),
-              value: appSettings.backgroundPlay,
-              onChanged: (v) { setState(() => appSettings.backgroundPlay = v); appSettings.save(); Navigator.pop(ctx); },
-            ),
-          ],
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Auto play next'),
+                value: appSettings.autoPlayNext,
+                onChanged: (v) {
+                  setState(() => appSettings.autoPlayNext = v);
+                  appSettings.save();
+                  Navigator.pop(ctx);
+                },
+              ),
+              SwitchListTile(
+                title: const Text('Resume from last position'),
+                value: appSettings.resumePlayback,
+                onChanged: (v) {
+                  setState(() => appSettings.resumePlayback = v);
+                  appSettings.save();
+                  Navigator.pop(ctx);
+                },
+              ),
+              SwitchListTile(
+                title: const Text('Background play'),
+                value: appSettings.backgroundPlay,
+                onChanged: (v) {
+                  _toggleBackground(v);
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
         );
       },
     );
   }
 
-  Future<void> _quickEdit() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, ss) {
-          return ListView(
-            shrinkWrap: true,
-            children: [
-              const ListTile(title: Text('Quick actions')),
-              for (final a in AppSettings.allQuickActions)
-                CheckboxListTile(
-                  value: appSettings.quickActions.contains(a),
-                  title: Text(a),
-                  onChanged: (v) {
-                    ss(() {
-                      if (v == true) {
-                        if (!appSettings.quickActions.contains(a)) appSettings.quickActions.add(a);
-                      } else {
-                        appSettings.quickActions.remove(a);
-                      }
-                    });
-                    appSettings.save();
-                    setState(() {});
-                  },
-                ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
   Future<void> _screenshot() async {
-    _flash('Screenshot saved to gallery when the decoder exposes a frame');
-    try {
-      await AndroidBridge.toast('Capture a frame from the current video');
-    } catch (_) {}
+    final path = await AndroidBridge.screenshot(
+      path: item.path,
+      positionMs: vc?.value.position.inMilliseconds ?? 0,
+      title: item.title,
+    );
+    if (path != null) {
+      _flash('Saved to DCIM/Screenshots');
+      await AndroidBridge.toast('Saved to DCIM/Screenshots');
+    } else {
+      _flash('Could not capture frame');
+    }
   }
 }
 

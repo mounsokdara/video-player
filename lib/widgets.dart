@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'android_bridge.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
@@ -260,7 +261,11 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
     context: context,
     showDragHandle: true,
     builder: (ctx) {
-      return SafeArea(
+      final pad = MediaQuery.paddingOf(ctx);
+      final insets = MediaQuery.viewInsetsOf(ctx);
+      return Padding(
+        padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
+        child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -330,6 +335,7 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
             const SizedBox(height: 8),
           ],
         ),
+        ),
       );
     },
   );
@@ -339,25 +345,43 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
   final file = File(item.path);
   final exists = file.existsSync();
   final stat = exists ? await file.stat() : null;
+  final info = await AndroidBridge.mediaInfo(item.path);
   if (!context.mounted) return;
+  final fps = (info?['fps'] as num?)?.toDouble() ?? item.fps;
+  final bitrate = (info?['bitrate'] as num?)?.toInt() ?? item.bitrate;
+  final frames = (info?['frameCount'] as num?)?.toInt() ?? item.frameCount;
+  final width = (info?['width'] as num?)?.toInt() ?? item.width;
+  final height = (info?['height'] as num?)?.toInt() ?? item.height;
+  final durationMs = (info?['durationMs'] as num?)?.toInt();
+  String fpsLabel;
+  if (fps == null || fps <= 0) {
+    fpsLabel = '—';
+  } else if ((fps - fps.round()).abs() < 0.05) {
+    fpsLabel = '${fps.round()} fps';
+  } else {
+    fpsLabel = '${fps.toStringAsFixed(2)} fps';
+  }
   final rows = <(String, String)>[
     ('Name', item.title),
     ('Path', item.path),
     ('Folder', item.folder),
     ('Size', '${formatBytes(item.size)}  (${item.size} bytes)'),
-    ('Duration', formatDuration(item.duration)),
-    ('Resolution', item.resolutionLabel),
-    ('Width', '${item.width} px'),
-    ('Height', '${item.height} px'),
-    ('Aspect', item.width > 0 && item.height > 0 ? (item.width / item.height).toStringAsFixed(4) : '—'),
+    ('Duration', durationMs != null ? formatDuration(Duration(milliseconds: durationMs)) : formatDuration(item.duration)),
+    ('Resolution', width > 0 && height > 0 ? '$width×$height' : item.resolutionLabel),
+    ('Width', '$width px'),
+    ('Height', '$height px'),
+    ('Frame rate', fpsLabel),
+    ('Frame count', frames != null && frames > 0 ? '$frames' : '—'),
+    ('Bitrate', bitrate != null && bitrate > 0 ? '${(bitrate / 1000).toStringAsFixed(0)} kbps' : '—'),
+    ('Aspect', width > 0 && height > 0 ? (width / height).toStringAsFixed(4) : '—'),
     ('Container', item.extension.toUpperCase()),
-    ('MIME', item.mime ?? 'video/${item.extension}'),
+    ('MIME', item.mime ?? (info?['mime'] as String?) ?? 'video/${item.extension}'),
     ('Created', item.created != null ? DateFormat.yMMMMd().add_Hms().format(item.created!) : '—'),
     ('Modified', DateFormat.yMMMMd().add_Hms().format(stat?.modified ?? item.modified)),
     ('Accessed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.accessed) : '—'),
     ('Changed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.changed) : '—'),
     ('Exists', exists ? 'Yes' : 'Missing'),
-    ('Readable', exists && file.existsSync() ? 'Yes' : 'No'),
+    ('Readable', exists ? 'Yes' : 'No'),
     ('Bookmarked', item.bookmarked ? 'Yes' : 'No'),
     ('Resume', '${(item.progress * 100).toStringAsFixed(1)}%'),
     ('Storage', item.path.contains('usb') ? 'USB / OTG' : item.path.contains('sdcard') || item.path.contains('/storage/') && !item.path.contains('emulated') ? 'SD card / volume' : 'Internal'),
@@ -366,44 +390,49 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
     context: context,
     isScrollControlled: true,
     builder: (ctx) {
+      final pad = MediaQuery.paddingOf(ctx);
+      final insets = MediaQuery.viewInsetsOf(ctx);
       return DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.72,
         maxChildSize: 0.95,
         builder: (_, controller) {
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-                child: Row(
-                  children: [
-                    const Expanded(child: Text('Properties', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600))),
-                    IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                  ],
+          return Padding(
+            padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('Properties', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600))),
+                      IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: ListView.separated(
-                  controller: controller,
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                  itemCount: rows.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final r = rows[i];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(width: 110, child: Text(r.$1, style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant))),
-                          Expanded(child: SelectableText(r.$2, style: const TextStyle(fontWeight: FontWeight.w500))),
-                        ],
-                      ),
-                    );
-                  },
+                Expanded(
+                  child: ListView.separated(
+                    controller: controller,
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    itemCount: rows.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final r = rows[i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(width: 110, child: Text(r.$1, style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant))),
+                            Expanded(child: SelectableText(r.$2, style: const TextStyle(fontWeight: FontWeight.w500))),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       );
@@ -430,13 +459,19 @@ Future<String?> promptText(BuildContext context, String title, String initial) a
   final c = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(title),
-      content: TextField(controller: c, autofocus: true),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
-      ],
-    ),
+    builder: (ctx) {
+      final insets = MediaQuery.viewInsetsOf(ctx);
+      return AlertDialog(
+        title: Text(title),
+        content: Padding(
+          padding: EdgeInsets.only(bottom: insets.bottom),
+          child: TextField(controller: c, autofocus: true),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
+        ],
+      );
+    },
   );
 }

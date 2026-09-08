@@ -52,6 +52,9 @@ class VideoItem {
     this.progress = 0,
     this.bookmarked = false,
     this.assetId,
+    this.fps,
+    this.bitrate,
+    this.frameCount,
   });
 
   final String id;
@@ -69,6 +72,9 @@ class VideoItem {
   double progress;
   bool bookmarked;
   final String? assetId;
+  final double? fps;
+  final int? bitrate;
+  final int? frameCount;
 
   String get folderName {
     final parts = folder.split(RegExp(r'[/\\]'));
@@ -86,6 +92,13 @@ class VideoItem {
     if (width <= 0 || height <= 0) return 'Unknown';
     final gcd = _gcd(width, height);
     return '$width×$height  (${width ~/ gcd}:${height ~/ gcd})';
+  }
+
+  String get fpsLabel {
+    if (fps == null || fps! <= 0) return '—';
+    final v = fps!;
+    if ((v - v.round()).abs() < 0.05) return '${v.round()} fps';
+    return '${v.toStringAsFixed(2)} fps';
   }
 
   static int _gcd(int a, int b) {
@@ -106,6 +119,9 @@ class VideoItem {
     bool? bookmarked,
     String? title,
     String? path,
+    double? fps,
+    int? bitrate,
+    int? frameCount,
   }) {
     return VideoItem(
       id: id,
@@ -123,6 +139,9 @@ class VideoItem {
       progress: progress ?? this.progress,
       bookmarked: bookmarked ?? this.bookmarked,
       assetId: assetId,
+      fps: fps ?? this.fps,
+      bitrate: bitrate ?? this.bitrate,
+      frameCount: frameCount ?? this.frameCount,
     );
   }
 }
