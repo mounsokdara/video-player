@@ -4,7 +4,6 @@ import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.audiofx.Equalizer
-import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -22,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private val channelName = "app.videoplayer/android"
     private var equalizer: Equalizer? = null
     private var wantPip = false
+    private var isPlaying = false
     private var keepScreenOn = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -86,14 +86,23 @@ class MainActivity : FlutterActivity() {
                             }
                             result.success(true)
                         }
-                        "enterPip" -> {
-                            wantPip = true
-                            enterPipNow()
+                        "setPlaying" -> {
+                            isPlaying = call.argument<Boolean>("on") ?: false
                             result.success(true)
+                        }
+                        "enterPip" -> {
+                            if (!isPlaying) {
+                                Toast.makeText(this, "Play a video first", Toast.LENGTH_SHORT).show()
+                                result.success(false)
+                            } else {
+                                wantPip = true
+                                runOnUiThread { enterPipNow() }
+                                result.success(true)
+                            }
                         }
                         "setPipEnabled" -> {
                             wantPip = call.argument<Boolean>("on") ?: false
-                            result.success(true)
+                            result.success(wantPip)
                         }
                         "isPip" -> result.success(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode)
                         "openWriteSettings" -> {
@@ -177,7 +186,8 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun enterPipNow() {
-        if (Build.VERSION.SDK_INT >= 26) {
+        if (!isPlaying) return
+        if (Build.VERSION.SDK_INT >= 26 && !isInPictureInPictureMode) {
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
                 .build()
@@ -187,7 +197,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (wantPip && Build.VERSION.SDK_INT >= 26) {
+        if (wantPip && isPlaying && Build.VERSION.SDK_INT >= 26) {
             enterPipNow()
         }
     }
@@ -226,6 +236,7 @@ class MainActivity : FlutterActivity() {
         return out
     }
 
+    @Suppress("DEPRECATION")
     private fun volumePath(volume: android.os.storage.StorageVolume): String? {
         if (Build.VERSION.SDK_INT >= 30) {
             return volume.directory?.absolutePath
@@ -242,25 +253,52 @@ class MainActivity : FlutterActivity() {
         val out = ArrayList<Map<String, Any?>>()
         if (depth < 0 || !dir.exists() || !dir.canRead()) return out
         val files = dir.listFiles() ?: return out
-        val videoExt = setOf("mp4", "mkv", "webm", "avi", "mov", "m4v", "3gp", "ts", "flv", "wmv", "mpeg", "mpg", "m2ts", "vob")
         for (f in files) {
             if (f.isDirectory) {
                 if (!f.name.startsWith(".")) out.addAll(scanVideos(f, depth - 1))
-            } else {
-                val ext = f.extension.lowercase()
-                if (ext in videoExt) {
-                    out.add(
-                        mapOf(
-                            "path" to f.absolutePath,
-                            "name" to f.name,
-                            "size" to f.length(),
-                            "modified" to f.lastModified(),
-                            "folder" to (f.parent ?: "")
-                        )
+            } else if (isVideoFile(f)) {
+                out.add(
+                    mapOf(
+                        "path" to f.absolutePath,
+                        "name" to f.name,
+                        "size" to f.length(),
+                        "modified" to f.lastModified(),
+                        "folder" to (f.parent ?: "")
                     )
-                }
+                )
             }
         }
         return out
+    }
+
+    companion object {
+        private val videoExt = setOf(
+            "mp4", "mkv", "webm", "avi", "mov", "m4v", "3gp", "flv", "wmv",
+            "mpeg", "mpg", "m2ts", "mts", "vob", "f4v", "ogv"
+        )
+        private val textExt = setOf(
+            "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "txt", "md", "css",
+            "html", "htm", "xml", "svg", "map", "yml", "yaml", "py", "java",
+            "kt", "dart", "c", "h", "cpp", "go", "rs", "sh", "log", "csv",
+            "toml", "ini", "cfg", "d.ts"
+        )
+
+        fun isVideoFile(f: File): Boolean {
+            val name = f.name.lowercase()
+            if (name.endsWith(".d.ts")) return false
+            val ext = f.extension.lowercase()
+            if (ext == "ts") return isMpegTs(f)
+            if (ext in textExt) return false
+            return ext in videoExt
+        }
+
+        private fun isMpegTs(f: File): Boolean {
+            if (f.length() < 188) return false
+            return try {
+                f.inputStream().use { it.read() == 0x47 }
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 }

@@ -89,6 +89,12 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> setPlaying(bool on) async {
+    try {
+      await _ch.invokeMethod('setPlaying', {'on': on});
+    } catch (_) {}
+  }
+
   static Future<Map<String, dynamic>?> initEqualizer(int sessionId) async {
     try {
       final raw = await _ch.invokeMethod('initEqualizer', {'sessionId': sessionId});

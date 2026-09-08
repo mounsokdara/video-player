@@ -62,6 +62,7 @@ class LibraryService {
         for (final a in assets) {
           final file = await a.file;
           if (file == null) continue;
+          if (!looksLikeVideo(file.path, mime: a.mimeType)) continue;
           if (seen.contains(file.path)) continue;
           seen.add(file.path);
           videos.add(
@@ -92,6 +93,7 @@ class LibraryService {
       for (final m in extra) {
         final path = m['path'] as String? ?? '';
         if (path.isEmpty || seen.contains(path)) continue;
+        if (!looksLikeVideo(path)) continue;
         seen.add(path);
         final name = m['name'] as String? ?? p.basename(path);
         videos.add(
@@ -225,12 +227,97 @@ class LibraryService {
         final name = p.basename(e.path);
         if (!settings.showHiddenFolders && name.startsWith('.')) return false;
         if (e is Directory) return true;
-        const ext = {'.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v', '.3gp', '.ts', '.flv', '.wmv', '.mpeg', '.mpg', '.m2ts', '.vob'};
-        return ext.contains(p.extension(e.path).toLowerCase());
+        return looksLikeVideo(e.path);
       }).toList();
     } catch (_) {
       return [];
     }
+  }
+}
+
+const videoExtensions = {
+  '.mp4',
+  '.mkv',
+  '.webm',
+  '.avi',
+  '.mov',
+  '.m4v',
+  '.3gp',
+  '.flv',
+  '.wmv',
+  '.mpeg',
+  '.mpg',
+  '.m2ts',
+  '.mts',
+  '.vob',
+  '.f4v',
+  '.ogv',
+};
+
+const textExtensions = {
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.txt',
+  '.md',
+  '.css',
+  '.html',
+  '.htm',
+  '.xml',
+  '.svg',
+  '.map',
+  '.yml',
+  '.yaml',
+  '.py',
+  '.java',
+  '.kt',
+  '.dart',
+  '.c',
+  '.h',
+  '.cpp',
+  '.go',
+  '.rs',
+  '.sh',
+  '.log',
+  '.csv',
+  '.toml',
+  '.ini',
+};
+
+bool looksLikeVideo(String path, {String? mime}) {
+  final name = p.basename(path).toLowerCase();
+  if (name.endsWith('.d.ts')) return false;
+  final ext = p.extension(name).toLowerCase();
+  final m = (mime ?? '').toLowerCase();
+  if (m.startsWith('text/')) return false;
+  if (m.contains('javascript') || m.contains('json') || m.contains('typescript')) return false;
+  if (m.startsWith('video/')) {
+    if (ext == '.tsx' || ext == '.jsx') return false;
+    if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
+      // Some stacks mislabel TypeScript as a generic video type; require MPEG-TS.
+      return _isMpegTsFile(path);
+    }
+    return true;
+  }
+  if (ext == '.ts') return _isMpegTsFile(path);
+  if (textExtensions.contains(ext)) return false;
+  return videoExtensions.contains(ext);
+}
+
+bool _isMpegTsFile(String path) {
+  try {
+    final f = File(path);
+    if (!f.existsSync() || f.lengthSync() < 188) return false;
+    final raf = f.openSync();
+    final b = raf.readByteSync();
+    raf.closeSync();
+    return b == 0x47;
+  } catch (_) {
+    return false;
   }
 }
 

@@ -33,7 +33,7 @@ class AppSettings {
   DecoderMode decoder = DecoderMode.hw;
   bool hwPriority = true;
   int seekStepSeconds = 10;
-  bool autoMiniplayer = true;
+  bool autoMiniplayer = false;
   bool rememberBackgroundPlay = false;
   bool backgroundPlay = false;
   bool rememberAspect = true;
@@ -86,15 +86,40 @@ class AppSettings {
   double hueRotate = 0;
   double sharpness = 0;
   bool mirror = false;
+  bool hideNavBar = false;
+  bool showAppNav = true;
 
-  List<String> quickActions = [
+  static const allQuickActions = <String>[
     'lock',
     'aspect',
-    'speed',
-    'rotate',
     'audio',
     'subtitle',
+    'speed',
+    'background',
+    'popup',
+    'hidenav',
+    'cast',
+    'delete',
+    'bookmark',
+    'playopt',
+    'ab',
+    'eq',
+    'night',
+    'mirror',
+    'invert',
+    'color',
+    'rotate',
+    'brightness',
+    'timer',
+    'songs',
+    'repeat',
+    'decoder',
+    'screenshot',
+    'share',
+    'properties',
   ];
+
+  List<String> quickActions = List<String>.from(allQuickActions);
 
   Map<String, double> resumeMap = {};
   Map<String, double> speedMap = {};
@@ -119,7 +144,12 @@ class AppSettings {
     decoder = DecoderMode.values[p.getInt('decoder') ?? 1];
     hwPriority = p.getBool('hwPriority') ?? true;
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
-    autoMiniplayer = p.getBool('autoMiniplayer') ?? true;
+    autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
+    if (p.getBool('pipDefaultOffV2') != true) {
+      autoMiniplayer = false;
+      await p.setBool('autoMiniplayer', false);
+      await p.setBool('pipDefaultOffV2', true);
+    }
     rememberBackgroundPlay = p.getBool('rememberBackgroundPlay') ?? false;
     backgroundPlay = p.getBool('backgroundPlay') ?? false;
     rememberAspect = p.getBool('rememberAspect') ?? true;
@@ -160,8 +190,17 @@ class AppSettings {
     gamma = p.getDouble('gamma') ?? 1;
     hueRotate = p.getDouble('hueRotate') ?? 0;
     mirror = p.getBool('mirror') ?? false;
+    hideNavBar = p.getBool('hideNavBar') ?? false;
+    showAppNav = p.getBool('showAppNav') ?? true;
     final qa = p.getStringList('quickActions');
-    if (qa != null && qa.isNotEmpty) quickActions = qa;
+    if (qa == null || qa.isEmpty) {
+      quickActions = List<String>.from(allQuickActions);
+    } else {
+      quickActions = [...qa];
+      for (final a in allQuickActions) {
+        if (!quickActions.contains(a)) quickActions.add(a);
+      }
+    }
     final resume = p.getString('resumeMap');
     if (resume != null) {
       resumeMap = (jsonDecode(resume) as Map).map((k, v) => MapEntry('$k', (v as num).toDouble()));
@@ -228,6 +267,8 @@ class AppSettings {
     await p.setDouble('gamma', gamma);
     await p.setDouble('hueRotate', hueRotate);
     await p.setBool('mirror', mirror);
+    await p.setBool('hideNavBar', hideNavBar);
+    await p.setBool('showAppNav', showAppNav);
     await p.setStringList('quickActions', quickActions);
     await p.setString('resumeMap', jsonEncode(resumeMap));
     await p.setStringList('bookmarks', bookmarks.toList());

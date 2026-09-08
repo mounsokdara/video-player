@@ -11,6 +11,10 @@ Material 3 Android video player for local files — internal storage, SD cards, 
 - Playlist modes: order, loop all, repeat one, shuffle, no autoplay
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
 - AB repeat, sleep timer, equalizer, night mode, color filters, HDR toggle
+- Quick action bar with every More-menu action; toggles show on/off state
+- Pop-up / PiP off by default and only while a video is actually playing
+- Skips plain text and TypeScript files (`.ts` only if it is MPEG-TS)
+- Hide or show the system bars and the Videos / Folders / Settings bar
 - All-files access so you can rename, share, and delete
 
 ## Build

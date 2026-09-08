@@ -17,6 +17,7 @@ import 'android_bridge.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
+import 'settings.dart';
 import 'settings_ui.dart';
 import 'widgets.dart';
 
@@ -59,6 +60,7 @@ class _PlayerPageState extends State<PlayerPage> {
   bool night = false;
   bool mirror = false;
   bool invert = false;
+  bool _lastPlaying = false;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -83,7 +85,9 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _boot() async {
     await WakelockPlus.enable();
     await AndroidBridge.setKeepScreenOn(true);
-    await AndroidBridge.setPipEnabled(appSettings.autoMiniplayer);
+    await AndroidBridge.setPlaying(false);
+    await AndroidBridge.setPipEnabled(false);
+    _applySystemUi();
     _applyRotation();
     try {
       brightness = await ScreenBrightness().application;
@@ -114,6 +118,20 @@ class _PlayerPageState extends State<PlayerPage> {
     AndroidBridge.setOrientation(m);
   }
 
+  void _applySystemUi() {
+    if (appSettings.hideNavBar) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  }
+
+  void _syncPip() {
+    final playing = vc?.value.isPlaying ?? false;
+    AndroidBridge.setPlaying(playing);
+    AndroidBridge.setPipEnabled(appSettings.autoMiniplayer && playing);
+  }
+
   Future<void> _openCurrent() async {
     await vc?.dispose();
     setState(() {
@@ -138,6 +156,8 @@ class _PlayerPageState extends State<PlayerPage> {
       c.addListener(_tick);
       c.setLooping(appSettings.playMode == PlayMode.repeatOne);
       await c.play();
+      _lastPlaying = true;
+      _syncPip();
       if (appSettings.backgroundPlay) {
         await AndroidBridge.startBackground(item.title);
       }
@@ -160,6 +180,11 @@ class _PlayerPageState extends State<PlayerPage> {
     appSettings.resumeMap[item.path] = p;
     if (abA != null && abB != null && pos / 1000 >= abB!) {
       c.seekTo(Duration(milliseconds: (abA! * 1000).round()));
+    }
+    final playing = c.value.isPlaying;
+    if (playing != _lastPlaying) {
+      _lastPlaying = playing;
+      _syncPip();
     }
     if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
       _onEnded();
@@ -255,6 +280,8 @@ class _PlayerPageState extends State<PlayerPage> {
     WakelockPlus.disable();
     AndroidBridge.setKeepScreenOn(false);
     AndroidBridge.stopBackground();
+    AndroidBridge.setPlaying(false);
+    AndroidBridge.setPipEnabled(false);
     AndroidBridge.setOrientation('auto');
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -557,45 +584,205 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Widget _quickActions() {
     Widget chip(String id) {
-      IconData icon;
-      VoidCallback? onTap;
-      switch (id) {
-        case 'lock':
-          icon = Icons.lock_outline;
-          onTap = () => setState(() { locked = true; showUi = false; });
-        case 'aspect':
-          icon = Icons.aspect_ratio;
-          onTap = _aspectSheet;
-        case 'speed':
-          icon = Icons.speed;
-          onTap = _speedSheet;
-        case 'rotate':
-          icon = Icons.screen_rotation;
-          onTap = _rotationSheet;
-        case 'audio':
-          icon = Icons.audiotrack_outlined;
-          onTap = () => _simple('Audio track', 'The current file exposes the default audio track. Multi-track selection uses the system decoder.');
-        case 'subtitle':
-          icon = Icons.subtitles_outlined;
-          onTap = () => _simple('Subtitles', 'Sidecar SRT/VTT and in-stream text tracks can be toggled from this sheet on supported files.');
-        case 'eq':
-          icon = Icons.equalizer;
-          onTap = () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
-        case 'night':
-          icon = Icons.nights_stay_outlined;
-          onTap = () => setState(() => night = !night);
-        default:
-          icon = Icons.tune;
-          onTap = _more;
-      }
-      return IconButton(onPressed: onTap, icon: Icon(icon, color: Colors.white70, size: 22));
+      final on = switch (id) {
+        'background' => appSettings.backgroundPlay,
+        'popup' => appSettings.autoMiniplayer,
+        'hidenav' => appSettings.hideNavBar,
+        'bookmark' => item.bookmarked,
+        'night' => night,
+        'mirror' => mirror,
+        'invert' => invert,
+        'subtitle' => appSettings.captions,
+        _ => false,
+      };
+      final icon = switch (id) {
+        'lock' => Icons.lock_outline,
+        'aspect' => Icons.aspect_ratio,
+        'speed' => Icons.speed,
+        'rotate' => Icons.screen_rotation,
+        'audio' => Icons.audiotrack_outlined,
+        'subtitle' => Icons.subtitles_outlined,
+        'background' => Icons.headphones_outlined,
+        'popup' => Icons.picture_in_picture_alt,
+        'hidenav' => Icons.navigation_outlined,
+        'cast' => Icons.cast,
+        'delete' => Icons.delete_outline,
+        'bookmark' => item.bookmarked ? Icons.bookmark : Icons.bookmark_border,
+        'playopt' => Icons.tune,
+        'ab' => Icons.repeat,
+        'eq' => Icons.equalizer,
+        'night' => Icons.nights_stay_outlined,
+        'mirror' => Icons.flip,
+        'invert' => Icons.invert_colors,
+        'color' => Icons.color_lens_outlined,
+        'brightness' => Icons.brightness_6_outlined,
+        'timer' => Icons.timer_outlined,
+        'songs' => Icons.library_music_outlined,
+        'repeat' => Icons.queue_music,
+        'decoder' => Icons.memory,
+        'screenshot' => Icons.camera_alt_outlined,
+        'share' => Icons.share_outlined,
+        'properties' => Icons.info_outline,
+        _ => Icons.tune,
+      };
+      return IconButton(
+        tooltip: id,
+        onPressed: () => _runAction(id),
+        icon: Icon(icon, color: on ? Colors.white : Colors.white70, size: 22),
+      );
     }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(children: [for (final a in appSettings.quickActions) chip(a)]),
+      child: Row(children: [for (final a in AppSettings.allQuickActions) chip(a)]),
     );
+  }
+
+  Future<void> _runAction(String id) async {
+    switch (id) {
+      case 'lock':
+        setState(() {
+          locked = true;
+          showUi = false;
+        });
+      case 'aspect':
+        await _aspectSheet();
+      case 'speed':
+        await _speedSheet();
+      case 'rotate':
+        await _rotationSheet();
+      case 'audio':
+        await _simple('Audio track', 'The current file exposes the default audio track. Multi-track selection uses the system decoder.');
+      case 'subtitle':
+        setState(() => appSettings.captions = !appSettings.captions);
+        await appSettings.save();
+      case 'background':
+        await _toggleBackground(!appSettings.backgroundPlay);
+      case 'popup':
+        await _togglePopup(!appSettings.autoMiniplayer);
+      case 'hidenav':
+        setState(() => appSettings.hideNavBar = !appSettings.hideNavBar);
+        await appSettings.save();
+        _applySystemUi();
+      case 'cast':
+        await _simple('Cast', 'Use Android wireless display / Cast from the system quick settings. Built-in route picker appears when a session is available.');
+      case 'delete':
+        final ok = await confirm(context, 'Delete this video?', item.title);
+        if (ok) {
+          await library.deleteVideos([item]);
+          widget.onChanged();
+          if (mounted) Navigator.pop(context);
+        }
+      case 'bookmark':
+        _toggleBookmark();
+      case 'playopt':
+        await _playOptions();
+      case 'ab':
+        _cycleAb();
+      case 'eq':
+        if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+      case 'night':
+        setState(() {
+          night = !night;
+          appSettings.nightMode = night;
+        });
+        await appSettings.save();
+      case 'mirror':
+        setState(() {
+          mirror = !mirror;
+          appSettings.mirror = mirror;
+        });
+        await appSettings.save();
+      case 'invert':
+        setState(() {
+          invert = !invert;
+          appSettings.invertColors = invert;
+        });
+        await appSettings.save();
+      case 'color':
+        await _colorSheet();
+      case 'brightness':
+        try {
+          await AndroidBridge.toast('Swipe the left side of the screen to adjust brightness');
+        } catch (_) {}
+      case 'timer':
+        await _timerSheet();
+      case 'songs':
+        await _simple('Songs', 'Audio-only entries from the same folder can be queued from Folders.');
+      case 'repeat':
+        await _playlist();
+      case 'decoder':
+        appSettings.decoder = switch (appSettings.decoder) {
+          DecoderMode.auto => DecoderMode.hw,
+          DecoderMode.hw => DecoderMode.sw,
+          DecoderMode.sw => DecoderMode.auto,
+        };
+        await appSettings.save();
+        _flash('${appSettings.decoder.name.toUpperCase()} decoder');
+      case 'screenshot':
+        await _screenshot();
+      case 'share':
+        await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
+      case 'properties':
+        await showProperties(context, item);
+      default:
+        await _more();
+    }
+  }
+
+  void _toggleBookmark() {
+    if (appSettings.bookmarks.contains(item.path)) {
+      appSettings.bookmarks.remove(item.path);
+      item.bookmarked = false;
+    } else {
+      appSettings.bookmarks.add(item.path);
+      item.bookmarked = true;
+    }
+    appSettings.save();
+    widget.onChanged();
+    setState(() {});
+  }
+
+  void _cycleAb() {
+    final pos = (vc?.value.position.inMilliseconds ?? 0) / 1000.0;
+    if (abA == null) {
+      abA = pos;
+      _flash('A marker');
+    } else if (abB == null) {
+      abB = pos;
+      _flash('AB loop');
+    } else {
+      abA = null;
+      abB = null;
+      _flash('AB cleared');
+    }
+    setState(() {});
+  }
+
+  Future<void> _toggleBackground(bool on) async {
+    appSettings.backgroundPlay = on;
+    await appSettings.save();
+    if (on) {
+      await AndroidBridge.startBackground(item.title);
+    } else {
+      await AndroidBridge.stopBackground();
+    }
+    setState(() {});
+  }
+
+  Future<void> _togglePopup(bool on) async {
+    appSettings.autoMiniplayer = on;
+    await appSettings.save();
+    final playing = vc?.value.isPlaying ?? false;
+    if (on && playing) {
+      await AndroidBridge.setPlaying(true);
+      await AndroidBridge.enterPip();
+    } else {
+      await AndroidBridge.setPipEnabled(on && playing);
+      if (on && !playing) _flash('Pop-up starts when a video is playing');
+    }
+    setState(() {});
   }
 
   Future<void> _togglePlay() async {
@@ -695,86 +882,98 @@ class _PlayerPageState extends State<PlayerPage> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        Widget tile(IconData i, String t, VoidCallback on) => ListTile(leading: Icon(i), title: Text(t), onTap: () { Navigator.pop(ctx); on(); });
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.8,
-          builder: (_, sc) => ListView(
-            controller: sc,
-            children: [
-              const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-              tile(Icons.audiotrack_outlined, 'Audio track', () => _simple('Audio track', 'Default track is selected. Additional tracks appear when the file contains them.')),
-              tile(Icons.subtitles_outlined, 'Subtitle', () => _simple('Subtitle', 'Enable captions in Accessibility or pick a sidecar file from the folder.')),
-              tile(Icons.speed, 'Speed', _speedSheet),
-              tile(Icons.headphones_outlined, 'Background play', () async {
-                appSettings.backgroundPlay = !appSettings.backgroundPlay;
-                if (appSettings.rememberBackgroundPlay) {}
-                await appSettings.save();
-                if (appSettings.backgroundPlay) {
-                  await AndroidBridge.startBackground(item.title);
-                } else {
-                  await AndroidBridge.stopBackground();
-                }
-              }),
-              tile(Icons.picture_in_picture_alt, 'Pop-up', () => AndroidBridge.enterPip()),
-              tile(Icons.cast, 'Cast', () => _simple('Cast', 'Use Android wireless display / Cast from the system quick settings. Built-in route picker appears when a session is available.')),
-              tile(Icons.delete_outline, 'Delete', () async {
-                final ok = await confirm(context, 'Delete this video?', item.title);
-                if (ok) {
-                  await library.deleteVideos([item]);
-                  widget.onChanged();
-                  if (mounted) Navigator.pop(context);
-                }
-              }),
-              tile(item.bookmarked ? Icons.bookmark : Icons.bookmark_border, 'Bookmark', () {
-                if (appSettings.bookmarks.contains(item.path)) {
-                  appSettings.bookmarks.remove(item.path);
-                  item.bookmarked = false;
-                } else {
-                  appSettings.bookmarks.add(item.path);
-                  item.bookmarked = true;
-                }
-                appSettings.save();
-                widget.onChanged();
-              }),
-              tile(Icons.tune, 'Play option', _playOptions),
-              tile(Icons.repeat, 'AB Repeat', () {
-                final pos = (vc?.value.position.inMilliseconds ?? 0) / 1000.0;
-                if (abA == null) {
-                  abA = pos;
-                  _flash('A marker');
-                } else if (abB == null) {
-                  abB = pos;
-                  _flash('AB loop');
-                } else {
-                  abA = null;
-                  abB = null;
-                  _flash('AB cleared');
-                }
-                setState(() {});
-              }),
-              tile(Icons.equalizer, 'Equalizer', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()))),
-              tile(Icons.nights_stay_outlined, 'Night mode', () => setState(() { night = !night; appSettings.nightMode = night; })),
-              tile(Icons.flip, 'Mirror', () => setState(() => mirror = !mirror)),
-              tile(Icons.invert_colors, 'Invert filter', () => setState(() => invert = !invert)),
-              tile(Icons.color_lens_outlined, 'Color correction', _colorSheet),
-              tile(Icons.screen_rotation, 'Rotation control', _rotationSheet),
-              tile(Icons.brightness_6_outlined, 'Brightness', () async {
-                try { await AndroidBridge.toast('Swipe the left side of the screen to adjust brightness'); } catch (_) {}
-              }),
-              tile(Icons.timer_outlined, 'Timer', _timerSheet),
-              tile(Icons.library_music_outlined, 'Songs', () => _simple('Songs', 'Audio-only entries from the same folder can be queued from Folders.')),
-              tile(Icons.repeat, 'Repeat mode', _playlist),
-              tile(Icons.memory, 'Decoder HW', () { appSettings.decoder = DecoderMode.hw; appSettings.save(); _flash('HW decoder'); }),
-              tile(Icons.memory_outlined, 'Decoder SW', () { appSettings.decoder = DecoderMode.sw; appSettings.save(); _flash('SW decoder'); }),
-              tile(Icons.developer_board, 'Decoder', () { appSettings.decoder = DecoderMode.auto; appSettings.save(); _flash('Auto decoder'); }),
-              tile(Icons.dashboard_customize_outlined, 'Customize quick actions', _quickEdit),
-              tile(Icons.camera_alt_outlined, 'Screenshot', _screenshot),
-              tile(Icons.share_outlined, 'Share', () => SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title))),
-              tile(Icons.info_outline, 'Properties', () => showProperties(context, item)),
-            ],
-          ),
-        );
+        return StatefulBuilder(builder: (ctx, ss) {
+          void refresh() {
+            ss(() {});
+            setState(() {});
+          }
+
+          Widget go(IconData i, String t, String id) => ListTile(
+                leading: Icon(i),
+                title: Text(t),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _runAction(id);
+                },
+              );
+
+          Widget tog(IconData i, String t, bool v, Future<void> Function(bool) on) => SwitchListTile(
+                secondary: Icon(i),
+                title: Text(t),
+                value: v,
+                onChanged: (n) async {
+                  await on(n);
+                  refresh();
+                },
+              );
+
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.85,
+            builder: (_, sc) => ListView(
+              controller: sc,
+              children: [
+                const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+                go(Icons.lock_outline, 'Lock', 'lock'),
+                go(Icons.aspect_ratio, 'Screen mode', 'aspect'),
+                go(Icons.audiotrack_outlined, 'Audio track', 'audio'),
+                tog(Icons.subtitles_outlined, 'Subtitle', appSettings.captions, (n) async {
+                  appSettings.captions = n;
+                  await appSettings.save();
+                }),
+                go(Icons.speed, 'Speed', 'speed'),
+                tog(Icons.headphones_outlined, 'Background play', appSettings.backgroundPlay, _toggleBackground),
+                tog(Icons.picture_in_picture_alt, 'Pop-up', appSettings.autoMiniplayer, _togglePopup),
+                tog(Icons.navigation_outlined, 'Hide navigation bar', appSettings.hideNavBar, (n) async {
+                  appSettings.hideNavBar = n;
+                  await appSettings.save();
+                  _applySystemUi();
+                }),
+                go(Icons.cast, 'Cast', 'cast'),
+                go(Icons.delete_outline, 'Delete', 'delete'),
+                tog(item.bookmarked ? Icons.bookmark : Icons.bookmark_border, 'Bookmark', item.bookmarked, (n) async {
+                  _toggleBookmark();
+                }),
+                go(Icons.tune, 'Play option', 'playopt'),
+                go(Icons.repeat, 'AB Repeat', 'ab'),
+                go(Icons.equalizer, 'Equalizer', 'eq'),
+                tog(Icons.nights_stay_outlined, 'Night mode', night, (n) async {
+                  night = n;
+                  appSettings.nightMode = n;
+                  await appSettings.save();
+                }),
+                tog(Icons.flip, 'Mirror', mirror, (n) async {
+                  mirror = n;
+                  appSettings.mirror = n;
+                  await appSettings.save();
+                }),
+                tog(Icons.invert_colors, 'Invert filter', invert, (n) async {
+                  invert = n;
+                  appSettings.invertColors = n;
+                  await appSettings.save();
+                }),
+                go(Icons.color_lens_outlined, 'Color correction', 'color'),
+                go(Icons.screen_rotation, 'Rotation control', 'rotate'),
+                go(Icons.brightness_6_outlined, 'Brightness', 'brightness'),
+                go(Icons.timer_outlined, 'Timer', 'timer'),
+                go(Icons.library_music_outlined, 'Songs', 'songs'),
+                go(Icons.queue_music, 'Repeat mode', 'repeat'),
+                go(Icons.memory, 'Decoder (${appSettings.decoder.name.toUpperCase()})', 'decoder'),
+                ListTile(
+                  leading: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('Customize quick actions'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _quickEdit();
+                  },
+                ),
+                go(Icons.camera_alt_outlined, 'Screenshot', 'screenshot'),
+                go(Icons.share_outlined, 'Share', 'share'),
+                go(Icons.info_outline, 'Properties', 'properties'),
+              ],
+            ),
+          );
+        });
       },
     );
   }
@@ -1014,7 +1213,6 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _quickEdit() async {
-    const all = ['lock', 'aspect', 'speed', 'rotate', 'audio', 'subtitle', 'eq', 'night'];
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
@@ -1023,14 +1221,14 @@ class _PlayerPageState extends State<PlayerPage> {
             shrinkWrap: true,
             children: [
               const ListTile(title: Text('Quick actions')),
-              for (final a in all)
+              for (final a in AppSettings.allQuickActions)
                 CheckboxListTile(
                   value: appSettings.quickActions.contains(a),
                   title: Text(a),
                   onChanged: (v) {
                     ss(() {
                       if (v == true) {
-                        appSettings.quickActions.add(a);
+                        if (!appSettings.quickActions.contains(a)) appSettings.quickActions.add(a);
                       } else {
                         appSettings.quickActions.remove(a);
                       }

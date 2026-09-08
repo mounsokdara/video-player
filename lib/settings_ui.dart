@@ -96,6 +96,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
         SwitchListTile(title: const Text('Confirm before delete'), value: s.confirmDelete, onChanged: (v) => set(() => s.confirmDelete = v)),
         SwitchListTile(title: const Text('Show hidden folders'), value: s.showHiddenFolders, onChanged: (v) => set(() => s.showHiddenFolders = v)),
         SwitchListTile(title: const Text('Haptic feedback'), value: s.hapticFeedback, onChanged: (v) => set(() => s.hapticFeedback = v)),
+        SwitchListTile(title: const Text('Show navigation bar'), subtitle: const Text('Videos / Folders / Settings bar'), value: s.showAppNav, onChanged: (v) => set(() => s.showAppNav = v)),
         SwitchListTile(title: const Text('Remember playback progress'), value: s.rememberPlayback, onChanged: (v) => set(() => s.rememberPlayback = v)),
         ListTile(
           title: const Text('Clear resume history'),
@@ -187,7 +188,8 @@ class _VideoSettingsState extends State<VideoSettings> {
             ),
           ),
         ),
-        SwitchListTile(title: const Text('Auto Miniplayer'), subtitle: const Text('Continue in a floating window when leaving the app'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
+        SwitchListTile(title: const Text('Auto Miniplayer / Pop-up'), subtitle: const Text('Off by default. Only while a video is playing — never when paused or idle.'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
+        SwitchListTile(title: const Text('Hide navigation bar'), subtitle: const Text('Hide system bars during playback'), value: s.hideNavBar, onChanged: (v) => set(() => s.hideNavBar = v)),
         SwitchListTile(title: const Text('Background play'), value: s.backgroundPlay, onChanged: (v) => set(() => s.backgroundPlay = v)),
         SwitchListTile(title: const Text('Remember background play'), subtitle: const Text('Keep the option on for every video'), value: s.rememberBackgroundPlay, onChanged: (v) => set(() => s.rememberBackgroundPlay = v)),
         SwitchListTile(title: const Text('Remember aspect ratio'), value: s.rememberAspect, onChanged: (v) => set(() => s.rememberAspect = v)),

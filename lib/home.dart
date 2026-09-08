@@ -115,20 +115,22 @@ class _HomeShellState extends State<HomeShell> {
           SettingsHub(onChanged: widget.onSettingsChanged),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: tab,
-        onDestinationSelected: (i) => setState(() {
-          tab = i;
-          selecting = false;
-          selected.clear();
-          searching = false;
-        }),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Videos'),
-          NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Folders'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
-        ],
-      ),
+      bottomNavigationBar: appSettings.showAppNav
+          ? NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (i) => setState(() {
+                tab = i;
+                selecting = false;
+                selected.clear();
+                searching = false;
+              }),
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Videos'),
+                NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Folders'),
+                NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
+              ],
+            )
+          : null,
     );
   }
 
@@ -180,11 +182,16 @@ class _HomeShellState extends State<HomeShell> {
                     } else if (v == 'allfiles') {
                       await library.ensureAllFiles();
                       await _boot();
+                    } else if (v == 'nav') {
+                      setState(() => appSettings.showAppNav = !appSettings.showAppNav);
+                      appSettings.save();
+                      widget.onSettingsChanged();
                     } else if (v == 'import') {
                       final r = await FilePicker.platform.pickFiles(type: FileType.video, allowMultiple: true);
                       if (r != null) {
                         for (final f in r.files) {
                           if (f.path == null) continue;
+                          if (!looksLikeVideo(f.path!)) continue;
                           library.videos.add(VideoItem(
                             id: f.path!,
                             path: f.path!,
@@ -198,12 +205,13 @@ class _HomeShellState extends State<HomeShell> {
                       }
                     }
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'eq', child: Text('Equalizer')),
-                    PopupMenuItem(value: 'refresh', child: Text('Refresh')),
-                    PopupMenuItem(value: 'select', child: Text('Select')),
-                    PopupMenuItem(value: 'allfiles', child: Text('Grant all-files access')),
-                    PopupMenuItem(value: 'import', child: Text('Import files')),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
+                    const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+                    const PopupMenuItem(value: 'select', child: Text('Select')),
+                    const PopupMenuItem(value: 'allfiles', child: Text('Grant all-files access')),
+                    const PopupMenuItem(value: 'import', child: Text('Import files')),
+                    PopupMenuItem(value: 'nav', child: Text(appSettings.showAppNav ? 'Hide navigation bar' : 'Show navigation bar')),
                   ],
                 ),
               ],
