@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 
 class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -33,7 +35,14 @@ class PlaybackService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .build()
-        startForeground(42, notification)
+        ServiceCompat.startForeground(
+            this,
+            42,
+            notification,
+            if (Build.VERSION.SDK_INT >= 29)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            else 0
+        )
         return START_STICKY
     }
 

@@ -226,9 +226,16 @@ class MainActivity : FlutterActivity() {
         return out
     }
 
-    @Suppress("DEPRECATION")
     private fun volumePath(volume: android.os.storage.StorageVolume): String? {
-        return if (Build.VERSION.SDK_INT >= 30) volume.directory?.absolutePath else volume.getPath()
+        if (Build.VERSION.SDK_INT >= 30) {
+            return volume.directory?.absolutePath
+        }
+        return try {
+            val method = volume.javaClass.getMethod("getPath")
+            method.invoke(volume) as? String
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun scanVideos(dir: File, depth: Int): List<Map<String, Any?>> {
