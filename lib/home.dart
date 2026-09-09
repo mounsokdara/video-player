@@ -1114,7 +1114,7 @@ class FoldersHub extends StatelessWidget {
                 trailing: selecting && !isDir
                     ? Checkbox(
                         value: video != null && selected.contains(video.id),
-                        onChanged: video == null ? null : (_) => onToggleSelect(video),
+                        onChanged: video == null ? null : (_) => onToggleSelect(video!),
                       )
                     : IconButton(
                   icon: const Icon(Icons.more_vert),
