@@ -1,6 +1,6 @@
-# Video Player
+# Video Player for android
 
-Material 3 Android video player for local files
+A Material 3 open source Media video player 
 
 This app under development it's may have alot bugs
 
