@@ -2,7 +2,7 @@
 
 Material 3 Android video player for local files — internal storage, SD cards, and USB/OTG.
 
-**Download APK:** [latest release](https://github.com/mounsokdara/video-player/releases/latest/download/app-release.apk)
+**Download APK:** [v1.0.0_Indev](https://github.com/mounsokdara/video-player/releases/download/v1.0.0_Indev/app-release.apk)
 
 Version **1.0.0_Indev** (development).
 

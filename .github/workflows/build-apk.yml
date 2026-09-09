@@ -38,5 +38,5 @@ jobs:
           files: build/app/outputs/flutter-apk/app-release.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
-          prerelease: true
+          prerelease: false
           make_latest: true
