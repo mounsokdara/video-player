@@ -1,10 +1,8 @@
 # Video Player
 
-Material 3 Android video player for local files — internal storage, SD cards, and USB/OTG.
+Material 3 Android video player for local files
 
-**Download APK:** [v1.0.0_Indev](https://github.com/mounsokdara/video-player/releases/download/v1.0.0_Indev/app-release.apk)
-
-Version **1.0.0_Indev** (development).
+This app under development it's may have alot bugs
 
 ## Features
 
