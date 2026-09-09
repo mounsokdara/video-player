@@ -11,6 +11,7 @@ import 'library.dart';
 import 'main.dart';
 import 'models.dart';
 import 'player.dart';
+import 'settings.dart';
 import 'settings_ui.dart';
 import 'widgets.dart';
 

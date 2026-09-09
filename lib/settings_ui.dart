@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'android_bridge.dart';
 import 'main.dart';
 import 'models.dart';
+import 'settings.dart';
 
 class SettingsHub extends StatelessWidget {
   const SettingsHub({super.key, required this.onChanged, this.overflow = const [], this.onOverflow});

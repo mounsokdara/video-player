@@ -8,6 +8,8 @@ import 'models.dart';
 import 'settings.dart';
 import 'theme.dart';
 
+export 'settings.dart';
+
 final appSettings = AppSettings();
 final library = LibraryService(appSettings);
 
