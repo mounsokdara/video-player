@@ -183,29 +183,20 @@ class LibraryService {
 
   Future<bool> deleteVideos(List<VideoItem> items) async {
     if (items.isEmpty) return true;
-    manageMedia = await AndroidBridge.canManageMedia();
-    allFiles = await AndroidBridge.hasAllFilesAccess();
-    if (!manageMedia) {
-      await AndroidBridge.requestManageMedia();
-      manageMedia = await AndroidBridge.canManageMedia();
-    }
     final paths = items.map((v) => v.path).where((p) => p.isNotEmpty).toList();
     await AndroidBridge.deletePaths(paths);
-    var ok = true;
-    for (final v in items) {
-      var deleted = false;
-      try {
-        final f = File(v.path);
-        if (!f.existsSync()) {
-          deleted = true;
-        } else {
-          await f.delete();
-          deleted = !f.existsSync();
-        }
-      } catch (_) {
-        deleted = !File(v.path).existsSync();
+    var leftover = items.where((v) => File(v.path).existsSync()).toList();
+    if (leftover.isNotEmpty) {
+      manageMedia = await AndroidBridge.canManageMedia();
+      if (!manageMedia) {
+        await AndroidBridge.requestManageMedia();
       }
-      if (deleted) {
+      await AndroidBridge.deletePaths(leftover.map((v) => v.path).toList());
+      leftover = leftover.where((v) => File(v.path).existsSync()).toList();
+    }
+    var ok = leftover.isEmpty;
+    for (final v in items) {
+      if (!File(v.path).existsSync()) {
         videos.removeWhere((x) => x.id == v.id || x.path == v.path);
       } else {
         ok = false;
