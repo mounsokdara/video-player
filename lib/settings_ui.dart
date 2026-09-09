@@ -63,6 +63,12 @@ class SettingsHub extends StatelessWidget {
               onTap: () => library.ensureAllFiles(),
             ),
             ListTile(
+              leading: const Icon(Icons.delete_sweep_outlined),
+              title: const Text('Media management'),
+              subtitle: const Text('Delete videos without the Android confirmation sheet'),
+              onTap: () => library.ensureManageMedia(),
+            ),
+            ListTile(
               leading: const Icon(Icons.equalizer),
               title: const Text('Equalizer'),
               subtitle: Text(appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off'),
@@ -71,7 +77,7 @@ class SettingsHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: const Text('Video Player 1.0.0'),
+              subtitle: const Text('Video Player 1.0.0_Indev'),
               onTap: () async {
                 final info = await PackageInfo.fromPlatform();
                 if (!context.mounted) return;

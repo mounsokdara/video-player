@@ -18,6 +18,7 @@ class LibraryService {
   final List<StorageVolumeInfo> volumes = [];
   bool permissionReady = false;
   bool allFiles = false;
+  bool manageMedia = false;
 
   Future<void> requestPermissions() async {
     await [
@@ -35,11 +36,20 @@ class LibraryService {
       await Permission.manageExternalStorage.request();
       allFiles = await AndroidBridge.hasAllFilesAccess();
     }
+    manageMedia = await AndroidBridge.canManageMedia();
   }
 
   Future<void> ensureAllFiles() async {
     allFiles = await AndroidBridge.hasAllFilesAccess();
     if (!allFiles) await AndroidBridge.requestAllFilesAccess();
+  }
+
+  Future<void> ensureManageMedia() async {
+    manageMedia = await AndroidBridge.canManageMedia();
+    if (!manageMedia) {
+      await AndroidBridge.requestManageMedia();
+      manageMedia = await AndroidBridge.canManageMedia();
+    }
   }
 
   Future<void> scan() async {
@@ -172,29 +182,31 @@ class LibraryService {
   }
 
   Future<bool> deleteVideos(List<VideoItem> items) async {
+    if (items.isEmpty) return true;
+    manageMedia = await AndroidBridge.canManageMedia();
+    allFiles = await AndroidBridge.hasAllFilesAccess();
+    if (!manageMedia) {
+      await AndroidBridge.requestManageMedia();
+      manageMedia = await AndroidBridge.canManageMedia();
+    }
+    final paths = items.map((v) => v.path).where((p) => p.isNotEmpty).toList();
+    await AndroidBridge.deletePaths(paths);
     var ok = true;
     for (final v in items) {
       var deleted = false;
-      if (v.assetId != null) {
-        try {
-          final result = await PhotoManager.editor.deleteWithIds([v.assetId!]);
-          deleted = result.isNotEmpty;
-        } catch (_) {}
-      }
-      if (!deleted) {
-        deleted = await AndroidBridge.deletePath(v.path);
-        if (!deleted) {
-          try {
-            final f = File(v.path);
-            if (f.existsSync()) {
-              await f.delete();
-              deleted = true;
-            }
-          } catch (_) {}
+      try {
+        final f = File(v.path);
+        if (!f.existsSync()) {
+          deleted = true;
+        } else {
+          await f.delete();
+          deleted = !f.existsSync();
         }
+      } catch (_) {
+        deleted = !File(v.path).existsSync();
       }
       if (deleted) {
-        videos.removeWhere((x) => x.id == v.id);
+        videos.removeWhere((x) => x.id == v.id || x.path == v.path);
       } else {
         ok = false;
       }

@@ -1,6 +1,7 @@
 package com.mounsokdara.video_player
 
 import android.app.PictureInPictureParams
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -99,6 +100,21 @@ class MainActivity : FlutterActivity() {
                             }
                             result.success(true)
                         }
+                        "canManageMedia" -> {
+                            result.success(
+                                if (Build.VERSION.SDK_INT >= 31) MediaStore.canManageMedia(this) else true
+                            )
+                        }
+                        "requestManageMedia" -> {
+                            if (Build.VERSION.SDK_INT >= 31 && !MediaStore.canManageMedia(this)) {
+                                startActivity(
+                                    Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
+                                        data = Uri.parse("package:$packageName")
+                                    }
+                                )
+                            }
+                            result.success(true)
+                        }
                         "listStorageVolumes" -> result.success(listVolumes())
                         "listVideoFiles" -> {
                             val root = call.argument<String>("path")
@@ -108,8 +124,15 @@ class MainActivity : FlutterActivity() {
                         "deletePath" -> {
                             val path = call.argument<String>("path")
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
-                            val file = File(path)
-                            result.success(file.exists() && file.delete())
+                            result.success(deleteMediaFile(path))
+                        }
+                        "deletePaths" -> {
+                            val paths = call.argument<List<String>>("paths") ?: emptyList()
+                            var ok = true
+                            for (path in paths) {
+                                if (!deleteMediaFile(path)) ok = false
+                            }
+                            result.success(ok)
                         }
                         "renamePath" -> {
                             val path = call.argument<String>("path")
@@ -271,9 +294,18 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun applyFxEnabled() {
-        equalizer?.enabled = eqWanted
-        bassBoost?.enabled = eqWanted && bassWanted
-        virtualizer?.enabled = eqWanted && surroundWanted
+        try {
+            equalizer?.enabled = eqWanted
+        } catch (_: Throwable) {
+        }
+        try {
+            bassBoost?.enabled = eqWanted && bassWanted
+        } catch (_: Throwable) {
+        }
+        try {
+            virtualizer?.enabled = eqWanted && surroundWanted
+        } catch (_: Throwable) {
+        }
     }
 
     private fun initAudioFx(session: Int): Map<String, Any> {
@@ -289,45 +321,172 @@ class MainActivity : FlutterActivity() {
             virtualizer?.release()
         } catch (_: Exception) {
         }
-        equalizer = Equalizer(0, session).apply { enabled = eqWanted }
-        bassBoost = BassBoost(0, session).apply {
-            setStrength(bassStrength.toShort())
-            enabled = eqWanted && bassWanted
+        equalizer = null
+        bassBoost = null
+        virtualizer = null
+        if (session == 0) return emptyFx(0)
+        try {
+            equalizer = Equalizer(0, session).apply { enabled = eqWanted }
+        } catch (_: Throwable) {
+            equalizer = null
         }
-        virtualizer = Virtualizer(0, session).apply {
-            setStrength(surroundStrength.toShort())
-            enabled = eqWanted && surroundWanted
+        try {
+            bassBoost = BassBoost(0, session).apply {
+                setStrength(bassStrength.toShort())
+                enabled = eqWanted && bassWanted
+            }
+        } catch (_: Throwable) {
+            bassBoost = null
         }
-        applyTenBands()
-        applyFxEnabled()
-        val eq = equalizer!!
-        val bands = eq.numberOfBands.toInt()
+        try {
+            virtualizer = Virtualizer(0, session).apply {
+                setStrength(surroundStrength.toShort())
+                enabled = eqWanted && surroundWanted
+            }
+        } catch (_: Throwable) {
+            virtualizer = null
+        }
+        try {
+            applyTenBands()
+            applyFxEnabled()
+        } catch (_: Throwable) {
+        }
+        val eq = equalizer ?: return emptyFx(session)
+        return try {
+            val bands = eq.numberOfBands.toInt()
+            val map = HashMap<String, Any>()
+            map["bands"] = 10
+            map["deviceBands"] = bands
+            map["min"] = eq.bandLevelRange[0].toInt()
+            map["max"] = eq.bandLevelRange[1].toInt()
+            map["freqs"] = tenBandHz.toList()
+            map["levels"] = tenBandLevels.toList()
+            map["sessionId"] = session
+            val presets = ArrayList<String>()
+            for (i in 0 until eq.numberOfPresets) {
+                presets.add(eq.getPresetName(i.toShort()))
+            }
+            map["presets"] = presets
+            map
+        } catch (_: Throwable) {
+            emptyFx(session)
+        }
+    }
+
+    private fun emptyFx(session: Int): Map<String, Any> {
         val map = HashMap<String, Any>()
         map["bands"] = 10
-        map["deviceBands"] = bands
-        map["min"] = eq.bandLevelRange[0].toInt()
-        map["max"] = eq.bandLevelRange[1].toInt()
+        map["deviceBands"] = 0
+        map["min"] = -1500
+        map["max"] = 1500
         map["freqs"] = tenBandHz.toList()
         map["levels"] = tenBandLevels.toList()
         map["sessionId"] = session
-        val presets = ArrayList<String>()
-        for (i in 0 until eq.numberOfPresets) {
-            presets.add(eq.getPresetName(i.toShort()))
-        }
-        map["presets"] = presets
+        map["presets"] = emptyList<String>()
         return map
+    }
+
+    @Suppress("DEPRECATION")
+    private fun deleteMediaFile(path: String): Boolean {
+        val file = File(path)
+        if (tryFileDelete(file)) return true
+        val uri = mediaUriForPath(path) ?: return tryFileDelete(file) || !file.exists()
+        return try {
+            val rows = contentResolver.delete(uri, null, null)
+            if (rows > 0) {
+                tryFileDelete(file)
+                true
+            } else {
+                tryFileDelete(file) || !file.exists()
+            }
+        } catch (_: SecurityException) {
+            // Never launch RecoverableSecurityException's confirmation sheet.
+            tryFileDelete(file) || !file.exists()
+        } catch (_: Exception) {
+            tryFileDelete(file) || !file.exists()
+        }
+    }
+
+    private fun tryFileDelete(file: File): Boolean {
+        return try {
+            if (!file.exists()) return true
+            if (file.delete()) {
+                try {
+                    MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("video/*"), null)
+                } catch (_: Exception) {
+                }
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun mediaUriForPath(path: String): Uri? {
+        val name = File(path).name
+        val collections = ArrayList<Uri>()
+        collections.add(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+        collections.add(MediaStore.Files.getContentUri("external"))
+        if (Build.VERSION.SDK_INT >= 29) {
+            try {
+                collections.add(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
+            } catch (_: Exception) {
+            }
+        }
+        val projection = arrayOf(MediaStore.Video.Media._ID)
+        for (collection in collections.distinct()) {
+            try {
+                contentResolver.query(
+                    collection,
+                    projection,
+                    "${MediaStore.MediaColumns.DATA}=?",
+                    arrayOf(path),
+                    null
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        val id = c.getLong(0)
+                        return ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        for (collection in collections.distinct()) {
+            try {
+                contentResolver.query(
+                    collection,
+                    projection,
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                    arrayOf(name),
+                    null
+                )?.use { c ->
+                    if (c.count == 1 && c.moveToFirst()) {
+                        val id = c.getLong(0)
+                        return ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return null
     }
 
     private fun applyTenBands() {
         val eq = equalizer ?: return
-        val n = eq.numberOfBands.toInt()
-        val min = eq.bandLevelRange[0].toInt()
-        val max = eq.bandLevelRange[1].toInt()
-        for (i in 0 until n) {
-            val freqHz = eq.getCenterFreq(i.toShort()) / 1000
-            val idx = nearestBand(freqHz)
-            val level = tenBandLevels[idx].coerceIn(min, max)
-            eq.setBandLevel(i.toShort(), level.toShort())
+        try {
+            val n = eq.numberOfBands.toInt()
+            val min = eq.bandLevelRange[0].toInt()
+            val max = eq.bandLevelRange[1].toInt()
+            for (i in 0 until n) {
+                val freqHz = eq.getCenterFreq(i.toShort()) / 1000
+                val idx = nearestBand(freqHz)
+                val level = tenBandLevels[idx].coerceIn(min, max)
+                eq.setBandLevel(i.toShort(), level.toShort())
+            }
+        } catch (_: Throwable) {
         }
     }
 

@@ -115,10 +115,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     night = appSettings.nightMode;
     mirror = appSettings.mirror;
     invert = appSettings.invertColors;
-    final kept = PlaybackSession.active &&
-        PlaybackSession.controller != null &&
-        PlaybackSession.controller!.value.isInitialized &&
-        PlaybackSession.item?.path == widget.playlist[index].path;
+    bool kept = false;
+    try {
+      kept = PlaybackSession.active &&
+          PlaybackSession.controller != null &&
+          PlaybackSession.controller!.value.isInitialized &&
+          PlaybackSession.item?.path == widget.playlist[index].path;
+    } catch (_) {
+      kept = false;
+    }
     if (kept) {
       vc = PlaybackSession.controller;
       ready = true;
@@ -278,24 +283,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openCurrent() async {
-    await vc?.dispose();
-    zoom.value = Matrix4.identity();
-    setState(() {
-      ready = false;
-      vc = null;
-    });
-    final file = File(item.path);
-    final c = VideoPlayerController.file(
-      file,
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true, allowBackgroundPlayback: appSettings.backgroundPlay),
-    );
-    vc = c;
     try {
+      await vc?.dispose();
+    } catch (_) {}
+    try {
+      zoom.value = Matrix4.identity();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        ready = false;
+        vc = null;
+      });
+    }
+    VideoPlayerController? c;
+    try {
+      final file = File(item.path);
+      if (!file.existsSync()) {
+        if (mounted) {
+          setState(() => ready = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File not found: ${item.title}')));
+        }
+        return;
+      }
+      c = VideoPlayerController.file(
+        file,
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: appSettings.backgroundPlay,
+        ),
+      );
+      vc = c;
       await c.initialize();
+      if (!mounted || vc != c) {
+        try {
+          await c.dispose();
+        } catch (_) {}
+        return;
+      }
       if (appSettings.resumePlayback) {
         final p = appSettings.resumeMap[item.path] ?? item.progress;
-        if (p > 0 && p < 0.97) {
-          await c.seekTo(c.value.duration * p);
+        final dur = c.value.duration;
+        if (p > 0 && p < 0.97 && dur.inMilliseconds > 0) {
+          await c.seekTo(Duration(milliseconds: (dur.inMilliseconds * p).round()));
         }
       }
       c.addListener(_tick);
@@ -305,16 +334,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _syncPip();
       await _syncBackground();
       await _applySpeed();
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      await AndroidBridge.initEqualizer(0);
-      await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
-      await AndroidBridge.setEqBands(appSettings.eqBands);
-      await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
-      await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+      if (mounted) setState(() => ready = true);
       _armHide();
-      setState(() => ready = true);
+      try {
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        var info = await AndroidBridge.initEqualizer(0);
+        var session = (info?['sessionId'] as num?)?.toInt() ?? 0;
+        if (session == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 420));
+          info = await AndroidBridge.initEqualizer(0);
+        }
+        await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
+        await AndroidBridge.setEqBands(appSettings.eqBands);
+        await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
+        await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+      } catch (_) {}
     } catch (e) {
+      try {
+        await c?.dispose();
+      } catch (_) {}
+      vc = null;
       if (mounted) {
+        setState(() => ready = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open: $e')));
       }
     }
@@ -322,25 +363,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _tick() {
     final c = vc;
-    if (c == null || !c.value.isInitialized) return;
-    final pos = c.value.position.inMilliseconds.toDouble();
-    final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
-    final p = (pos / dur).clamp(0.0, 1.0).toDouble();
-    item.progress = p;
-    appSettings.resumeMap[item.path] = p;
-    if (abA != null && abB != null && pos / 1000 >= abB!) {
-      c.seekTo(Duration(milliseconds: (abA! * 1000).round()));
-    }
-    final playing = c.value.isPlaying;
-    if (playing != _lastPlaying) {
-      _lastPlaying = playing;
-      _syncPip();
-      _syncBackground();
-    }
-    if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
-      _onEnded();
-    }
-    if (mounted) setState(() {});
+    if (c == null || !mounted) return;
+    try {
+      if (!c.value.isInitialized) return;
+      final pos = c.value.position.inMilliseconds.toDouble();
+      final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
+      final p = (pos / dur).clamp(0.0, 1.0).toDouble();
+      item.progress = p;
+      appSettings.resumeMap[item.path] = p;
+      if (abA != null && abB != null && pos / 1000 >= abB!) {
+        c.seekTo(Duration(milliseconds: (abA! * 1000).round()));
+      }
+      final playing = c.value.isPlaying;
+      if (playing != _lastPlaying) {
+        _lastPlaying = playing;
+        _syncPip();
+        _syncBackground();
+      }
+      if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
+        _onEnded();
+      }
+      setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _onEnded() async {
@@ -439,7 +483,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     events?.cancel();
     vc?.removeListener(_tick);
     _persistProgress();
-    final keep = appSettings.backgroundPlay && (vc?.value.isPlaying ?? false);
+    var keep = false;
+    try {
+      keep = appSettings.backgroundPlay && (vc?.value.isPlaying ?? false);
+    } catch (_) {
+      keep = false;
+    }
     if (keep && vc != null) {
       PlaybackSession.keepAlive = true;
       PlaybackSession.controller = vc;
@@ -559,7 +608,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(color: Colors.black, child: ready && c != null ? _video(c, size) : const Center(child: CircularProgressIndicator())),
+            ColoredBox(
+              color: Colors.black,
+              child: () {
+                try {
+                  if (ready && c != null && c.value.isInitialized) {
+                    final w = size.width <= 0 ? 1.0 : size.width;
+                    final h = size.height <= 0 ? 1.0 : size.height;
+                    return _video(c, Size(w, h));
+                  }
+                } catch (_) {}
+                return const Center(child: CircularProgressIndicator());
+              }(),
+            ),
             for (final b in bursts)
               Positioned(
                 left: b.pos.dx - 72,
@@ -634,8 +695,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _video(VideoPlayerController c, Size screen) {
+    try {
+      if (!c.value.isInitialized) {
+        return const SizedBox.expand(child: Center(child: CircularProgressIndicator()));
+      }
+    } catch (_) {
+      return const SizedBox.expand();
+    }
     Widget player = VideoPlayer(c);
     player = _fit(player, c, screen);
+    final w = screen.width <= 0 ? 1.0 : screen.width;
+    final h = screen.height <= 0 ? 1.0 : screen.height;
+    player = SizedBox(width: w, height: h, child: player);
     if (appSettings.allowZoom) {
       player = InteractiveViewer(
         transformationController: zoom,
@@ -674,8 +745,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _fit(Widget child, VideoPlayerController c, Size screen) {
-    final vw = c.value.size.width;
-    final vh = c.value.size.height;
+    var vw = c.value.size.width;
+    var vh = c.value.size.height;
+    if (vw <= 0 || vh <= 0) {
+      vw = screen.width.clamp(1, 10000);
+      vh = screen.height.clamp(1, 10000);
+    }
     switch (aspect) {
       case AspectMode.fit:
         return FittedBox(fit: BoxFit.contain, child: SizedBox(width: vw, height: vh, child: child));

@@ -28,6 +28,20 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<bool> canManageMedia() async {
+    try {
+      return await _ch.invokeMethod<bool>('canManageMedia') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> requestManageMedia() async {
+    try {
+      await _ch.invokeMethod('requestManageMedia');
+    } catch (_) {}
+  }
+
   static Future<List<StorageVolumeInfo>> listStorageVolumes() async {
     try {
       final raw = await _ch.invokeMethod<List<dynamic>>('listStorageVolumes') ?? [];
@@ -62,6 +76,19 @@ class AndroidBridge {
       return await _ch.invokeMethod<bool>('deletePath', {'path': path}) ?? false;
     } catch (_) {
       return false;
+    }
+  }
+
+  static Future<bool> deletePaths(List<String> paths) async {
+    if (paths.isEmpty) return true;
+    try {
+      return await _ch.invokeMethod<bool>('deletePaths', {'paths': paths}) ?? false;
+    } catch (_) {
+      var ok = true;
+      for (final path in paths) {
+        if (!await deletePath(path)) ok = false;
+      }
+      return ok;
     }
   }
 

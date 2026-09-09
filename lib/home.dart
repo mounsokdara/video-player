@@ -270,6 +270,7 @@ class _HomeShellState extends State<HomeShell> {
           selecting: selecting,
           overflow: _overflowItems(),
           onOverflow: _onOverflow,
+          onRefresh: _boot,
         ),
       'settings' => SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow),
       _ => const SizedBox.shrink(),
@@ -283,7 +284,6 @@ class _HomeShellState extends State<HomeShell> {
       const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
       const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
       const PopupMenuItem(value: 'select', child: Text('Select')),
-      const PopupMenuItem(value: 'allfiles', child: Text('Grant all-files access')),
       const PopupMenuItem(value: 'import', child: Text('Import files')),
       const PopupMenuItem(value: 'tabs', child: Text('Visible tabs')),
       for (final id in hidden)
@@ -298,9 +298,6 @@ class _HomeShellState extends State<HomeShell> {
       await _boot();
     } else if (v == 'select') {
       setState(() => selecting = true);
-    } else if (v == 'allfiles') {
-      await library.ensureAllFiles();
-      await _boot();
     } else if (v == 'import') {
       await _import();
     } else if (v == 'tabs') {
@@ -340,6 +337,7 @@ class _HomeShellState extends State<HomeShell> {
             selecting: selecting,
             overflow: _overflowItems(),
             onOverflow: _onOverflow,
+            onRefresh: _boot,
           );
         case 'settings':
           return SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow);
@@ -631,7 +629,12 @@ class VideosHub extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pad = MediaQuery.paddingOf(context);
-    return NestedScrollView(
+    return RefreshIndicator(
+      displacement: 52,
+      strokeWidth: 2.4,
+      notificationPredicate: (n) => n.depth <= 1,
+      onRefresh: onRefresh,
+      child: NestedScrollView(
       headerSliverBuilder: (context, inner) {
         return [
           SliverAppBar(
@@ -689,11 +692,18 @@ class VideosHub extends StatelessWidget {
         ];
       },
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: const [SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))],
+            )
           : items.isEmpty
-              ? _EmptyLibrary(onRefresh: onRefresh, onImport: onImport)
+              ? CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [SliverFillRemaining(hasScrollBody: false, child: _EmptyLibrary(onRefresh: onRefresh, onImport: onImport))],
+                )
               : layout == LayoutMode.list
                   ? ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: EdgeInsets.only(bottom: 24 + pad.bottom),
                       itemCount: items.length,
                       itemBuilder: (_, i) {
@@ -709,6 +719,7 @@ class VideosHub extends StatelessWidget {
                       },
                     )
                   : GridView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: _columns(context),
@@ -729,6 +740,7 @@ class VideosHub extends StatelessWidget {
                         );
                       },
                     ),
+    ),
     );
   }
 }
@@ -799,6 +811,7 @@ class FoldersHub extends StatelessWidget {
     required this.selecting,
     this.overflow = const [],
     this.onOverflow,
+    required this.onRefresh,
   });
 
   final bool loading;
@@ -810,6 +823,7 @@ class FoldersHub extends StatelessWidget {
   final bool selecting;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -818,7 +832,13 @@ class FoldersHub extends StatelessWidget {
     final roots = library.volumes;
     final path = folderPath;
     if (path == null) {
-      return CustomScrollView(
+      return RefreshIndicator(
+        displacement: 52,
+        strokeWidth: 2.4,
+        notificationPredicate: (n) => n.depth <= 1,
+        onRefresh: onRefresh,
+        child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverAppBar(
             pinned: true,
@@ -877,6 +897,7 @@ class FoldersHub extends StatelessWidget {
               ]),
             ),
         ],
+      ),
       );
     }
 
@@ -898,7 +919,12 @@ class FoldersHub extends StatelessWidget {
           title: Text(p.basename(path).isEmpty ? path : p.basename(path)),
         ),
         Expanded(
-          child: ListView.builder(
+          child: RefreshIndicator(
+            displacement: 52,
+            strokeWidth: 2.4,
+            onRefresh: onRefresh,
+            child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: EdgeInsets.only(bottom: pad.bottom + 16),
             itemCount: ents.length,
             itemBuilder: (_, i) {
@@ -953,6 +979,7 @@ class FoldersHub extends StatelessWidget {
                 },
               );
             },
+          ),
           ),
         ),
       ],

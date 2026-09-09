@@ -4,7 +4,7 @@ Material 3 Android video player for local files — internal storage, SD cards, 
 
 **Download APK:** [latest release](https://github.com/mounsokdara/video-player/releases/latest/download/app-release.apk)
 
-Version **1.0.0** (development).
+Version **1.0.0_Indev** (development).
 
 ## Features
 
@@ -24,8 +24,9 @@ Version **1.0.0** (development).
 - Color correction toggle + sliders
 - Always hide navigation bar, or show system bars only while the controller is visible
 - Properties include frame rate
-- Auto-refresh library toggle
+- Auto-refresh library toggle and pull-to-refresh on Videos / Folders
 - Settings persist (equalizer, tabs, resume, zoom, playback)
+- Deletes use `MANAGE_MEDIA` so Android does not show a confirmation sheet
 - Skips plain text and TypeScript files (`.ts` only if it is MPEG-TS)
 - Pop-up / PiP off by default and only while a video is actually playing
 - Wide / large-DPI layout (navigation rail on tablets)
@@ -48,6 +49,7 @@ CI on `main` publishes the APK to GitHub Releases.
 The app requests:
 
 - Read/write media and **all-files** access (`MANAGE_EXTERNAL_STORAGE`)
+- **Media management** (`MANAGE_MEDIA`) so deletes skip the system confirmation sheet
 - USB host (OTG) and removable volumes
 - Notifications / foreground media playback for background play
 - Picture-in-picture and display-over-apps for pop-up play
