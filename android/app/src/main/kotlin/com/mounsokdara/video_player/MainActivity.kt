@@ -8,9 +8,6 @@ import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
-import android.media.audiofx.BassBoost
-import android.media.audiofx.Equalizer
-import android.media.audiofx.Virtualizer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,7 +24,6 @@ import android.view.WindowManager
 import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -39,9 +35,6 @@ import java.util.Locale
 class MainActivity : FlutterActivity() {
     private val channelName = "app.videoplayer/android"
     private val eventName = "app.videoplayer/events"
-    private var equalizer: Equalizer? = null
-    private var bassBoost: BassBoost? = null
-    private var virtualizer: Virtualizer? = null
     private var wantPip = false
     private var isPlaying = false
     private var keepScreenOn = false
@@ -50,16 +43,20 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tenBandHz = intArrayOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
     private var tenBandLevels = IntArray(10)
-    private var eqWanted = false
-    private var bassWanted = false
-    private var surroundWanted = false
-    private var bassStrength = 0
-    private var surroundStrength = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         installCrashHook()
         handleIncoming(intent)
+    }
+
+    override fun onDestroy() {
+        try {
+            File(filesDir, "session_dirty.txt").delete()
+            File(filesDir, "last_action.txt").writeText("idle")
+        } catch (_: Exception) {
+        }
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -188,58 +185,27 @@ class MainActivity : FlutterActivity() {
                         }
                         "isPip" -> result.success(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode)
                         "initEqualizer" -> {
-                            var session = call.argument<Int>("sessionId") ?: 0
-                            if (session == 0) session = currentAudioSession()
-                            breadcrumb("initEqualizer session=$session eq=$eqWanted")
-                            result.success(initAudioFx(session))
+                            // Never attach android.media.audiofx or walk ExoPlayer internals.
+                            // Those paths SIGSEGV on play / equalizer open.
+                            breadcrumb("initEqualizer skipped (ui-only)")
+                            result.success(emptyFx(0))
                         }
                         "setEqBand" -> {
                             val band = call.argument<Int>("band") ?: 0
                             val level = call.argument<Int>("level") ?: 0
                             if (band in 0..9) tenBandLevels[band] = level
-                            applyTenBands()
                             result.success(true)
                         }
                         "setEqBands" -> {
                             val levels = call.argument<List<Int>>("levels") ?: emptyList()
                             for (i in 0 until minOf(10, levels.size)) tenBandLevels[i] = levels[i]
-                            applyTenBands()
                             result.success(true)
                         }
-                        "setEqPreset" -> {
-                            val preset = call.argument<Int>("preset") ?: 0
-                            equalizer?.usePreset(preset.toShort())
-                            result.success(true)
-                        }
-                        "setEqEnabled" -> {
-                            eqWanted = call.argument<Boolean>("on") ?: true
-                            if (eqWanted && equalizer == null) {
-                                val session = currentAudioSession()
-                                if (session != 0) initAudioFx(session)
-                            }
-                            applyFxEnabled()
-                            result.success(true)
-                        }
-                        "setBassBoost" -> {
-                            bassWanted = call.argument<Boolean>("on") ?: false
-                            bassStrength = (call.argument<Int>("strength") ?: 0).coerceIn(0, 1000)
-                            bassBoost?.setStrength(bassStrength.toShort())
-                            applyFxEnabled()
-                            result.success(true)
-                        }
-                        "setVirtualizer" -> {
-                            surroundWanted = call.argument<Boolean>("on") ?: false
-                            surroundStrength = (call.argument<Int>("strength") ?: 0).coerceIn(0, 1000)
-                            virtualizer?.setStrength(surroundStrength.toShort())
-                            applyFxEnabled()
-                            result.success(true)
-                        }
-                        "setPlaybackParams" -> {
-                            val speed = (call.argument<Double>("speed") ?: 1.0).toFloat()
-                            val pitchShift = call.argument<Boolean>("pitchShift") ?: false
-                            applyPlaybackParams(speed, pitchShift)
-                            result.success(true)
-                        }
+                        "setEqPreset" -> result.success(true)
+                        "setEqEnabled" -> result.success(true)
+                        "setBassBoost" -> result.success(true)
+                        "setVirtualizer" -> result.success(true)
+                        "setPlaybackParams" -> result.success(true)
                         "toast" -> {
                             Toast.makeText(this, call.argument<String>("msg") ?: "", Toast.LENGTH_SHORT).show()
                             result.success(true)
@@ -258,7 +224,11 @@ class MainActivity : FlutterActivity() {
                                 putExtra("positionMs", positionMs)
                                 putExtra("durationMs", durationMs)
                             }
-                            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+                            try {
+                                if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+                            } catch (t: Throwable) {
+                                writeCrash("startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
+                            }
                             result.success(true)
                         }
                         "updateBackground" -> {
@@ -293,120 +263,18 @@ class MainActivity : FlutterActivity() {
                             pendingOpen = null
                             result.success(path)
                         }
-                        "lastCrash" -> {
-                            val crash = File(filesDir, "last_crash.txt")
-                            if (!crash.exists()) {
-                                result.success(null)
-                            } else {
-                                val action = File(filesDir, "last_action.txt")
-                                val buf = StringBuilder()
-                                if (action.exists()) buf.append("Last action: ").append(action.readText()).append('\n')
-                                buf.append(crash.readText())
-                                crash.delete()
-                                result.success(buf.toString())
-                            }
-                        }
+                        "lastCrash" -> result.success(readLastCrash())
                         "breadcrumb" -> {
                             breadcrumb(call.argument<String>("action") ?: "")
                             result.success(true)
                         }
                         else -> result.notImplemented()
                     }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    writeCrash("channel ${call.method}: ${e.message}\n${Log.getStackTraceString(e)}")
                     result.error("ERR", e.message, null)
                 }
             }
-    }
-
-    private fun applyFxEnabled() {
-        try {
-            equalizer?.enabled = eqWanted
-        } catch (_: Throwable) {
-        }
-        try {
-            bassBoost?.enabled = eqWanted && bassWanted
-        } catch (_: Throwable) {
-        }
-        try {
-            virtualizer?.enabled = eqWanted && surroundWanted
-        } catch (_: Throwable) {
-        }
-    }
-
-    private fun initAudioFx(session: Int): Map<String, Any> {
-        try {
-            equalizer?.release()
-        } catch (_: Exception) {
-        }
-        try {
-            bassBoost?.release()
-        } catch (_: Exception) {
-        }
-        try {
-            virtualizer?.release()
-        } catch (_: Exception) {
-        }
-        equalizer = null
-        bassBoost = null
-        virtualizer = null
-        if (session == 0) return emptyFx(0)
-        if (!eqWanted && !bassWanted && !surroundWanted) return emptyFx(session)
-        breadcrumb("audiofx construct session=$session")
-        try {
-            if (eqWanted) {
-                equalizer = Equalizer(0, session).apply { enabled = true }
-            }
-        } catch (t: Throwable) {
-            equalizer = null
-            writeCrash("Equalizer: ${t.message}\n${Log.getStackTraceString(t)}")
-        }
-        try {
-            if (bassWanted) {
-                bassBoost = BassBoost(0, session).apply {
-                    setStrength(bassStrength.toShort())
-                    enabled = eqWanted
-                }
-            }
-        } catch (t: Throwable) {
-            bassBoost = null
-            writeCrash("BassBoost: ${t.message}\n${Log.getStackTraceString(t)}")
-        }
-        try {
-            if (surroundWanted) {
-                virtualizer = Virtualizer(0, session).apply {
-                    setStrength(surroundStrength.toShort())
-                    enabled = eqWanted
-                }
-            }
-        } catch (t: Throwable) {
-            virtualizer = null
-            writeCrash("Virtualizer: ${t.message}\n${Log.getStackTraceString(t)}")
-        }
-        try {
-            applyTenBands()
-            applyFxEnabled()
-        } catch (_: Throwable) {
-        }
-        val eq = equalizer ?: return emptyFx(session)
-        return try {
-            val bands = eq.numberOfBands.toInt()
-            val map = HashMap<String, Any>()
-            map["bands"] = 10
-            map["deviceBands"] = bands
-            map["min"] = eq.bandLevelRange[0].toInt()
-            map["max"] = eq.bandLevelRange[1].toInt()
-            map["freqs"] = tenBandHz.toList()
-            map["levels"] = tenBandLevels.toList()
-            map["sessionId"] = session
-            val presets = ArrayList<String>()
-            for (i in 0 until eq.numberOfPresets) {
-                presets.add(eq.getPresetName(i.toShort()))
-            }
-            map["presets"] = presets
-            map
-        } catch (_: Throwable) {
-            emptyFx(session)
-        }
     }
 
     private fun emptyFx(session: Int): Map<String, Any> {
@@ -420,6 +288,39 @@ class MainActivity : FlutterActivity() {
         map["sessionId"] = session
         map["presets"] = emptyList<String>()
         return map
+    }
+
+    private fun readLastCrash(): String? {
+        val crash = File(filesDir, "last_crash.txt")
+        val dirty = File(filesDir, "session_dirty.txt")
+        val actionFile = File(filesDir, "last_action.txt")
+        val hasCrash = crash.exists()
+        val died = dirty.exists()
+        val action = try {
+            if (actionFile.exists()) actionFile.readText() else ""
+        } catch (_: Exception) {
+            ""
+        }
+        val interesting = action.contains("Open video", ignoreCase = true) ||
+            action.contains("Play ", ignoreCase = true) ||
+            action.contains("equalizer", ignoreCase = true) ||
+            action.contains("initEqualizer", ignoreCase = true) ||
+            action.contains("audiofx", ignoreCase = true)
+        val buf = StringBuilder()
+        if (action.isNotBlank()) buf.append("Last action: ").append(action).append('\n')
+        if (hasCrash) {
+            buf.append(crash.readText())
+            crash.delete()
+        } else if (died && interesting) {
+            buf.append("===== PROCESS_DIED =====\nThe app process was killed during the last action (native crash / SIGSEGV). No Java stack trace.\n")
+        }
+        try {
+            dirty.delete()
+            dirty.writeText("running")
+        } catch (_: Exception) {
+        }
+        val out = buf.toString().trim()
+        return if (out.isEmpty() || (!hasCrash && !(died && interesting))) null else out
     }
 
     @Suppress("DEPRECATION")
@@ -508,136 +409,6 @@ class MainActivity : FlutterActivity() {
             }
         }
         return null
-    }
-
-    private fun applyTenBands() {
-        val eq = equalizer ?: return
-        try {
-            val n = eq.numberOfBands.toInt()
-            val min = eq.bandLevelRange[0].toInt()
-            val max = eq.bandLevelRange[1].toInt()
-            for (i in 0 until n) {
-                val freqHz = eq.getCenterFreq(i.toShort()) / 1000
-                val idx = nearestBand(freqHz)
-                val level = tenBandLevels[idx].coerceIn(min, max)
-                eq.setBandLevel(i.toShort(), level.toShort())
-            }
-        } catch (_: Throwable) {
-        }
-    }
-
-    private fun nearestBand(freqHz: Int): Int {
-        var best = 0
-        var bestDiff = Int.MAX_VALUE
-        for (i in tenBandHz.indices) {
-            val d = kotlin.math.abs(tenBandHz[i] - freqHz)
-            if (d < bestDiff) {
-                bestDiff = d
-                best = i
-            }
-        }
-        return best
-    }
-
-    private fun currentAudioSession(): Int {
-        for (exo in collectExoPlayers()) {
-            try {
-                val method = exo.javaClass.methods.firstOrNull { it.name == "getAudioSessionId" } ?: continue
-                val id = method.invoke(exo) as? Int ?: continue
-                if (id != 0) return id
-            } catch (_: Exception) {
-            }
-        }
-        return 0
-    }
-
-    private fun collectExoPlayers(): List<Any> {
-        val out = ArrayList<Any>()
-        val engine = flutterEngine ?: return out
-        try {
-            val pluginClass = Class.forName("io.flutter.plugins.videoplayer.VideoPlayerPlugin")
-            val plugin = engine.plugins.get(pluginClass as Class<out FlutterPlugin>) ?: return out
-            extractPlayers(plugin, out, 0, HashSet())
-        } catch (_: Throwable) {
-        }
-        return out
-    }
-
-    private fun extractPlayers(root: Any, out: MutableList<Any>, depth: Int, seen: MutableSet<Int>) {
-        if (depth > 3) return
-        val id = System.identityHashCode(root)
-        if (!seen.add(id)) return
-        val name = root.javaClass.name
-        if (name.contains("ExoPlayer") && !name.contains("Plugin") && !name.contains("Factory") && !name.contains("Audio")) {
-            out.add(root)
-            return
-        }
-        if (name.startsWith("android.") || name.startsWith("java.") || name.startsWith("kotlin.") ||
-            name.startsWith("dalvik.") || name.startsWith("androidx.media3")
-        ) {
-            return
-        }
-        when (root) {
-            is Map<*, *> -> {
-                for (v in root.values) if (v != null) extractPlayers(v, out, depth + 1, seen)
-                return
-            }
-            is Iterable<*> -> {
-                for (v in root) if (v != null) extractPlayers(v, out, depth + 1, seen)
-                return
-            }
-        }
-        if (name.contains("SparseArray")) {
-            try {
-                val size = ((root.javaClass.methods.firstOrNull { it.name == "size" }?.invoke(root) as? Int) ?: 0).coerceAtMost(8)
-                val valueAt = root.javaClass.methods.firstOrNull { it.name == "valueAt" }
-                for (i in 0 until size) {
-                    val item = valueAt?.invoke(root, i) ?: continue
-                    extractPlayers(item, out, depth + 1, seen)
-                }
-            } catch (_: Throwable) {
-            }
-            return
-        }
-        var cls: Class<*>? = root.javaClass
-        var hops = 0
-        while (cls != null && cls != Any::class.java && hops < 3) {
-            hops++
-            for (field in cls.declaredFields) {
-                try {
-                    field.isAccessible = true
-                    val v = field.get(root) ?: continue
-                    val vn = v.javaClass.name
-                    if (vn.startsWith("android.") || vn.startsWith("java.") || vn.startsWith("kotlin.")) continue
-                    if (vn.startsWith("androidx.media3") && !vn.contains("ExoPlayer")) continue
-                    extractPlayers(v, out, depth + 1, seen)
-                } catch (_: Throwable) {
-                }
-            }
-            cls = cls.superclass
-        }
-    }
-
-    private fun applyPlaybackParams(speed: Float, pitchShift: Boolean) {
-        val pitch = if (pitchShift) speed else 1f
-        val paramsClass = try {
-            Class.forName("androidx.media3.common.PlaybackParameters")
-        } catch (_: Exception) {
-            try {
-                Class.forName("com.google.android.exoplayer2.PlaybackParameters")
-            } catch (_: Exception) {
-                return
-            }
-        }
-        try {
-            val ctor = paramsClass.getConstructor(Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
-            val params = ctor.newInstance(speed, pitch)
-            for (exo in collectExoPlayers()) {
-                val method = exo.javaClass.methods.firstOrNull { it.name == "setPlaybackParameters" } ?: continue
-                method.invoke(exo, params)
-            }
-        } catch (_: Exception) {
-        }
     }
 
     private fun captureFrame(path: String, positionMs: Long, title: String): String? {
@@ -896,14 +667,21 @@ class MainActivity : FlutterActivity() {
 
     private fun scanVideos(dir: File, depth: Int, hidden: Boolean): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
-        if (depth < 0 || !dir.exists() || !dir.canRead()) return out
-        val files = dir.listFiles() ?: return out
+        scanVideosInto(dir, depth, hidden, out, intArrayOf(2500))
+        return out
+    }
+
+    private fun scanVideosInto(dir: File, depth: Int, hidden: Boolean, out: ArrayList<Map<String, Any?>>, budget: IntArray) {
+        if (budget[0] <= 0 || depth < 0 || !dir.exists() || !dir.canRead()) return
+        val files = dir.listFiles() ?: return
         for (f in files) {
+            if (budget[0] <= 0) return
             if (f.isDirectory) {
                 if (shouldSkipDir(f, hidden)) continue
-                out.addAll(scanVideos(f, depth - 1, hidden))
+                scanVideosInto(f, depth - 1, hidden, out, budget)
             } else if (isVideoFile(f)) {
                 if (!hidden && f.name.startsWith(".")) continue
+                budget[0] = budget[0] - 1
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
@@ -915,14 +693,27 @@ class MainActivity : FlutterActivity() {
                 )
             }
         }
-        return out
     }
 
     private fun shouldSkipDir(f: File, hidden: Boolean): Boolean {
         val n = f.name
         if (!hidden && n.startsWith(".")) return true
         val low = n.lowercase()
-        return low == "android" || low == "lost.dir" || low == "thumbnails" || low == ".thumbnails"
+        return low == "android" ||
+            low == "lost.dir" ||
+            low == "thumbnails" ||
+            low == ".thumbnails" ||
+            low == "obb" ||
+            low == "data" ||
+            low == "cache" ||
+            low == "code_cache" ||
+            low == "no_backup" ||
+            low == "node_modules" ||
+            low == ".git" ||
+            low == ".trashed" ||
+            low == "alarms" ||
+            low == "ringtones" ||
+            low == "notifications"
     }
 
     companion object {

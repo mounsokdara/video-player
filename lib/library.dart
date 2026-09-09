@@ -74,49 +74,53 @@ class LibraryService {
       ..clear()
       ..addAll(await AndroidBridge.listStorageVolumes());
 
-    if (!allFiles) {
-      try {
-        final paths = await PhotoManager.getAssetPathList(
-          type: RequestType.video,
-          hasAll: true,
-          onlyAll: true,
-        );
-        for (final album in paths) {
-          final count = await album.assetCountAsync;
-          for (var start = 0; start < count; start += 120) {
-            final end = (start + 120).clamp(0, count);
-            final assets = await album.getAssetListRange(start: start, end: end);
-            for (final a in assets) {
-              final path = _assetPath(a);
-              if (path == null || path.isEmpty || seen.contains(path)) continue;
-              if (!looksLikeVideo(path, mime: a.mimeType)) continue;
-              if (!hidden && _isHiddenPath(path)) continue;
-              seen.add(path);
-              next.add(
-                VideoItem(
-                  id: a.id,
-                  path: path,
-                  title: p.basename(path),
-                  folder: p.dirname(path),
-                  size: 0,
-                  modified: a.modifiedDateTime,
-                  created: a.createDateTime,
-                  duration: a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
-                  width: a.width,
-                  height: a.height,
-                  mime: a.mimeType,
-                  assetId: a.id,
-                  progress: settings.resumeMap[path] ?? 0,
-                  bookmarked: settings.bookmarks.contains(path),
-                ),
-              );
-            }
+    // MediaStore is indexed and fast. Native walks only removable volumes so
+    // pull-to-refresh does not crawl the whole internal disk.
+    try {
+      final paths = await PhotoManager.getAssetPathList(
+        type: RequestType.video,
+        hasAll: true,
+        onlyAll: true,
+      );
+      for (final album in paths) {
+        final count = await album.assetCountAsync;
+        for (var start = 0; start < count; start += 120) {
+          final end = (start + 120).clamp(0, count);
+          final assets = await album.getAssetListRange(start: start, end: end);
+          for (final a in assets) {
+            final path = _assetPath(a);
+            if (path == null || path.isEmpty || seen.contains(path)) continue;
+            if (!looksLikeVideo(path, mime: a.mimeType)) continue;
+            if (!hidden && _isHiddenPath(path)) continue;
+            seen.add(path);
+            next.add(
+              VideoItem(
+                id: a.id,
+                path: path,
+                title: p.basename(path),
+                folder: p.dirname(path),
+                size: 0,
+                modified: a.modifiedDateTime,
+                created: a.createDateTime,
+                duration: a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
+                width: a.width,
+                height: a.height,
+                mime: a.mimeType,
+                assetId: a.id,
+                progress: settings.resumeMap[path] ?? 0,
+                bookmarked: settings.bookmarks.contains(path),
+              ),
+            );
           }
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
-    for (final vol in volumes) {
+    final nativeTargets = <StorageVolumeInfo>[
+      ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
+      if (next.isEmpty) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
+    ];
+    for (final vol in nativeTargets) {
       if (vol.path.isEmpty) continue;
       final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: hidden);
       for (final m in extra) {
@@ -151,7 +155,7 @@ class LibraryService {
   String? _assetPath(AssetEntity a) {
     final title = a.title;
     final rel = a.relativePath;
-    if (title.isEmpty || rel == null || rel.isEmpty) return null;
+    if (title == null || title.isEmpty || rel == null || rel.isEmpty) return null;
     final prefix = rel.startsWith('/') ? rel : '/storage/emulated/0/$rel';
     final base = prefix.endsWith('/') ? prefix : '$prefix/';
     return '$base$title';

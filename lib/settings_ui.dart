@@ -3,7 +3,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'android_bridge.dart';
 import 'crash.dart';
 import 'main.dart';
 import 'models.dart';
@@ -542,15 +541,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
 
   Future<void> _push() async {
     try {
-      if (!appSettings.eqEnabled) {
-        await AndroidBridge.setEqEnabled(false);
-        return;
-      }
-      await AndroidBridge.initEqualizer(0);
-      await AndroidBridge.setEqEnabled(true);
-      await AndroidBridge.setEqBands(appSettings.eqBands);
-      await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
-      await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+      await appSettings.save();
     } catch (e, s) {
       CrashLog.record('EQ', '$e', s);
     }
@@ -634,7 +625,6 @@ class _EqualizerPageState extends State<EqualizerPage> {
                                         s.eqBands[i] = (v * 100).round();
                                         s.eqPreset = 'Custom';
                                       });
-                                      await AndroidBridge.setEqBand(i, s.eqBands[i]);
                                     }
                                   : null,
                               onChangeEnd: (_) => s.save(),
@@ -672,7 +662,6 @@ class _EqualizerPageState extends State<EqualizerPage> {
             onChanged: s.bassBoostOn
                 ? (v) async {
                     setState(() => s.bassBoost = v.round());
-                    await AndroidBridge.setBassBoost(on: true, strength: s.bassBoost);
                   }
                 : null,
             onChangeEnd: (_) => s.save(),
@@ -695,7 +684,6 @@ class _EqualizerPageState extends State<EqualizerPage> {
             onChanged: s.surroundOn
                 ? (v) async {
                     setState(() => s.surround = v.round());
-                    await AndroidBridge.setSurround(on: true, strength: s.surround);
                   }
                 : null,
             onChangeEnd: (_) => s.save(),

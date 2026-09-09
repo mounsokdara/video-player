@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,18 +18,22 @@ final library = LibraryService(appSettings);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterError.onError = (details) {
-    CrashLog.record('FLUTTER', details.exceptionAsString(), details.stack);
-    FlutterError.presentError(details);
-  };
-  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
-    CrashLog.record('PLATFORM', '$error', stack);
-    return true;
-  };
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  await appSettings.load();
-  await CrashLog.install();
-  runApp(const VideoPlayerApp());
+  await runZonedGuarded(() async {
+    FlutterError.onError = (details) {
+      CrashLog.record('FLUTTER', details.exceptionAsString(), details.stack);
+      FlutterError.presentError(details);
+    };
+    WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+      CrashLog.record('PLATFORM', '$error', stack);
+      return true;
+    };
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    await appSettings.load();
+    await CrashLog.install();
+    runApp(const VideoPlayerApp());
+  }, (error, stack) {
+    CrashLog.record('ZONE', '$error', stack);
+  });
 }
 
 class VideoPlayerApp extends StatefulWidget {

@@ -191,19 +191,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     await AndroidBridge.setPipEnabled(false);
     _applySystemUi();
     _applyRotation();
-    try {
-      brightness = await ScreenBrightness().application;
-    } catch (_) {}
-    try {
-      VolumeController.instance.showSystemUI = false;
-      volume = await VolumeController.instance.getVolume();
-    } catch (_) {}
-    if (appSettings.rememberBrightness && appSettings.brightness >= 0) {
-      brightness = appSettings.brightness;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        await ScreenBrightness().setApplicationScreenBrightness(brightness);
+        brightness = await ScreenBrightness().application;
+        if (appSettings.rememberBrightness && appSettings.brightness >= 0) {
+          brightness = appSettings.brightness;
+          await ScreenBrightness().setApplicationScreenBrightness(brightness);
+        }
       } catch (_) {}
-    }
+      try {
+        VolumeController.instance.showSystemUI = false;
+        volume = await VolumeController.instance.getVolume();
+      } catch (_) {}
+      if (mounted) setState(() {});
+    });
     await _openCurrent();
   }
 
@@ -300,21 +301,27 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     VideoPlayerController? c;
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
-      final file = File(item.path);
-      if (!file.existsSync()) {
-        if (mounted) {
-          setState(() => ready = false);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File not found: ${item.title}')));
-        }
-        return;
-      }
-      c = VideoPlayerController.file(
-        file,
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: true,
-          allowBackgroundPlayback: appSettings.backgroundPlay,
-        ),
+      final opts = VideoPlayerOptions(
+        mixWithOthers: true,
+        allowBackgroundPlayback: appSettings.backgroundPlay,
       );
+      if (item.path.startsWith('content:')) {
+        c = VideoPlayerController.contentUri(Uri.parse(item.path), videoPlayerOptions: opts);
+      } else {
+        final file = File(item.path);
+        var exists = false;
+        try {
+          exists = file.existsSync();
+        } catch (_) {}
+        if (!exists) {
+          if (mounted) {
+            setState(() => ready = false);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File not found: ${item.title}')));
+          }
+          return;
+        }
+        c = VideoPlayerController.file(file, videoPlayerOptions: opts);
+      }
       vc = c;
       await c.initialize();
       await CrashLog.breadcrumb('Initialized ${item.title}');
@@ -333,6 +340,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
       c.addListener(_tick);
       c.setLooping(appSettings.playMode == PlayMode.repeatOne);
+      if (c.value.hasError) {
+        throw StateError(c.value.errorDescription ?? 'Player failed to start');
+      }
       await c.play();
       _lastPlaying = true;
       _syncPip();
@@ -340,18 +350,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       await _applySpeed();
       if (mounted) setState(() => ready = true);
       _armHide();
-      if (appSettings.eqEnabled) {
-        try {
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-          await AndroidBridge.initEqualizer(0);
-          await AndroidBridge.setEqEnabled(true);
-          await AndroidBridge.setEqBands(appSettings.eqBands);
-          await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
-          await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
-        } catch (e, s) {
-          CrashLog.record('EQ', '$e', s);
-        }
-      }
     } catch (e, s) {
       CrashLog.record('PLAY', '$e', s);
       try {
@@ -756,9 +754,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Widget _fit(Widget child, VideoPlayerController c, Size screen) {
     var vw = c.value.size.width;
     var vh = c.value.size.height;
-    if (vw <= 0 || vh <= 0) {
+    if (vw <= 1 || vh <= 1) {
       vw = screen.width.clamp(1, 10000);
       vh = screen.height.clamp(1, 10000);
+    }
+    if (screen.width < 2 || screen.height < 2) {
+      return child;
     }
     switch (aspect) {
       case AspectMode.fit:
@@ -824,10 +825,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     onPressed: () async {
                       try {
                         appSettings.eqEnabled = !appSettings.eqEnabled;
-                        if (appSettings.eqEnabled) {
-                          await AndroidBridge.initEqualizer(0);
-                        }
-                        await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
                         await appSettings.save();
                         if (mounted) setState(() {});
                         _flash(appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off');
