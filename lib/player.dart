@@ -6,7 +6,6 @@ import 'dart:ui' as ui;
 
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
@@ -111,8 +110,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Uint8List? _previewBytes;
   Timer? _previewDebounce;
   int _playerGen = 0;
-  final _shotKey = GlobalKey();
   double? _systemBrightness;
+  Offset _zoomPan = Offset.zero;
+  Offset _pinchStartFocal = Offset.zero;
+  Offset _pinchBasePan = Offset.zero;
+  bool _pinching = false;
+  bool _showZoomHud = false;
+  Timer? _zoomHudTimer;
+  DateTime? _tapAt;
+  Offset? _tapPos;
+  DateTime _lastBg = DateTime.fromMillisecondsSinceEpoch(0);
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -171,9 +178,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           case 'pause':
             vc?.pause();
           case 'next':
-            _next();
+            unawaited(_next());
           case 'prev':
-            _prev();
+            unawaited(_prev());
+          case 'seek':
+            final ms = e['positionMs'];
+            if (ms is num) unawaited(vc?.seekTo(Duration(milliseconds: ms.round())) ?? Future<void>.value());
         }
       }
     });
@@ -306,6 +316,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scrub = null;
     _previewBytes = null;
     _zoomScale = 1;
+    _zoomPan = Offset.zero;
+    _pinching = false;
+    _showZoomHud = false;
     _pts.clear();
     if (mounted) setState(() {});
     await WidgetsBinding.instance.endOfFrame;
@@ -390,15 +403,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         c.seekTo(Duration(milliseconds: (abA! * 1000).round()));
       }
       final playing = c.value.isPlaying;
+      final nowTick = DateTime.now();
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
-        _syncBackground();
+        unawaited(_syncBackground());
+      }
+      if (appSettings.backgroundPlay && nowTick.difference(_lastBg) >= const Duration(milliseconds: 800)) {
+        _lastBg = nowTick;
+        unawaited(_syncBackground());
       }
       if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
         _onEnded();
       }
-      final nowTick = DateTime.now();
       if (nowTick.difference(_lastUi) >= const Duration(milliseconds: 120)) {
         _lastUi = nowTick;
         setState(() {});
@@ -503,6 +520,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     sleepTimer?.cancel();
     events?.cancel();
     _previewDebounce?.cancel();
+    _zoomHudTimer?.cancel();
     vc?.removeListener(_tick);
     _persistProgress();
     var keep = false;
@@ -548,139 +566,107 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
       body: Listener(
-        onPointerDown: (e) {
-          _pts[e.pointer] = e.localPosition;
-          if (_pts.length == 2 && appSettings.allowZoom) {
-            _pinchStart = (_pts.values.first - _pts.values.last).distance;
-            _pinchBase = _zoomScale;
-          }
-        },
-        onPointerMove: (e) {
-          _pts[e.pointer] = e.localPosition;
-          if (_pts.length >= 2 && appSettings.allowZoom) {
-            final dist = (_pts.values.first - _pts.values.last).distance;
-            if (_pinchStart > 12) {
-              final next = (_pinchBase * dist / _pinchStart).clamp(1.0, 5.0);
-              if ((next - _zoomScale).abs() > 0.01) {
-                setState(() => _zoomScale = next);
-              }
-            }
-          }
-        },
-        onPointerUp: (e) => _pts.remove(e.pointer),
-        onPointerCancel: (e) => _pts.remove(e.pointer),
-        child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          if (locked) return;
-          _setUi(!showUi);
-        },
-        onDoubleTapDown: (d) {
-          if (locked) return;
-          if (_inChrome(d.localPosition, size)) return;
-          final x = d.localPosition.dx;
-          if (x < size.width * 0.28 && appSettings.doubleTapSeek) {
-            _ripple(d.localPosition, '-${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_left);
-            _seekBy(-appSettings.seekStepSeconds);
-          } else if (x > size.width * 0.72 && appSettings.doubleTapSeek) {
-            _ripple(d.localPosition, '+${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_right);
-            _seekBy(appSettings.seekStepSeconds);
-          } else if (!_inCenterDead(d.localPosition, size)) {
-            final playing = vc?.value.isPlaying ?? false;
-            _ripple(d.localPosition, playing ? 'Paused' : 'Playing', playing ? Icons.pause : Icons.play_arrow);
-            _togglePlay();
-          }
-        },
-        onLongPressStart: (_) async {
-          if (locked || !appSettings.longPress2x || c == null) return;
-          if (_pts.length >= 2) return;
-          speeding = true;
-          unawaited(_applySpeed());
-          if (appSettings.longPressVibration) {
-            try {
-              if (await Vibration.hasVibrator()) Vibration.vibrate(duration: 20);
-            } catch (_) {}
-          }
-          setState(() {});
-        },
-        onLongPressEnd: (_) async {
-          if (!speeding) return;
-          speeding = false;
-          unawaited(_applySpeed());
-          setState(() {});
-        },
-        onPanStart: (d) {
-          if (locked || !appSettings.gestureControl) return;
-          if (_pts.length >= 2) return;
-          if (_inChrome(d.localPosition, size)) return;
-          panStart = d.localPosition;
-          panKind = '';
-        },
-        onPanUpdate: (d) {
-          if (locked || !appSettings.gestureControl || panStart == null || c == null) return;
-          if (_pts.length >= 2) return;
-          final dx = d.localPosition.dx - panStart!.dx;
-          final dy = d.localPosition.dy - panStart!.dy;
-          if (panKind.isEmpty) {
-            if (dx.abs() > 24 && dx.abs() > dy.abs()) {
-              panKind = 'seek';
-              panBase = c.value.position.inMilliseconds.toDouble();
-            } else if (dy.abs() > 24) {
-              panKind = panStart!.dx < size.width / 2 ? 'brightness' : 'volume';
-              panBase = panKind == 'brightness' ? brightness : volume;
-            } else {
-              return;
-            }
-          }
-          if (panKind == 'seek') {
-            final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
-            final delta = (dx / size.width) * dur * 0.6;
-            final next = (panBase + delta).clamp(0, dur);
-            setState(() => _scrub = next / dur);
-            _queuePreview((next / dur).toDouble());
-            _flash(formatDuration(Duration(milliseconds: next.round())));
-          } else if (panKind == 'brightness') {
-            brightness = (panBase - dy / size.height).clamp(0.0, 1.0);
-            unawaited(ScreenBrightness().setApplicationScreenBrightness(brightness));
-            if (appSettings.rememberBrightness) {
-              appSettings.brightness = brightness;
-            }
-            _flash('Brightness ${(brightness * 100).round()}%');
-            setState(() {});
-          } else if (panKind == 'volume') {
-            volume = (panBase - dy / size.height).clamp(0.0, 1.0);
-            try {
-              VolumeController.instance.setVolume(volume);
-            } catch (_) {}
-            _flash('Volume ${(volume * 100).round()}%');
-            setState(() {});
-          }
-        },
-        onPanEnd: (_) async {
-          if (panKind == 'seek' && _scrub != null && c != null) {
-            final dur = c.value.duration.inMilliseconds;
-            await c.seekTo(Duration(milliseconds: (_scrub! * dur).round()));
-          }
-          panKind = '';
-          _scrub = null;
-          _previewBytes = null;
-          if (mounted) setState(() {});
-        },
+        onPointerDown: (e) => _pinchDown(e, size),
+        onPointerMove: (e) => _pinchMove(e, size),
+        onPointerUp: (e) => _pinchUp(e.pointer),
+        onPointerCancel: (e) => _pinchUp(e.pointer),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(
-              color: Colors.black,
-              child: () {
-                try {
-                  if (ready && c != null && c.value.isInitialized) {
-                    final w = size.width <= 0 ? 1.0 : size.width;
-                    final h = size.height <= 0 ? 1.0 : size.height;
-                    return _video(c, Size(w, h));
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (d) => _tapPos = d.localPosition,
+              onTap: () {
+                if (locked || _pts.length >= 2 || _pinching) return;
+                _onVideoTap(_tapPos ?? Offset.zero, size);
+              },
+              onLongPressStart: (_) async {
+                if (locked || !appSettings.longPress2x || c == null) return;
+                if (_pts.length >= 2 || _pinching) return;
+                speeding = true;
+                unawaited(_applySpeed());
+                if (appSettings.longPressVibration) {
+                  try {
+                    if (await Vibration.hasVibrator()) Vibration.vibrate(duration: 20);
+                  } catch (_) {}
+                }
+                setState(() {});
+              },
+              onLongPressEnd: (_) async {
+                if (!speeding) return;
+                speeding = false;
+                unawaited(_applySpeed());
+                setState(() {});
+              },
+              onPanStart: (d) {
+                if (locked || !appSettings.gestureControl) return;
+                if (_pts.length >= 2 || _pinching) return;
+                panStart = d.localPosition;
+                panKind = '';
+              },
+              onPanUpdate: (d) {
+                if (locked || !appSettings.gestureControl || panStart == null || c == null) return;
+                if (_pts.length >= 2 || _pinching) return;
+                final dx = d.localPosition.dx - panStart!.dx;
+                final dy = d.localPosition.dy - panStart!.dy;
+                if (panKind.isEmpty) {
+                  if (dx.abs() > 24 && dx.abs() > dy.abs()) {
+                    panKind = 'seek';
+                    panBase = c.value.position.inMilliseconds.toDouble();
+                  } else if (dy.abs() > 24) {
+                    panKind = panStart!.dx < size.width / 2 ? 'brightness' : 'volume';
+                    panBase = panKind == 'brightness' ? brightness : volume;
+                  } else {
+                    return;
                   }
-                } catch (_) {}
-                return const Center(child: CircularProgressIndicator());
-              }(),
+                }
+                if (panKind == 'seek') {
+                  final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
+                  final delta = (dx / size.width) * dur * 0.6;
+                  final next = (panBase + delta).clamp(0, dur);
+                  setState(() => _scrub = next / dur);
+                  _queuePreview((next / dur).toDouble());
+                  _flash(formatDuration(Duration(milliseconds: next.round())));
+                } else if (panKind == 'brightness') {
+                  brightness = (panBase - dy / size.height).clamp(0.0, 1.0);
+                  unawaited(ScreenBrightness().setApplicationScreenBrightness(brightness));
+                  if (appSettings.rememberBrightness) {
+                    appSettings.brightness = brightness;
+                  }
+                  _flash('Brightness ${(brightness * 100).round()}%');
+                  setState(() {});
+                } else if (panKind == 'volume') {
+                  volume = (panBase - dy / size.height).clamp(0.0, 1.0);
+                  try {
+                    VolumeController.instance.setVolume(volume);
+                  } catch (_) {}
+                  _flash('Volume ${(volume * 100).round()}%');
+                  setState(() {});
+                }
+              },
+              onPanEnd: (_) async {
+                if (panKind == 'seek' && _scrub != null && c != null) {
+                  final dur = c.value.duration.inMilliseconds;
+                  unawaited(c.seekTo(Duration(milliseconds: (_scrub! * dur).round())));
+                }
+                panKind = '';
+                _scrub = null;
+                _previewBytes = null;
+                if (mounted) setState(() {});
+              },
+              child: ColoredBox(
+                color: Colors.black,
+                child: () {
+                  try {
+                    if (ready && c != null && c.value.isInitialized) {
+                      final w = size.width <= 0 ? 1.0 : size.width;
+                      final h = size.height <= 0 ? 1.0 : size.height;
+                      return _video(c, Size(w, h));
+                    }
+                  } catch (_) {}
+                  return const Center(child: CircularProgressIndicator());
+                }(),
+              ),
             ),
             for (final b in bursts)
               Positioned(
@@ -717,19 +703,31 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ),
               ),
             if (speeding)
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.72), borderRadius: BorderRadius.circular(999)),
-                  child: const Text('2.0×', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+              const IgnorePointer(
+                child: Center(
+                  child: _HudChip(child: Text('2.0×', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 0.4))),
                 ),
               ),
             if (overlay.isNotEmpty && !speeding)
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                  child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+              IgnorePointer(
+                child: Center(
+                  child: _HudChip(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                ),
+              ),
+            if (_showZoomHud || _pinching || _zoomScale > 1.01)
+              Positioned(
+                top: pad.top + 56,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: _HudChip(
+                      child: Text(
+                        '${(_zoomScale * 100).round()}%',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             if (locked)
@@ -749,10 +747,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ),
               ),
             if (showUi && !locked) ..._chrome(c, size),
+            if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
             if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
               Positioned(
-                left: (size.width * _scrub!).clamp(16, size.width - 156) - 0,
-                bottom: 118 + pad.bottom,
+                left: (size.width * _scrub!).clamp(16, size.width - 156),
+                bottom: (showUi && !locked ? 118 : 88) + pad.bottom,
                 child: IgnorePointer(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
@@ -763,12 +762,128 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           ],
         ),
       ),
-      ),
     );
   }
 
-  bool _inChrome(Offset p, Size size) {
-    return p.dy < 92 || p.dy > size.height - 128;
+  void _pinchDown(PointerDownEvent e, Size size) {
+    _pts[e.pointer] = e.localPosition;
+    if (_pts.length == 2 && appSettings.allowZoom) {
+      final pts = _pts.values.toList();
+      _pinchStart = (pts[0] - pts[1]).distance;
+      _pinchBase = _zoomScale;
+      _pinchBasePan = _zoomPan;
+      _pinchStartFocal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
+      _pinching = true;
+      _showZoomHud = true;
+      _zoomHudTimer?.cancel();
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _pinchMove(PointerMoveEvent e, Size size) {
+    _pts[e.pointer] = e.localPosition;
+    if (_pts.length < 2 || !appSettings.allowZoom) return;
+    final pts = _pts.values.toList();
+    final dist = (pts[0] - pts[1]).distance;
+    final focal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
+    if (_pinchStart <= 12) {
+      _pinchStart = dist;
+      _pinchBase = _zoomScale;
+      _pinchBasePan = _zoomPan;
+      _pinchStartFocal = focal;
+      return;
+    }
+    final nextScale = (_pinchBase * dist / _pinchStart).clamp(1.0, 6.0);
+    final center = Offset(size.width / 2, size.height / 2);
+    Offset nextPan;
+    if (nextScale <= 1.001) {
+      nextPan = Offset.zero;
+    } else {
+      final content = (_pinchStartFocal - center - _pinchBasePan) / _pinchBase;
+      nextPan = focal - center - content * nextScale;
+      final maxX = (nextScale - 1) * size.width / 2 + 48;
+      final maxY = (nextScale - 1) * size.height / 2 + 48;
+      nextPan = Offset(nextPan.dx.clamp(-maxX, maxX), nextPan.dy.clamp(-maxY, maxY));
+    }
+    if ((nextScale - _zoomScale).abs() > 0.004 || (nextPan - _zoomPan).distance > 0.5) {
+      setState(() {
+        _zoomScale = nextScale <= 1.001 ? 1 : nextScale;
+        _zoomPan = nextPan;
+        _pinching = true;
+        _showZoomHud = true;
+      });
+    }
+  }
+
+  void _pinchUp(int pointer) {
+    _pts.remove(pointer);
+    if (_pts.length < 2 && _pinching) {
+      _pinching = false;
+      if (_zoomScale <= 1.001) {
+        _zoomScale = 1;
+        _zoomPan = Offset.zero;
+      }
+      _zoomHudTimer?.cancel();
+      _zoomHudTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _showZoomHud = false);
+      });
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _onVideoTap(Offset pos, Size size) {
+    final now = DateTime.now();
+    final isDouble = _tapAt != null &&
+        now.difference(_tapAt!) < const Duration(milliseconds: 280) &&
+        _tapPos != null &&
+        (pos - _tapPos!).distance < 64;
+    _tapAt = now;
+    _tapPos = pos;
+    if (isDouble) {
+      if (pos.dx < size.width * 0.28 && appSettings.doubleTapSeek) {
+        _ripple(pos, '-${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_left);
+        unawaited(_seekBy(-appSettings.seekStepSeconds));
+      } else if (pos.dx > size.width * 0.72 && appSettings.doubleTapSeek) {
+        _ripple(pos, '+${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_right);
+        unawaited(_seekBy(appSettings.seekStepSeconds));
+      } else if (!_inCenterDead(pos, size)) {
+        final playing = vc?.value.isPlaying ?? false;
+        _ripple(pos, playing ? 'Paused' : 'Playing', playing ? Icons.pause : Icons.play_arrow);
+        _togglePlay();
+      }
+      return;
+    }
+    _setUi(!showUi);
+  }
+
+  Widget _seekHud(VideoPlayerController? c, EdgeInsets pad) {
+    final pos = c?.value.position ?? Duration.zero;
+    final dur = c?.value.duration ?? Duration.zero;
+    final frac = dur.inMilliseconds == 0 ? 0.0 : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0));
+    final shown = Duration(milliseconds: (frac * dur.inMilliseconds).round());
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 28 + pad.bottom,
+      child: IgnorePointer(
+        child: Material(
+          color: Colors.black.withValues(alpha: 0.62),
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            child: Row(
+              children: [
+                Text(_stamp(shown), style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 12)),
+                Expanded(
+                  child: Slider(value: frac, onChanged: null),
+                ),
+                Text(_stamp(dur), style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   bool _inCenterDead(Offset p, Size size) {
@@ -798,13 +913,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return const SizedBox.expand();
     }
     Widget player = VideoPlayer(key: ValueKey(_playerGen), c);
-    player = RepaintBoundary(key: _shotKey, child: player);
     player = _fit(player, c, screen);
     final w = screen.width <= 0 ? 1.0 : screen.width;
     final h = screen.height <= 0 ? 1.0 : screen.height;
     player = SizedBox(width: w, height: h, child: player);
-    if (_zoomScale > 1.001) {
-      player = Transform.scale(scale: _zoomScale, child: player);
+    if (_zoomScale > 1.001 || _zoomPan != Offset.zero) {
+      player = Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..translate(_zoomPan.dx, _zoomPan.dy)
+          ..scale(_zoomScale),
+        child: player,
+      );
     }
     if (mirror) player = Transform.flip(flipX: true, child: player);
     final filters = <ColorFilter>[];
@@ -1000,48 +1120,54 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               ),
               SizedBox(
                 height: playSize + 12,
-                child: Stack(
-                  alignment: Alignment.center,
+                child: Row(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: () => _seekBy(-appSettings.seekStepSeconds),
-                          icon: Icon(Icons.keyboard_double_arrow_left, color: Colors.white, size: iconSize),
-                        ),
-                        IconButton(
-                          onPressed: _togglePlay,
-                          icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
-                        ),
-                        IconButton(
-                          onPressed: () => _seekBy(appSettings.seekStepSeconds),
-                          icon: Icon(Icons.keyboard_double_arrow_right, color: Colors.white, size: iconSize),
-                        ),
-                      ],
-                    ),
-                    Positioned(
-                      right: 0,
+                    Expanded(
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           IconButton(
-                            onPressed: () {
-                              setState(() {
-                                locked = true;
-                                showUi = false;
-                              });
-                              _applySystemUi();
-                            },
-                            icon: const Icon(Icons.lock_outline, color: Colors.white),
-                            tooltip: 'Lock',
+                            tooltip: 'Previous',
+                            onPressed: () => unawaited(_prev()),
+                            icon: Icon(Icons.skip_previous, color: Colors.white, size: iconSize),
                           ),
                           IconButton(
-                            onPressed: _aspectSheet,
-                            icon: const Icon(Icons.aspect_ratio, color: Colors.white),
-                            tooltip: 'Screen mode',
+                            tooltip: 'Seek back',
+                            onPressed: () => unawaited(_seekBy(-appSettings.seekStepSeconds)),
+                            icon: Icon(Icons.keyboard_double_arrow_left, color: Colors.white, size: iconSize),
+                          ),
+                          IconButton(
+                            onPressed: _togglePlay,
+                            icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
+                          ),
+                          IconButton(
+                            tooltip: 'Seek forward',
+                            onPressed: () => unawaited(_seekBy(appSettings.seekStepSeconds)),
+                            icon: Icon(Icons.keyboard_double_arrow_right, color: Colors.white, size: iconSize),
+                          ),
+                          IconButton(
+                            tooltip: 'Next',
+                            onPressed: () => unawaited(_next()),
+                            icon: Icon(Icons.skip_next, color: Colors.white, size: iconSize),
                           ),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        setState(() {
+                          locked = true;
+                          showUi = false;
+                        });
+                        _applySystemUi();
+                      },
+                      icon: const Icon(Icons.lock_outline, color: Colors.white),
+                      tooltip: 'Lock',
+                    ),
+                    IconButton(
+                      onPressed: _aspectSheet,
+                      icon: const Icon(Icons.aspect_ratio, color: Colors.white),
+                      tooltip: 'Screen mode',
                     ),
                   ],
                 ),
@@ -1176,7 +1302,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await appSettings.save();
         _flash('${appSettings.decoder.name.toUpperCase()} decoder');
       case 'screenshot':
-        await _screenshot();
+        _screenshot();
+      case 'quickbar':
+        if (mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: () { if (mounted) setState(() {}); })),
+          );
+        }
       case 'share':
         await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
       case 'properties':
@@ -1382,6 +1515,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom + 16),
               children: [
                 const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+                ListTile(
+                  leading: const Icon(Icons.dashboard_customize_outlined),
+                  title: const Text('Organize quick actions'),
+                  subtitle: const Text('Drag to reorder, check to show on the bar'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    if (!mounted) return;
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: () { if (mounted) setState(() {}); })),
+                    );
+                  },
+                ),
                 head('Playback'),
                 go(Icons.lock_outline, 'Lock', 'lock'),
                 go(Icons.aspect_ratio, 'Screen mode', 'aspect'),
@@ -1816,24 +1962,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _screenshot() async {
-    try {
-      final boundary = _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary != null) {
-        final img = await boundary.toImage(pixelRatio: 2);
-        final bd = await img.toByteData(format: ui.ImageByteFormat.png);
-        img.dispose();
-        if (bd != null) {
-          final saved = await AndroidBridge.saveScreenshotBytes(bd.buffer.asUint8List(), title: item.title);
-          if (saved != null) {
-            _flash('Saved to DCIM/Screenshots');
-            await AndroidBridge.toast('Saved to DCIM/Screenshots');
-            return;
-          }
-        }
+  void _screenshot() {
+    _flash('Saving');
+    unawaited(() async {
+      final saved = await AndroidBridge.screenshotWindow(title: item.title);
+      if (!mounted) return;
+      if (saved != null) {
+        _flash('Saved to DCIM/Screenshots');
+        unawaited(AndroidBridge.toast('Saved to DCIM/Screenshots'));
+      } else {
+        _flash('Could not capture frame');
       }
-    } catch (_) {}
-    _flash('Could not capture frame');
+    }());
   }
 }
 
@@ -1880,4 +2020,18 @@ List<double> _cs(double c, double s) {
     c * sr, c * sg, c * (sb + s), 0, t,
     0, 0, 0, 1, 0,
   ];
+}
+
+class _HudChip extends StatelessWidget {
+  const _HudChip({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.72), borderRadius: BorderRadius.circular(12)),
+      child: child,
+    );
+  }
 }

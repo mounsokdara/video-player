@@ -27,7 +27,7 @@ class CrashLog {
     }
     if (reports.isEmpty) {
       buf.writeln('No crash captured in this session.');
-      buf.writeln('If the app closed by itself, copy this screen anyway — the last action is the clue.');
+      buf.writeln('If the app closed by itself, copy this screen anyway - the last action is the clue.');
       return buf.toString();
     }
     for (final r in reports) {

@@ -7,14 +7,14 @@ This app under development it's may have alot bugs
 ## Features
 
 - Library of all videos on the device (Videos / Folders / Settings)
-- Hide individual library tabs; hidden ones move to the 3-dot menu (keep at least one)
+- Hide individual library tabs from Settings > General; hidden ones stay reachable from the Videos / Folders 3-dot menu
 - Gesture playback: seek, brightness, volume, double-tap ripples (paused / playing / skip), 2× long-press with a persistent badge
-- Pinch-to-zoom inside the picture (on by default)
-- Previous / play / next stay centered; lock and screen mode sit to the right
+- Pinch-to-zoom around your fingers, two-finger pan, and a live zoom percent
+- Previous and next sit around skip-back / play / skip-forward; lock and screen mode sit to the right
 - Playlist modes: order, loop all, repeat one, shuffle, no autoplay
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
-- Quick actions: screenshot, background play, speed
-- Background play uses a music-style notification with play / pause / next / previous
+- Quick actions: screenshot, background play, speed (reorder and check from player More)
+- Background play uses a music-style notification with play / pause / next / previous and a seek bar
 - Open a video from another file manager
 - Screenshot the current frame to `DCIM/Screenshots`
 - Ten-band equalizer with presets, on/off on the player top bar, bass boost, and surround
@@ -52,7 +52,7 @@ The app requests:
 - Notifications / foreground media playback for background play
 - Picture-in-picture and display-over-apps for pop-up play
 
-On first launch, grant **All files access** in system settings. If access is already granted and the library is empty, the app tells you there are no videos — it does not keep asking for permission.
+On first launch, grant **All files access** in system settings. If access is already granted and the library is empty, the app tells you there are no videos - it does not keep asking for permission.
 
 ## License
 

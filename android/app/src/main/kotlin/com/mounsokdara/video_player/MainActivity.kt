@@ -20,6 +20,7 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
 import android.util.Rational
+import android.view.PixelCopy
 import android.view.WindowManager
 import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
@@ -278,6 +279,12 @@ class MainActivity : FlutterActivity() {
                             val title = call.argument<String>("title") ?: "frame"
                             io.execute {
                                 val saved = saveJpegBytes(bytes, title)
+                                mainHandler.post { result.success(saved) }
+                            }
+                        }
+                        "screenshotWindow" -> {
+                            val title = call.argument<String>("title") ?: "frame"
+                            captureWindow(title) { saved ->
                                 mainHandler.post { result.success(saved) }
                             }
                         }
@@ -993,6 +1000,43 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun captureWindow(title: String, done: (String?) -> Unit) {
+        val view = window?.decorView
+        val w = view?.width ?: 0
+        val h = view?.height ?: 0
+        if (view == null || w <= 0 || h <= 0) {
+            done(null)
+            return
+        }
+        if (Build.VERSION.SDK_INT < 26) {
+            done(null)
+            return
+        }
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        try {
+            PixelCopy.request(window, bitmap, { code ->
+                if (code == PixelCopy.SUCCESS) {
+                    io.execute {
+                        val out = java.io.ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                        bitmap.recycle()
+                        val saved = saveJpegBytes(out.toByteArray(), title)
+                        done(saved)
+                    }
+                } else {
+                    bitmap.recycle()
+                    done(null)
+                }
+            }, mainHandler)
+        } catch (_: Exception) {
+            try {
+                bitmap.recycle()
+            } catch (_: Exception) {
+            }
+            done(null)
+        }
+    }
+
     private fun saveJpegBytes(bytes: ByteArray, title: String): String? {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val safe = title.replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
@@ -1036,8 +1080,12 @@ class MainActivity : FlutterActivity() {
     companion object {
         var eventsSink: EventChannel.EventSink? = null
 
-        fun emitMedia(action: String) {
-            eventsSink?.success(mapOf("type" to "media", "action" to action))
+        fun emitMedia(action: String, extra: Map<String, Any?> = emptyMap()) {
+            val payload = HashMap<String, Any?>(extra.size + 2)
+            payload["type"] = "media"
+            payload["action"] = action
+            payload.putAll(extra)
+            eventsSink?.success(payload)
         }
 
         private val videoExt = setOf(

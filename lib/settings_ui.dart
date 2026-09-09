@@ -10,10 +10,8 @@ import 'settings.dart';
 import 'widgets.dart';
 
 class SettingsHub extends StatelessWidget {
-  const SettingsHub({super.key, required this.onChanged, this.overflow = const [], this.onOverflow});
+  const SettingsHub({super.key, required this.onChanged});
   final VoidCallback onChanged;
-  final List<PopupMenuEntry<String>> overflow;
-  final Future<void> Function(String)? onOverflow;
 
   @override
   Widget build(BuildContext context) {
@@ -41,13 +39,6 @@ class SettingsHub extends StatelessWidget {
         SliverAppBar(
           pinned: true,
           title: const Text('Settings'),
-          actions: [
-            if (overflow.isNotEmpty)
-              PopupMenuButton<String>(
-                onSelected: (v) => onOverflow?.call(v),
-                itemBuilder: (_) => overflow,
-              ),
-          ],
         ),
         SliverPadding(
           padding: EdgeInsets.only(bottom: pad.bottom + 24),

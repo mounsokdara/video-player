@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
@@ -88,11 +87,14 @@ class _HomeShellState extends State<HomeShell> {
         case 'pause':
           c?.pause();
         case 'next':
-          _sessionSkip(1);
+          unawaited(_sessionSkip(1));
         case 'prev':
-          _sessionSkip(-1);
+          unawaited(_sessionSkip(-1));
+        case 'seek':
+          final ms = e['positionMs'];
+          if (ms is num) unawaited(c?.seekTo(Duration(milliseconds: ms.round())) ?? Future<void>.value());
         case 'refresh':
-          _boot();
+          unawaited(_boot());
       }
       if (mounted) setState(() {});
     }
@@ -223,23 +225,40 @@ class _HomeShellState extends State<HomeShell> {
     await SharePlus.instance.share(ShareParams(files: items.map((e) => XFile(e.path)).toList()));
   }
 
-  Future<void> _import() async {
-    final r = await FilePicker.platform.pickFiles(type: FileType.video, allowMultiple: true);
-    if (r == null) return;
-    for (final f in r.files) {
-      if (f.path == null) continue;
-      if (!looksLikeVideo(f.path!)) continue;
-      if (library.videos.any((v) => v.path == f.path)) continue;
-      library.videos.add(VideoItem(
-        id: f.path!,
-        path: f.path!,
-        title: f.name,
-        folder: p.dirname(f.path!),
-        size: f.size,
-        modified: DateTime.now(),
-      ));
+  void _selectAllVisible() {
+    setState(() {
+      selecting = true;
+      selected
+        ..clear()
+        ..addAll(visible.map((v) => v.id));
+    });
+  }
+
+  void _selectAllInFolder() {
+    final path = folderPath;
+    if (path == null) {
+      setState(() {
+        selecting = true;
+        selected
+          ..clear()
+          ..addAll(library.videos.map((v) => v.id));
+      });
+      return;
     }
-    setState(() {});
+    final ents = library.listDir(path);
+    setState(() {
+      selecting = true;
+      for (final e in ents) {
+        if (e is File) selected.add(e.path);
+      }
+    });
+  }
+
+  void _deselectAll() {
+    setState(() {
+      selected.clear();
+      selecting = false;
+    });
   }
 
   void _openHiddenTab(String id) {
@@ -272,9 +291,10 @@ class _HomeShellState extends State<HomeShell> {
             selected.clear();
           }),
           onSelectMode: () => setState(() => selecting = true),
+          onSelectAll: _selectAllVisible,
+          onDeselectAll: _deselectAll,
           onRefresh: _refresh,
-          onImport: _import,
-          overflow: _overflowItems(),
+          overflow: _overflowItems(includeSelect: true),
           onOverflow: _onOverflow,
           filter: filter,
           onFilter: (v) => setState(() => filter = v),
@@ -292,24 +312,30 @@ class _HomeShellState extends State<HomeShell> {
           onOpen: _open,
           onToggleSelect: _toggleSelect,
           selecting: selecting,
-          overflow: _overflowItems(),
+          selected: selected,
+          onSelectMode: () => setState(() => selecting = true),
+          onSelectAll: _selectAllInFolder,
+          onDeselectAll: _deselectAll,
+          onClearSelect: () => setState(() {
+            selecting = false;
+            selected.clear();
+          }),
+          overflow: _overflowItems(includeSelect: false),
           onOverflow: _onOverflow,
           onRefresh: _refresh,
         ),
-      'settings' => SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow),
+      'settings' => SettingsHub(onChanged: widget.onSettingsChanged),
       _ => const SizedBox.shrink(),
     };
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(body: dest)));
   }
 
-  List<PopupMenuEntry<String>> _overflowItems() {
+  List<PopupMenuEntry<String>> _overflowItems({bool includeSelect = false}) {
     final hidden = appSettings.hiddenTabs;
     return [
       const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
       const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
-      const PopupMenuItem(value: 'select', child: Text('Select')),
-      const PopupMenuItem(value: 'import', child: Text('Import files')),
-      const PopupMenuItem(value: 'tabs', child: Text('Visible tabs')),
+      if (includeSelect) const PopupMenuItem(value: 'select', child: Text('Select')),
       const PopupMenuItem(value: 'crash', child: Text('Crash report')),
       for (final id in hidden)
         PopupMenuItem(value: 'tab:$id', child: Text(AppSettings.tabLabels[id] ?? id)),
@@ -329,15 +355,6 @@ class _HomeShellState extends State<HomeShell> {
       await _refresh();
     } else if (v == 'select') {
       setState(() => selecting = true);
-    } else if (v == 'import') {
-      await _import();
-    } else if (v == 'tabs') {
-      await showTabVisibilityDialog(context, () {
-        setState(() {
-          if (tab >= tabs.length) tab = 0;
-        });
-        widget.onSettingsChanged();
-      });
     } else if (v == 'crash') {
       await CrashLog.show();
     } else if (v.startsWith('tab:')) {
@@ -387,13 +404,21 @@ class _HomeShellState extends State<HomeShell> {
               onOpen: _open,
               onToggleSelect: _toggleSelect,
               selecting: selecting,
-              overflow: _overflowItems(),
+              selected: selected,
+              onSelectMode: () => setState(() => selecting = true),
+              onSelectAll: _selectAllInFolder,
+              onDeselectAll: _deselectAll,
+              onClearSelect: () => setState(() {
+                selecting = false;
+                selected.clear();
+              }),
+              overflow: _overflowItems(includeSelect: false),
               onOverflow: _onOverflow,
               onRefresh: _refresh,
             ),
           );
         case 'settings':
-          return SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow);
+          return SettingsHub(onChanged: widget.onSettingsChanged);
         default:
           return VideosHub(
             loading: loading,
@@ -423,9 +448,10 @@ class _HomeShellState extends State<HomeShell> {
               selected.clear();
             }),
             onSelectMode: () => setState(() => selecting = true),
+            onSelectAll: _selectAllVisible,
+            onDeselectAll: _deselectAll,
             onRefresh: _refresh,
-            onImport: _import,
-            overflow: _overflowItems(),
+            overflow: _overflowItems(includeSelect: true),
             onOverflow: _onOverflow,
             filter: filter,
             onFilter: (v) => setState(() => filter = v),
@@ -639,8 +665,9 @@ class VideosHub extends StatelessWidget {
     required this.onDeleteSelected,
     required this.onClearSelect,
     required this.onSelectMode,
+    required this.onSelectAll,
+    required this.onDeselectAll,
     required this.onRefresh,
-    required this.onImport,
     required this.overflow,
     this.onOverflow,
     this.filter = 'all',
@@ -667,8 +694,9 @@ class VideosHub extends StatelessWidget {
   final Future<void> Function() onDeleteSelected;
   final VoidCallback onClearSelect;
   final VoidCallback onSelectMode;
+  final VoidCallback onSelectAll;
+  final VoidCallback onDeselectAll;
   final Future<void> Function() onRefresh;
-  final Future<void> Function() onImport;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
   final String filter;
@@ -700,9 +728,11 @@ class VideosHub extends StatelessWidget {
             title: Text(selecting ? '${selected.length} selected' : 'Videos'),
             actions: [
               if (selecting) ...[
+                IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
+                IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
                 IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
                 IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close)),
+                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
               ] else ...[
                 IconButton(
                   onPressed: () => onSearch(true),
@@ -775,7 +805,7 @@ class VideosHub extends StatelessWidget {
           : items.isEmpty
               ? CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [SliverFillRemaining(hasScrollBody: false, child: _EmptyLibrary(onRefresh: onRefresh, onImport: onImport))],
+                  slivers: [SliverFillRemaining(hasScrollBody: false, child: _EmptyLibrary(onRefresh: onRefresh))],
                 )
               : layout == LayoutMode.list
                   ? ListView.builder(
@@ -822,9 +852,8 @@ class VideosHub extends StatelessWidget {
 }
 
 class _EmptyLibrary extends StatelessWidget {
-  const _EmptyLibrary({required this.onRefresh, required this.onImport});
+  const _EmptyLibrary({required this.onRefresh});
   final Future<void> Function() onRefresh;
-  final Future<void> Function() onImport;
 
   @override
   Widget build(BuildContext context) {
@@ -848,7 +877,7 @@ class _EmptyLibrary extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 granted
-                    ? 'Nothing playable turned up in internal storage, SD cards, or USB drives. Import a file or copy videos onto the device, then scan again.'
+                    ? 'Nothing playable turned up in internal storage, SD cards, or USB drives. Copy videos onto the device, then scan again.'
                     : 'Grant all-files access so the player can read internal storage, SD cards, and USB drives.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: scheme.onSurfaceVariant),
@@ -862,11 +891,8 @@ class _EmptyLibrary extends StatelessWidget {
                   },
                   child: const Text('Grant access'),
                 )
-              else ...[
-                FilledButton(onPressed: onImport, child: const Text('Import videos')),
-                const SizedBox(height: 8),
-                TextButton(onPressed: onRefresh, child: const Text('Scan again')),
-              ],
+              else
+                FilledButton(onPressed: onRefresh, child: const Text('Scan again')),
             ],
           ),
         ),
@@ -885,6 +911,11 @@ class FoldersHub extends StatelessWidget {
     required this.onOpen,
     required this.onToggleSelect,
     required this.selecting,
+    this.selected = const {},
+    this.onSelectMode,
+    this.onSelectAll,
+    this.onDeselectAll,
+    this.onClearSelect,
     this.overflow = const [],
     this.onOverflow,
     required this.onRefresh,
@@ -897,6 +928,11 @@ class FoldersHub extends StatelessWidget {
   final Future<void> Function(VideoItem item, {List<VideoItem>? playlist}) onOpen;
   final void Function(VideoItem) onToggleSelect;
   final bool selecting;
+  final Set<String> selected;
+  final VoidCallback? onSelectMode;
+  final VoidCallback? onSelectAll;
+  final VoidCallback? onDeselectAll;
+  final VoidCallback? onClearSelect;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
   final Future<void> Function() onRefresh;
@@ -918,13 +954,24 @@ class FoldersHub extends StatelessWidget {
         slivers: [
           SliverAppBar(
             pinned: true,
-            title: const Text('Folders'),
+            title: Text(selecting ? '${selected.length} selected' : 'Folders'),
             actions: [
-              if (overflow.isNotEmpty)
-                PopupMenuButton<String>(
-                  onSelected: (v) => onOverflow?.call(v),
-                  itemBuilder: (_) => overflow,
+              if (selecting) ...[
+                IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
+                IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
+                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
+              ] else ...[
+                IconButton(
+                  tooltip: 'Select',
+                  onPressed: onSelectMode,
+                  icon: const Icon(Icons.checklist),
                 ),
+                if (overflow.isNotEmpty)
+                  PopupMenuButton<String>(
+                    onSelected: (v) => onOverflow?.call(v),
+                    itemBuilder: (_) => overflow,
+                  ),
+              ],
             ],
           ),
           if (loading)
@@ -985,22 +1032,33 @@ class FoldersHub extends StatelessWidget {
       children: [
         AppBar(
           automaticallyImplyLeading: false,
-          title: Text(p.basename(path).isEmpty ? path : p.basename(path)),
+          title: Text(selecting ? '${selected.length} selected' : (p.basename(path).isEmpty ? path : p.basename(path))),
           actions: [
-            if (library.clipPath != null)
+            if (selecting) ...[
+              IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
+              IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
+              IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
+            ] else ...[
+              if (library.clipPath != null)
+                IconButton(
+                  tooltip: 'Paste',
+                  onPressed: () async {
+                    await library.pasteInto(path);
+                    onRefresh();
+                  },
+                  icon: const Icon(Icons.content_paste),
+                ),
               IconButton(
-                tooltip: 'Paste',
-                onPressed: () async {
-                  await library.pasteInto(path);
-                  onRefresh();
-                },
-                icon: const Icon(Icons.content_paste),
+                tooltip: 'Select',
+                onPressed: onSelectMode,
+                icon: const Icon(Icons.checklist),
               ),
-            if (overflow.isNotEmpty)
-              PopupMenuButton<String>(
-                onSelected: (v) => onOverflow?.call(v),
-                itemBuilder: (_) => overflow,
-              ),
+              if (overflow.isNotEmpty)
+                PopupMenuButton<String>(
+                  onSelected: (v) => onOverflow?.call(v),
+                  itemBuilder: (_) => overflow,
+                ),
+            ],
           ],
         ),
         Expanded(
@@ -1052,7 +1110,13 @@ class FoldersHub extends StatelessWidget {
                     : SizedBox(width: 56, height: 36, child: video != null ? VideoThumb(item: video, radius: 6) : const Icon(Icons.movie_outlined)),
                 title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: isDir ? const Text('Folder') : Text(formatBytes(video?.size ?? 0)),
-                trailing: IconButton(
+                selected: !isDir && video != null && selected.contains(video.id),
+                trailing: selecting && !isDir
+                    ? Checkbox(
+                        value: video != null && selected.contains(video.id),
+                        onChanged: video == null ? null : (_) => onToggleSelect(video),
+                      )
+                    : IconButton(
                   icon: const Icon(Icons.more_vert),
                   onPressed: () => showFolderEntryMenu(
                     context,
@@ -1132,7 +1196,6 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final items = library.sorted(SortBy.name, desc: false, query: query);
-    final insets = MediaQuery.viewInsetsOf(context);
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
@@ -1143,25 +1206,24 @@ class _SearchPageState extends State<SearchPage> {
           onChanged: (v) => setState(() => query = v),
         ),
       ),
-      body: Padding(
-        padding: EdgeInsets.only(bottom: insets.bottom),
-        child: items.isEmpty
-            ? const Center(child: Text('No matches'))
-            : ListView.builder(
-                itemCount: items.length,
-                itemBuilder: (_, i) {
-                  final item = items[i];
-                  return VideoListTile(
-                    item: item,
-                    selected: false,
-                    selecting: false,
-                    onTap: () => widget.onOpen(item, playlist: items),
-                    onLongPress: () => widget.onToggleSelect(item),
-                    onMenu: () => showVideoMenu(context, item, onChanged: () => setState(() {}), onPlay: () => widget.onOpen(item, playlist: items)),
-                  );
-                },
-              ),
-      ),
+      body: items.isEmpty
+          ? const Center(child: Text('No matches'))
+          : ListView.builder(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 24),
+              itemCount: items.length,
+              itemBuilder: (_, i) {
+                final item = items[i];
+                return VideoListTile(
+                  item: item,
+                  selected: false,
+                  selecting: false,
+                  onTap: () => widget.onOpen(item, playlist: items),
+                  onLongPress: () => widget.onToggleSelect(item),
+                  onMenu: () => showVideoMenu(context, item, onChanged: () => setState(() {}), onPlay: () => widget.onOpen(item, playlist: items)),
+                );
+              },
+            ),
     );
   }
 }

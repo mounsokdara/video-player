@@ -95,7 +95,7 @@ class VideoItem {
   }
 
   String get fpsLabel {
-    if (fps == null || fps! <= 0) return '—';
+    if (fps == null || fps! <= 0) return '-';
     final v = fps!;
     if ((v - v.round()).abs() < 0.05) return '${v.round()} fps';
     return '${v.toStringAsFixed(2)} fps';

@@ -296,6 +296,8 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
               title: const Text('Rename'),
               onTap: () async {
                 Navigator.pop(ctx);
+                await Future<void>.delayed(const Duration(milliseconds: 160));
+                if (!context.mounted) return;
                 final name = await promptText(context, 'Rename', item.title);
                 if (name != null && name.trim().isNotEmpty) {
                   await library.rename(item, name.trim());
@@ -392,7 +394,7 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
   final durationMs = (info?['durationMs'] as num?)?.toInt();
   String fpsLabel;
   if (fps == null || fps <= 0) {
-    fpsLabel = '—';
+    fpsLabel = '-';
   } else if ((fps - fps.round()).abs() < 0.05) {
     fpsLabel = '${fps.round()} fps';
   } else {
@@ -408,15 +410,15 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
     ('Width', '$width px'),
     ('Height', '$height px'),
     ('Frame rate', fpsLabel),
-    ('Frame count', frames != null && frames > 0 ? '$frames' : '—'),
-    ('Bitrate', bitrate != null && bitrate > 0 ? '${(bitrate / 1000).toStringAsFixed(0)} kbps' : '—'),
-    ('Aspect', width > 0 && height > 0 ? (width / height).toStringAsFixed(4) : '—'),
+    ('Frame count', frames != null && frames > 0 ? '$frames' : '-'),
+    ('Bitrate', bitrate != null && bitrate > 0 ? '${(bitrate / 1000).toStringAsFixed(0)} kbps' : '-'),
+    ('Aspect', width > 0 && height > 0 ? (width / height).toStringAsFixed(4) : '-'),
     ('Container', item.extension.toUpperCase()),
     ('MIME', item.mime ?? (info?['mime'] as String?) ?? 'video/${item.extension}'),
-    ('Created', item.created != null ? DateFormat.yMMMMd().add_Hms().format(item.created!) : '—'),
+    ('Created', item.created != null ? DateFormat.yMMMMd().add_Hms().format(item.created!) : '-'),
     ('Modified', DateFormat.yMMMMd().add_Hms().format(stat?.modified ?? item.modified)),
-    ('Accessed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.accessed) : '—'),
-    ('Changed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.changed) : '—'),
+    ('Accessed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.accessed) : '-'),
+    ('Changed', stat != null ? DateFormat.yMMMMd().add_Hms().format(stat.changed) : '-'),
     ('Exists', exists ? 'Yes' : 'Missing'),
     ('Readable', exists ? 'Yes' : 'No'),
     ('Bookmarked', item.bookmarked ? 'Yes' : 'No'),
@@ -499,23 +501,46 @@ Future<bool> confirm(BuildContext context, String title, String body) async {
 
 Future<String?> promptText(BuildContext context, String title, String initial) async {
   final c = TextEditingController(text: initial);
-  return showDialog<String>(
-    context: context,
-    builder: (ctx) {
-      final insets = MediaQuery.viewInsetsOf(ctx);
-      return AlertDialog(
-        title: Text(title),
-        content: Padding(
-          padding: EdgeInsets.only(bottom: insets.bottom),
-          child: TextField(controller: c, autofocus: true),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
-        ],
-      );
-    },
-  );
+  try {
+    return await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + insets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: c,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(border: OutlineInputBorder()),
+                onSubmitted: (v) => Navigator.pop(ctx, v),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                  const SizedBox(width: 8),
+                  FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  } finally {
+    c.dispose();
+  }
 }
 
 class ChipScroller extends StatelessWidget {
@@ -571,6 +596,8 @@ Future<void> showFolderEntryMenu(
               title: const Text('Rename'),
               onTap: () async {
                 Navigator.pop(ctx);
+                await Future<void>.delayed(const Duration(milliseconds: 160));
+                if (!context.mounted) return;
                 final next = await promptText(context, 'Rename', name);
                 if (next != null && next.trim().isNotEmpty) {
                   await AndroidBridge.renamePath(path, next.trim());
