@@ -22,6 +22,8 @@ class LibraryService {
 
   bool _scanning = false;
   final Map<String, Uint8List?> _thumbs = {};
+  String? clipPath;
+  bool clipCut = false;
 
   Future<void> requestPermissions() async {
     await [
@@ -74,47 +76,76 @@ class LibraryService {
       ..clear()
       ..addAll(await AndroidBridge.listStorageVolumes());
 
-    // MediaStore is indexed and fast. Native walks only removable volumes so
-    // pull-to-refresh does not crawl the whole internal disk.
     try {
-      final paths = await PhotoManager.getAssetPathList(
-        type: RequestType.video,
-        hasAll: true,
-        onlyAll: true,
-      );
-      for (final album in paths) {
-        final count = await album.assetCountAsync;
-        for (var start = 0; start < count; start += 120) {
-          final end = (start + 120).clamp(0, count);
-          final assets = await album.getAssetListRange(start: start, end: end);
-          for (final a in assets) {
-            final path = _assetPath(a);
-            if (path == null || path.isEmpty || seen.contains(path)) continue;
-            if (!looksLikeVideo(path, mime: a.mimeType)) continue;
-            if (!hidden && _isHiddenPath(path)) continue;
-            seen.add(path);
-            next.add(
-              VideoItem(
-                id: a.id,
-                path: path,
-                title: p.basename(path),
-                folder: p.dirname(path),
-                size: 0,
-                modified: a.modifiedDateTime,
-                created: a.createDateTime,
-                duration: a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
-                width: a.width,
-                height: a.height,
-                mime: a.mimeType,
-                assetId: a.id,
-                progress: settings.resumeMap[path] ?? 0,
-                bookmarked: settings.bookmarks.contains(path),
-              ),
-            );
-          }
-        }
+      final indexed = await AndroidBridge.listIndexedVideos();
+      for (final m in indexed) {
+        final path = m['path'] as String? ?? '';
+        if (path.isEmpty || seen.contains(path)) continue;
+        if (!looksLikeVideo(path, mime: m['mime'] as String?)) continue;
+        if (!hidden && _isHiddenPath(path)) continue;
+        seen.add(path);
+        final durMs = (m['durationMs'] as num?)?.toInt() ?? 0;
+        next.add(
+          VideoItem(
+            id: '${m['id'] ?? path}',
+            path: path,
+            title: m['name'] as String? ?? p.basename(path),
+            folder: m['folder'] as String? ?? p.dirname(path),
+            size: (m['size'] as num?)?.toInt() ?? 0,
+            modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
+            duration: Duration(milliseconds: durMs),
+            width: (m['width'] as num?)?.toInt() ?? 0,
+            height: (m['height'] as num?)?.toInt() ?? 0,
+            mime: m['mime'] as String?,
+            assetId: m['id']?.toString(),
+            progress: settings.resumeMap[path] ?? 0,
+            bookmarked: settings.bookmarks.contains(path),
+          ),
+        );
       }
     } catch (_) {}
+
+    if (next.isEmpty) {
+      try {
+        final paths = await PhotoManager.getAssetPathList(
+          type: RequestType.video,
+          hasAll: true,
+          onlyAll: true,
+        );
+        for (final album in paths) {
+          final count = await album.assetCountAsync;
+          for (var start = 0; start < count; start += 120) {
+            final end = (start + 120).clamp(0, count);
+            final assets = await album.getAssetListRange(start: start, end: end);
+            for (final a in assets) {
+              final path = _assetPath(a);
+              if (path == null || path.isEmpty || seen.contains(path)) continue;
+              if (!looksLikeVideo(path, mime: a.mimeType)) continue;
+              if (!hidden && _isHiddenPath(path)) continue;
+              seen.add(path);
+              next.add(
+                VideoItem(
+                  id: a.id,
+                  path: path,
+                  title: p.basename(path),
+                  folder: p.dirname(path),
+                  size: 0,
+                  modified: a.modifiedDateTime,
+                  created: a.createDateTime,
+                  duration: a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
+                  width: a.width,
+                  height: a.height,
+                  mime: a.mimeType,
+                  assetId: a.id,
+                  progress: settings.resumeMap[path] ?? 0,
+                  bookmarked: settings.bookmarks.contains(path),
+                ),
+              );
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
     final nativeTargets = <StorageVolumeInfo>[
       ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
@@ -180,13 +211,24 @@ class LibraryService {
     folders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   }
 
-  List<VideoItem> sorted(SortBy sort, {bool desc = true, String query = ''}) {
+  List<VideoItem> sorted(SortBy sort, {bool desc = true, String query = '', String filter = 'all'}) {
     var list = List<VideoItem>.from(videos);
+    if (filter == 'bookmarked') {
+      list = list.where((v) => settings.bookmarks.contains(v.path) || v.bookmarked).toList();
+    } else if (filter == 'pinned') {
+      list = list.where((v) => settings.pinned.contains(v.path)).toList();
+    }
     if (query.trim().isNotEmpty) {
       final q = query.toLowerCase();
       list = list.where((v) => v.title.toLowerCase().contains(q) || v.folder.toLowerCase().contains(q)).toList();
     }
     int cmp(VideoItem a, VideoItem b) {
+      final ap = settings.pinned.contains(a.path) ? 1 : 0;
+      final bp = settings.pinned.contains(b.path) ? 1 : 0;
+      if (ap != bp) return bp.compareTo(ap);
+      final ab = (settings.bookmarks.contains(a.path) || a.bookmarked) ? 1 : 0;
+      final bb = (settings.bookmarks.contains(b.path) || b.bookmarked) ? 1 : 0;
+      if (filter == 'all' && ab != bb) return bb.compareTo(ab);
       switch (sort) {
         case SortBy.name:
           return a.title.toLowerCase().compareTo(b.title.toLowerCase());
@@ -203,7 +245,10 @@ class LibraryService {
 
     list.sort(cmp);
     if (desc && sort != SortBy.name && sort != SortBy.folder) {
-      list = list.reversed.toList();
+      // keep pins at top: partition, reverse rest
+      final pins = list.where((v) => settings.pinned.contains(v.path)).toList();
+      final rest = list.where((v) => !settings.pinned.contains(v.path)).toList().reversed.toList();
+      return [...pins, ...rest];
     }
     return list;
   }
@@ -257,6 +302,68 @@ class LibraryService {
     final i = videos.indexWhere((v) => v.id == item.id);
     if (i >= 0) videos[i] = next;
     return next;
+  }
+
+  void copyEntry(String path) {
+    clipPath = path;
+    clipCut = false;
+  }
+
+  void cutEntry(String path) {
+    clipPath = path;
+    clipCut = true;
+  }
+
+  Future<bool> pasteInto(String dir) async {
+    final src = clipPath;
+    if (src == null || src.isEmpty) return false;
+    final name = p.basename(src);
+    var dest = p.join(dir, name);
+    if (dest == src) return false;
+    if (File(dest).existsSync() || Directory(dest).existsSync()) {
+      final stem = p.basenameWithoutExtension(name);
+      final ext = p.extension(name);
+      dest = p.join(dir, '${stem}_copy$ext');
+    }
+    if (clipCut) {
+      final moved = await AndroidBridge.movePath(src, dest);
+      if (moved == null) return false;
+      clipPath = null;
+      clipCut = false;
+      final i = videos.indexWhere((v) => v.path == src);
+      if (i >= 0) {
+        videos[i] = videos[i].copyWith(path: moved, title: p.basename(moved));
+      }
+      _rebuildFolders();
+      return true;
+    }
+    final ok = await AndroidBridge.copyPath(src, dest);
+    if (ok) {
+      VideoItem? srcItem;
+      for (final v in videos) {
+        if (v.path == src) srcItem = v;
+      }
+      videos.add(
+        VideoItem(
+          id: dest,
+          path: dest,
+          title: p.basename(dest),
+          folder: dir,
+          size: srcItem?.size ?? File(dest).lengthSync(),
+          modified: DateTime.now(),
+          duration: srcItem?.duration ?? Duration.zero,
+        ),
+      );
+      _rebuildFolders();
+    }
+    return ok;
+  }
+
+  Future<bool> deletePath(String path) async {
+    final ok = await AndroidBridge.deletePath(path);
+    videos.removeWhere((v) => v.path == path);
+    _rebuildFolders();
+    return ok;
   }
 
   List<FileSystemEntity> listDir(String path) {

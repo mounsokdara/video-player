@@ -7,6 +7,7 @@ import 'crash.dart';
 import 'main.dart';
 import 'models.dart';
 import 'settings.dart';
+import 'widgets.dart';
 
 class SettingsHub extends StatelessWidget {
   const SettingsHub({super.key, required this.onChanged, this.overflow = const [], this.onOverflow});
@@ -183,6 +184,12 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             onTap: () => showTabVisibilityDialog(context, () {
               set(() {});
             }),
+          ),
+          ListTile(
+            title: const Text('Quick actions'),
+            subtitle: const Text('Drag to reorder. Check to show on the player bar.'),
+            trailing: const Icon(Icons.tune),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: widget.onChanged))),
           ),
           SwitchListTile(title: const Text('Remember playback progress'), value: s.rememberPlayback, onChanged: (v) => set(() => s.rememberPlayback = v)),
           ListTile(
@@ -466,9 +473,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
           const SizedBox(height: 8),
           const Text('Seed color', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
+          ChipScroller(
             children: [
               for (final e in seeds)
                 GestureDetector(
@@ -586,9 +591,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
         children: [
           Text('Presets', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          ChipScroller(
             children: [
               for (final name in AppSettings.eqPresets.keys)
                 ChoiceChip(
@@ -689,6 +692,76 @@ class _EqualizerPageState extends State<EqualizerPage> {
             onChangeEnd: (_) => s.save(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class QuickActionsEditor extends StatefulWidget {
+  const QuickActionsEditor({super.key, required this.onChanged});
+  final VoidCallback onChanged;
+
+  @override
+  State<QuickActionsEditor> createState() => _QuickActionsEditorState();
+}
+
+class _QuickActionsEditorState extends State<QuickActionsEditor> {
+  late List<String> order;
+  late Set<String> enabled;
+
+  @override
+  void initState() {
+    super.initState();
+    enabled = appSettings.quickActions.toSet();
+    order = [...appSettings.quickActions];
+    for (final id in AppSettings.allQuickActions.keys) {
+      if (!order.contains(id)) order.add(id);
+    }
+  }
+
+  Future<void> _persist() async {
+    var next = order.where(enabled.contains).toList();
+    if (next.isEmpty) next = List<String>.from(AppSettings.defaultQuickActions);
+    appSettings.quickActions = next;
+    await appSettings.save();
+    widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final insets = MediaQuery.viewInsetsOf(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Quick actions')),
+      body: ReorderableListView.builder(
+        padding: EdgeInsets.only(bottom: insets.bottom + 24),
+        itemCount: order.length,
+        onReorder: (oldIndex, newIndex) async {
+          setState(() {
+            if (newIndex > oldIndex) newIndex -= 1;
+            final item = order.removeAt(oldIndex);
+            order.insert(newIndex, item);
+          });
+          await _persist();
+        },
+        itemBuilder: (ctx, i) {
+          final id = order[i];
+          return CheckboxListTile(
+            key: ValueKey(id),
+            value: enabled.contains(id),
+            title: Text(AppSettings.allQuickActions[id] ?? id),
+            secondary: const Icon(Icons.drag_handle),
+            onChanged: (v) async {
+              setState(() {
+                if (v == true) {
+                  enabled.add(id);
+                } else {
+                  enabled.remove(id);
+                }
+              });
+              await _persist();
+            },
+          );
+        },
       ),
     );
   }

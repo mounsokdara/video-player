@@ -146,6 +146,11 @@ class PlaybackService : Service() {
         )
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (playing) return
+        stopSelf()
+    }
+
     override fun onDestroy() {
         session?.release()
         session = null

@@ -105,6 +105,21 @@ class AppSettings {
 
   static const defaultQuickActions = <String>['screenshot', 'background', 'speed'];
 
+  static const allQuickActions = <String, String>{
+    'speed': 'Speed',
+    'background': 'Background',
+    'screenshot': 'Screenshot',
+    'lock': 'Lock',
+    'aspect': 'Screen mode',
+    'ab': 'A-B repeat',
+    'eq': 'Equalizer',
+    'bookmark': 'Bookmark',
+    'brightness': 'Brightness',
+    'rotate': 'Rotate',
+    'share': 'Share',
+    'night': 'Night mode',
+  };
+
   List<String> quickActions = List<String>.from(defaultQuickActions);
 
   static const eqBandHz = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -134,6 +149,7 @@ class AppSettings {
   Map<String, double> resumeMap = {};
   Map<String, double> speedMap = {};
   Set<String> bookmarks = {};
+  Set<String> pinned = {};
 
   Color get seed => Color(seedColor);
 
@@ -237,8 +253,9 @@ class AppSettings {
       hiddenTabs = hiddenTabs.take(tabIds.length - 1).toList();
     }
 
-    quickActions = List<String>.from(defaultQuickActions);
-    await p.setStringList('quickActions', quickActions);
+    quickActions = List<String>.from(p.getStringList('quickActions') ?? defaultQuickActions);
+    quickActions.removeWhere((id) => !allQuickActions.containsKey(id));
+    if (quickActions.isEmpty) quickActions = List<String>.from(defaultQuickActions);
 
     eqEnabled = p.getBool('eqEnabled') ?? false;
     eqPreset = p.getString('eqPreset') ?? 'Flat';
@@ -270,6 +287,7 @@ class AppSettings {
       } catch (_) {}
     }
     bookmarks = (p.getStringList('bookmarks') ?? []).toSet();
+    pinned = (p.getStringList('pinned') ?? []).toSet();
   }
 
   Future<void> save() async {
@@ -345,7 +363,7 @@ class AppSettings {
     await p.setBool('colorCorrection', colorCorrection);
     await p.setBool('alwaysHideNavBar', alwaysHideNavBar);
     await p.setStringList('hiddenTabs', hiddenTabs);
-    await p.setStringList('quickActions', defaultQuickActions);
+    await p.setStringList('quickActions', quickActions);
     await p.setBool('eqEnabled', eqEnabled);
     await p.setString('eqPreset', eqPreset);
     await p.setString('eqBands', jsonEncode(eqBands));
@@ -356,6 +374,7 @@ class AppSettings {
     await p.setString('resumeMap', jsonEncode(resumeMap));
     await p.setString('speedMap', jsonEncode(speedMap));
     await p.setStringList('bookmarks', bookmarks.toList());
+    await p.setStringList('pinned', pinned.toList());
   }
 
   void applyPreset(String name) {

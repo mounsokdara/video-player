@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -7,11 +10,19 @@ class AndroidBridge {
   static const _ch = MethodChannel('app.videoplayer/android');
   static const _ev = EventChannel('app.videoplayer/events');
 
+  static Stream<Map<String, dynamic>>? _events;
+  static StreamSubscription<Map<String, dynamic>>? _keepAlive;
+
   static Stream<Map<String, dynamic>> events() {
-    return _ev.receiveBroadcastStream().map((e) {
-      if (e is Map) return Map<String, dynamic>.from(e);
-      return <String, dynamic>{'type': '$e'};
-    });
+    if (_events == null) {
+      final raw = _ev.receiveBroadcastStream().map((e) {
+        if (e is Map) return Map<String, dynamic>.from(e);
+        return <String, dynamic>{'type': '$e'};
+      }).handleError((_) {});
+      _events = raw.asBroadcastStream(onCancel: (_) {});
+      _keepAlive = _events!.listen((_) {});
+    }
+    return _events!;
   }
 
   static Future<bool> hasAllFilesAccess() async {
@@ -100,6 +111,39 @@ class AndroidBridge {
       return await _ch.invokeMethod<String>('renamePath', {'path': path, 'name': name});
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<bool> copyPath(String src, String dest) async {
+    try {
+      return await _ch.invokeMethod<bool>('copyPath', {'src': src, 'dest': dest}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String?> movePath(String src, String dest) async {
+    try {
+      return await _ch.invokeMethod<String>('movePath', {'src': src, 'dest': dest});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<int> fileSize(String path) async {
+    try {
+      return await _ch.invokeMethod<int>('fileSize', {'path': path}) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> listIndexedVideos() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('listIndexedVideos') ?? [];
+      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
     }
   }
 
@@ -236,6 +280,29 @@ class AndroidBridge {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<String?> saveScreenshotBytes(Uint8List bytes, {String? title}) async {
+    try {
+      return await _ch.invokeMethod<String>('saveScreenshotBytes', {
+        'bytes': bytes,
+        'title': title ?? 'frame',
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Uint8List?> previewFrame({required String path, required int positionMs}) async {
+    try {
+      final raw = await _ch.invokeMethod('previewFrame', {
+        'path': path,
+        'positionMs': positionMs,
+      });
+      if (raw is Uint8List) return raw;
+      if (raw is List<int>) return Uint8List.fromList(raw);
+    } catch (_) {}
+    return null;
   }
 
   static Future<Map<String, dynamic>?> mediaInfo(String path) async {

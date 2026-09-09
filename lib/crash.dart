@@ -108,7 +108,13 @@ class CrashLog {
       'FLUTTER',
       'VIDEO_WIDGET',
     };
-    if (autoShow.contains(kind)) scheduleShow();
+    if (autoShow.contains(kind)) {
+      final low = message.toLowerCase();
+      if (low.contains('no active player') || low.contains('no active stream to cancel')) {
+        return;
+      }
+      scheduleShow();
+    }
   }
 
   static void scheduleShow() {

@@ -155,6 +155,21 @@ class VideoListTile extends StatelessWidget {
                       '${formatBytes(item.size)}  ·  ${DateFormat.yMMMd().format(item.modified)}',
                       style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                     ),
+                    if (appSettings.pinned.contains(item.path) || item.bookmarked)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            if (appSettings.pinned.contains(item.path))
+                              Icon(Icons.push_pin, size: 14, color: scheme.primary),
+                            if (item.bookmarked || appSettings.bookmarks.contains(item.path))
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Icon(Icons.bookmark, size: 14, color: scheme.primary),
+                              ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 6),
                     ResumeBar(progress: item.progress),
                   ],
@@ -313,6 +328,20 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
               },
             ),
             ListTile(
+              leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
+              title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
+              onTap: () {
+                Navigator.pop(ctx);
+                if (appSettings.pinned.contains(item.path)) {
+                  appSettings.pinned.remove(item.path);
+                } else {
+                  appSettings.pinned.add(item.path);
+                }
+                appSettings.save();
+                onChanged();
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.delete_outline, color: scheme.error),
               title: Text('Delete', style: TextStyle(color: scheme.error)),
               onTap: () async {
@@ -345,6 +374,14 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
   final file = File(item.path);
   final exists = file.existsSync();
   final stat = exists ? await file.stat() : null;
+  var size = item.size;
+  if (exists) {
+    try {
+      final n = file.lengthSync();
+      if (n > 0) size = n;
+    } catch (_) {}
+  }
+  if (size <= 0) size = await AndroidBridge.fileSize(item.path);
   final info = await AndroidBridge.mediaInfo(item.path);
   if (!context.mounted) return;
   final fps = (info?['fps'] as num?)?.toDouble() ?? item.fps;
@@ -365,7 +402,7 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
     ('Name', item.title),
     ('Path', item.path),
     ('Folder', item.folder),
-    ('Size', '${formatBytes(item.size)}  (${item.size} bytes)'),
+    ('Size', '${formatBytes(size)}  ($size bytes)'),
     ('Duration', durationMs != null ? formatDuration(Duration(milliseconds: durationMs)) : formatDuration(item.duration)),
     ('Resolution', width > 0 && height > 0 ? '$width×$height' : item.resolutionLabel),
     ('Width', '$width px'),
@@ -441,6 +478,7 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
 }
 
 Future<bool> confirm(BuildContext context, String title, String body) async {
+  final scheme = Theme.of(context).colorScheme;
   final v = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -448,7 +486,11 @@ Future<bool> confirm(BuildContext context, String title, String body) async {
       content: Text(body),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: scheme.error, foregroundColor: scheme.onError),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Delete'),
+        ),
       ],
     ),
   );
@@ -471,6 +513,104 @@ Future<String?> promptText(BuildContext context, String title, String initial) a
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
         ],
+      );
+    },
+  );
+}
+
+class ChipScroller extends StatelessWidget {
+  const ChipScroller({super.key, required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: children.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) => children[i],
+      ),
+    );
+  }
+}
+
+Future<void> showFolderEntryMenu(
+  BuildContext context, {
+  required String path,
+  required bool isDir,
+  required VoidCallback onChanged,
+  VoidCallback? onOpen,
+}) async {
+  final scheme = Theme.of(context).colorScheme;
+  final name = path.split(RegExp(r'[/\\]')).last;
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) {
+      final pad = MediaQuery.paddingOf(ctx);
+      final insets = MediaQuery.viewInsetsOf(ctx);
+      return Padding(
+        padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
+            if (onOpen != null)
+              ListTile(
+                leading: const Icon(Icons.open_in_new),
+                title: Text(isDir ? 'Open' : 'Play'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onOpen();
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('Rename'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final next = await promptText(context, 'Rename', name);
+                if (next != null && next.trim().isNotEmpty) {
+                  await AndroidBridge.renamePath(path, next.trim());
+                  onChanged();
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy),
+              title: const Text('Copy'),
+              onTap: () {
+                Navigator.pop(ctx);
+                library.copyEntry(path);
+                onChanged();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.content_cut),
+              title: const Text('Cut'),
+              onTap: () {
+                Navigator.pop(ctx);
+                library.cutEntry(path);
+                onChanged();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text('Delete', style: TextStyle(color: scheme.error)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
+                if (ok == true) {
+                  await library.deletePath(path);
+                  onChanged();
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       );
     },
   );
