@@ -21,6 +21,7 @@ import android.os.storage.StorageManager
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Log
 import android.util.Rational
 import android.view.WindowManager
 import android.widget.Toast
@@ -57,6 +58,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installCrashHook()
         handleIncoming(intent)
     }
 
@@ -119,7 +121,8 @@ class MainActivity : FlutterActivity() {
                         "listVideoFiles" -> {
                             val root = call.argument<String>("path")
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
-                            result.success(scanVideos(File(root), 4))
+                            val hidden = call.argument<Boolean>("includeHidden") ?: false
+                            result.success(scanVideos(File(root), 3, hidden))
                         }
                         "deletePath" -> {
                             val path = call.argument<String>("path")
@@ -187,6 +190,7 @@ class MainActivity : FlutterActivity() {
                         "initEqualizer" -> {
                             var session = call.argument<Int>("sessionId") ?: 0
                             if (session == 0) session = currentAudioSession()
+                            breadcrumb("initEqualizer session=$session eq=$eqWanted")
                             result.success(initAudioFx(session))
                         }
                         "setEqBand" -> {
@@ -209,6 +213,10 @@ class MainActivity : FlutterActivity() {
                         }
                         "setEqEnabled" -> {
                             eqWanted = call.argument<Boolean>("on") ?: true
+                            if (eqWanted && equalizer == null) {
+                                val session = currentAudioSession()
+                                if (session != 0) initAudioFx(session)
+                            }
                             applyFxEnabled()
                             result.success(true)
                         }
@@ -285,6 +293,23 @@ class MainActivity : FlutterActivity() {
                             pendingOpen = null
                             result.success(path)
                         }
+                        "lastCrash" -> {
+                            val crash = File(filesDir, "last_crash.txt")
+                            if (!crash.exists()) {
+                                result.success(null)
+                            } else {
+                                val action = File(filesDir, "last_action.txt")
+                                val buf = StringBuilder()
+                                if (action.exists()) buf.append("Last action: ").append(action.readText()).append('\n')
+                                buf.append(crash.readText())
+                                crash.delete()
+                                result.success(buf.toString())
+                            }
+                        }
+                        "breadcrumb" -> {
+                            breadcrumb(call.argument<String>("action") ?: "")
+                            result.success(true)
+                        }
                         else -> result.notImplemented()
                     }
                 } catch (e: Exception) {
@@ -325,26 +350,37 @@ class MainActivity : FlutterActivity() {
         bassBoost = null
         virtualizer = null
         if (session == 0) return emptyFx(0)
+        if (!eqWanted && !bassWanted && !surroundWanted) return emptyFx(session)
+        breadcrumb("audiofx construct session=$session")
         try {
-            equalizer = Equalizer(0, session).apply { enabled = eqWanted }
-        } catch (_: Throwable) {
+            if (eqWanted) {
+                equalizer = Equalizer(0, session).apply { enabled = true }
+            }
+        } catch (t: Throwable) {
             equalizer = null
+            writeCrash("Equalizer: ${t.message}\n${Log.getStackTraceString(t)}")
         }
         try {
-            bassBoost = BassBoost(0, session).apply {
-                setStrength(bassStrength.toShort())
-                enabled = eqWanted && bassWanted
+            if (bassWanted) {
+                bassBoost = BassBoost(0, session).apply {
+                    setStrength(bassStrength.toShort())
+                    enabled = eqWanted
+                }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
             bassBoost = null
+            writeCrash("BassBoost: ${t.message}\n${Log.getStackTraceString(t)}")
         }
         try {
-            virtualizer = Virtualizer(0, session).apply {
-                setStrength(surroundStrength.toShort())
-                enabled = eqWanted && surroundWanted
+            if (surroundWanted) {
+                virtualizer = Virtualizer(0, session).apply {
+                    setStrength(surroundStrength.toShort())
+                    enabled = eqWanted
+                }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
             virtualizer = null
+            writeCrash("Virtualizer: ${t.message}\n${Log.getStackTraceString(t)}")
         }
         try {
             applyTenBands()
@@ -521,59 +557,61 @@ class MainActivity : FlutterActivity() {
         try {
             val pluginClass = Class.forName("io.flutter.plugins.videoplayer.VideoPlayerPlugin")
             val plugin = engine.plugins.get(pluginClass as Class<out FlutterPlugin>) ?: return out
-            walkForExo(plugin, out, 0, HashSet())
-        } catch (_: Exception) {
+            extractPlayers(plugin, out, 0, HashSet())
+        } catch (_: Throwable) {
         }
         return out
     }
 
-    private fun walkForExo(root: Any, out: MutableList<Any>, depth: Int, seen: MutableSet<Int>) {
-        if (depth > 8) return
+    private fun extractPlayers(root: Any, out: MutableList<Any>, depth: Int, seen: MutableSet<Int>) {
+        if (depth > 3) return
         val id = System.identityHashCode(root)
         if (!seen.add(id)) return
         val name = root.javaClass.name
-        if (name.contains("ExoPlayer") && !name.contains("Plugin") && !name.contains("Factory")) {
+        if (name.contains("ExoPlayer") && !name.contains("Plugin") && !name.contains("Factory") && !name.contains("Audio")) {
             out.add(root)
             return
         }
         if (name.startsWith("android.") || name.startsWith("java.") || name.startsWith("kotlin.") ||
-            name.startsWith("dalvik.") || name.startsWith("androidx.media3.exoplayer.source")
+            name.startsWith("dalvik.") || name.startsWith("androidx.media3")
         ) {
             return
         }
         when (root) {
             is Map<*, *> -> {
-                for (v in root.values) if (v != null) walkForExo(v, out, depth + 1, seen)
+                for (v in root.values) if (v != null) extractPlayers(v, out, depth + 1, seen)
                 return
             }
             is Iterable<*> -> {
-                for (v in root) if (v != null) walkForExo(v, out, depth + 1, seen)
+                for (v in root) if (v != null) extractPlayers(v, out, depth + 1, seen)
                 return
             }
         }
         if (name.contains("SparseArray")) {
             try {
-                val size = (root.javaClass.methods.firstOrNull { it.name == "size" }?.invoke(root) as? Int) ?: 0
+                val size = ((root.javaClass.methods.firstOrNull { it.name == "size" }?.invoke(root) as? Int) ?: 0).coerceAtMost(8)
                 val valueAt = root.javaClass.methods.firstOrNull { it.name == "valueAt" }
                 for (i in 0 until size) {
                     val item = valueAt?.invoke(root, i) ?: continue
-                    walkForExo(item, out, depth + 1, seen)
+                    extractPlayers(item, out, depth + 1, seen)
                 }
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
             }
             return
         }
         var cls: Class<*>? = root.javaClass
-        while (cls != null && cls != Any::class.java) {
+        var hops = 0
+        while (cls != null && cls != Any::class.java && hops < 3) {
+            hops++
             for (field in cls.declaredFields) {
                 try {
                     field.isAccessible = true
                     val v = field.get(root) ?: continue
                     val vn = v.javaClass.name
-                    if (vn.startsWith("android.") && !vn.contains("SparseArray")) continue
-                    if (vn.startsWith("java.") || vn.startsWith("kotlin.")) continue
-                    walkForExo(v, out, depth + 1, seen)
-                } catch (_: Exception) {
+                    if (vn.startsWith("android.") || vn.startsWith("java.") || vn.startsWith("kotlin.")) continue
+                    if (vn.startsWith("androidx.media3") && !vn.contains("ExoPlayer")) continue
+                    extractPlayers(v, out, depth + 1, seen)
+                } catch (_: Throwable) {
                 }
             }
             cls = cls.superclass
@@ -758,6 +796,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun installCrashHook() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+            writeCrash("${e.javaClass.name}: ${e.message}\n${Log.getStackTraceString(e)}")
+            try {
+                emit(
+                    mapOf(
+                        "type" to "crash",
+                        "message" to "${e.javaClass.name}: ${e.message}",
+                        "stack" to Log.getStackTraceString(e)
+                    )
+                )
+            } catch (_: Exception) {
+            }
+            prev?.uncaughtException(Thread.currentThread(), e)
+        }
+    }
+
+    private fun writeCrash(text: String) {
+        try {
+            File(filesDir, "last_crash.txt").writeText(
+                "===== NATIVE ${SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())} =====\n$text"
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun breadcrumb(action: String) {
+        try {
+            File(filesDir, "last_action.txt").writeText(action)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun enterPipNow() {
         if (!isPlaying) return
         if (Build.VERSION.SDK_INT >= 26 && !isInPictureInPictureMode) {
@@ -822,14 +894,16 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun scanVideos(dir: File, depth: Int): List<Map<String, Any?>> {
+    private fun scanVideos(dir: File, depth: Int, hidden: Boolean): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
         if (depth < 0 || !dir.exists() || !dir.canRead()) return out
         val files = dir.listFiles() ?: return out
         for (f in files) {
             if (f.isDirectory) {
-                if (!f.name.startsWith(".")) out.addAll(scanVideos(f, depth - 1))
+                if (shouldSkipDir(f, hidden)) continue
+                out.addAll(scanVideos(f, depth - 1, hidden))
             } else if (isVideoFile(f)) {
+                if (!hidden && f.name.startsWith(".")) continue
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
@@ -842,6 +916,13 @@ class MainActivity : FlutterActivity() {
             }
         }
         return out
+    }
+
+    private fun shouldSkipDir(f: File, hidden: Boolean): Boolean {
+        val n = f.name
+        if (!hidden && n.startsWith(".")) return true
+        val low = n.lowercase()
+        return low == "android" || low == "lost.dir" || low == "thumbnails" || low == ".thumbnails"
     }
 
     companion object {

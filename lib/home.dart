@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import 'android_bridge.dart';
+import 'crash.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
@@ -46,11 +47,9 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     _boot();
     events = AndroidBridge.events().listen(_onEvent);
-    refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+    refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted || !appSettings.autoRefresh) return;
-      library.scan().then((_) {
-        if (mounted) setState(() {});
-      });
+      _refresh();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumePending());
   }
@@ -98,18 +97,40 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  Future<void> _boot() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+  bool _busy = false;
+
+  Future<void> _boot({bool spinner = true}) async {
+    if (_busy) return;
+    _busy = true;
+    if (spinner && library.videos.isEmpty && mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       await library.requestPermissions();
-      if (appSettings.scanOnStart || appSettings.autoRefresh) await library.scan();
-    } catch (e) {
+      if (appSettings.scanOnStart || appSettings.autoRefresh || !spinner) {
+        await library.scan();
+      }
+    } catch (e, s) {
       error = '$e';
+      CrashLog.record('LIBRARY', '$e', s);
     }
+    _busy = false;
     if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _refresh() async {
+    if (_busy) return;
+    _busy = true;
+    try {
+      await library.scan();
+    } catch (e, s) {
+      CrashLog.record('LIBRARY', '$e', s);
+    }
+    _busy = false;
+    if (mounted) setState(() {});
   }
 
   List<VideoItem> get visible => library.sorted(sort, desc: sortDesc, query: query);
@@ -122,6 +143,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _open(VideoItem item, {List<VideoItem>? playlist}) async {
+    await CrashLog.breadcrumb('Play ${item.path}');
     final list = playlist ?? visible;
     final i = list.indexWhere((v) => v.id == item.id);
     await Navigator.of(context).push(MaterialPageRoute(
@@ -251,7 +273,7 @@ class _HomeShellState extends State<HomeShell> {
             selected.clear();
           }),
           onSelectMode: () => setState(() => selecting = true),
-          onRefresh: _boot,
+          onRefresh: _refresh,
           onImport: _import,
           overflow: _overflowItems(),
         ),
@@ -270,7 +292,7 @@ class _HomeShellState extends State<HomeShell> {
           selecting: selecting,
           overflow: _overflowItems(),
           onOverflow: _onOverflow,
-          onRefresh: _boot,
+          onRefresh: _refresh,
         ),
       'settings' => SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow),
       _ => const SizedBox.shrink(),
@@ -286,6 +308,7 @@ class _HomeShellState extends State<HomeShell> {
       const PopupMenuItem(value: 'select', child: Text('Select')),
       const PopupMenuItem(value: 'import', child: Text('Import files')),
       const PopupMenuItem(value: 'tabs', child: Text('Visible tabs')),
+      const PopupMenuItem(value: 'crash', child: Text('Crash report')),
       for (final id in hidden)
         PopupMenuItem(value: 'tab:$id', child: Text(AppSettings.tabLabels[id] ?? id)),
     ];
@@ -293,9 +316,15 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _onOverflow(String v) async {
     if (v == 'eq') {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+      try {
+        await CrashLog.breadcrumb('Open equalizer');
+        if (!context.mounted) return;
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+      } catch (e, s) {
+        CrashLog.record('EQ', '$e', s);
+      }
     } else if (v == 'refresh') {
-      await _boot();
+      await _refresh();
     } else if (v == 'select') {
       setState(() => selecting = true);
     } else if (v == 'import') {
@@ -307,6 +336,8 @@ class _HomeShellState extends State<HomeShell> {
         });
         widget.onSettingsChanged();
       });
+    } else if (v == 'crash') {
+      await CrashLog.show();
     } else if (v.startsWith('tab:')) {
       _openHiddenTab(v.substring(4));
     }
@@ -337,7 +368,7 @@ class _HomeShellState extends State<HomeShell> {
             selecting: selecting,
             overflow: _overflowItems(),
             onOverflow: _onOverflow,
-            onRefresh: _boot,
+            onRefresh: _refresh,
           );
         case 'settings':
           return SettingsHub(onChanged: widget.onSettingsChanged, overflow: _overflowItems(), onOverflow: _onOverflow);
@@ -372,7 +403,7 @@ class _HomeShellState extends State<HomeShell> {
               selected.clear();
             }),
             onSelectMode: () => setState(() => selecting = true),
-            onRefresh: _boot,
+            onRefresh: _refresh,
             onImport: _import,
             overflow: _overflowItems(),
             onOverflow: _onOverflow,

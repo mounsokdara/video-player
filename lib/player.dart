@@ -14,6 +14,7 @@ import 'package:volume_controller/volume_controller.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'android_bridge.dart';
+import 'crash.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
@@ -96,6 +97,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool mirror = false;
   bool invert = false;
   bool _lastPlaying = false;
+  DateTime _lastUi = DateTime.fromMillisecondsSinceEpoch(0);
   final bursts = <_Burst>[];
   int _burstSeq = 0;
   final zoom = TransformationController();
@@ -243,11 +245,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   Future<void> _applySpeed() async {
     final rate = speeding ? 2.0 : speed;
-    await vc?.setPlaybackSpeed(rate);
-    await AndroidBridge.setPlaybackParams(speed: rate, pitchShift: appSettings.pitchShift);
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
-      AndroidBridge.setPlaybackParams(speed: speeding ? 2 : speed, pitchShift: appSettings.pitchShift);
-    });
+    try {
+      await vc?.setPlaybackSpeed(rate);
+    } catch (e, s) {
+      CrashLog.record('SPEED', '$e', s);
+    }
   }
 
   Future<void> _syncBackground() async {
@@ -297,6 +299,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     VideoPlayerController? c;
     try {
+      await CrashLog.breadcrumb('Open video ${item.path}');
       final file = File(item.path);
       if (!file.existsSync()) {
         if (mounted) {
@@ -314,6 +317,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       );
       vc = c;
       await c.initialize();
+      await CrashLog.breadcrumb('Initialized ${item.title}');
       if (!mounted || vc != c) {
         try {
           await c.dispose();
@@ -336,27 +340,26 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       await _applySpeed();
       if (mounted) setState(() => ready = true);
       _armHide();
-      try {
-        await Future<void>.delayed(const Duration(milliseconds: 280));
-        var info = await AndroidBridge.initEqualizer(0);
-        var session = (info?['sessionId'] as num?)?.toInt() ?? 0;
-        if (session == 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 420));
-          info = await AndroidBridge.initEqualizer(0);
+      if (appSettings.eqEnabled) {
+        try {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          await AndroidBridge.initEqualizer(0);
+          await AndroidBridge.setEqEnabled(true);
+          await AndroidBridge.setEqBands(appSettings.eqBands);
+          await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
+          await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+        } catch (e, s) {
+          CrashLog.record('EQ', '$e', s);
         }
-        await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
-        await AndroidBridge.setEqBands(appSettings.eqBands);
-        await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
-        await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
-      } catch (_) {}
-    } catch (e) {
+      }
+    } catch (e, s) {
+      CrashLog.record('PLAY', '$e', s);
       try {
         await c?.dispose();
       } catch (_) {}
       vc = null;
       if (mounted) {
         setState(() => ready = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open: $e')));
       }
     }
   }
@@ -383,8 +386,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
         _onEnded();
       }
-      setState(() {});
-    } catch (_) {}
+      final nowTick = DateTime.now();
+      if (nowTick.difference(_lastUi) >= const Duration(milliseconds: 120)) {
+        _lastUi = nowTick;
+        setState(() {});
+      }
+    } catch (e, s) {
+      CrashLog.record('TICK', '$e', s);
+    }
   }
 
   Future<void> _onEnded() async {
@@ -813,13 +822,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   IconButton(
                     tooltip: appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off',
                     onPressed: () async {
-                      appSettings.eqEnabled = !appSettings.eqEnabled;
-                      await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
-                      await appSettings.save();
-                      setState(() {});
-                      _flash(appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off');
+                      try {
+                        appSettings.eqEnabled = !appSettings.eqEnabled;
+                        if (appSettings.eqEnabled) {
+                          await AndroidBridge.initEqualizer(0);
+                        }
+                        await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
+                        await appSettings.save();
+                        if (mounted) setState(() {});
+                        _flash(appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off');
+                      } catch (e, s) {
+                        CrashLog.record('EQ', '$e', s);
+                      }
                     },
                     onLongPress: () {
+                      CrashLog.breadcrumb('Open equalizer');
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
                     },
                     icon: Icon(Icons.equalizer, color: appSettings.eqEnabled ? Colors.white : Colors.white54),
@@ -996,7 +1013,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       case 'ab':
         _cycleAb();
       case 'eq':
-        if (mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+        try {
+          await CrashLog.breadcrumb('Open equalizer');
+          if (mounted) {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+          }
+        } catch (e, s) {
+          CrashLog.record('EQ', '$e', s);
+        }
       case 'night':
         setState(() {
           night = !night;

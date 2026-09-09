@@ -2,6 +2,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'crash.dart';
 import 'home.dart';
 import 'library.dart';
 import 'models.dart';
@@ -15,8 +16,17 @@ final library = LibraryService(appSettings);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    CrashLog.record('FLUTTER', details.exceptionAsString(), details.stack);
+    FlutterError.presentError(details);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    CrashLog.record('PLATFORM', '$error', stack);
+    return true;
+  };
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   await appSettings.load();
+  await CrashLog.install();
   runApp(const VideoPlayerApp());
 }
 
@@ -34,6 +44,7 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> {
       builder: (light, dark) {
         final mode = appSettings.themeMode;
         return MaterialApp(
+          navigatorKey: appNavigator,
           title: 'Video Player',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(

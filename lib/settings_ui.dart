@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'android_bridge.dart';
+import 'crash.dart';
 import 'main.dart';
 import 'models.dart';
 import 'settings.dart';
@@ -57,22 +58,16 @@ class SettingsHub extends StatelessWidget {
             tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.folder_open),
-              title: const Text('All-files access'),
-              subtitle: const Text('Required to read, write, and delete on SD and USB'),
-              onTap: () => library.ensureAllFiles(),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_sweep_outlined),
-              title: const Text('Media management'),
-              subtitle: const Text('Delete videos without the Android confirmation sheet'),
-              onTap: () => library.ensureManageMedia(),
-            ),
-            ListTile(
               leading: const Icon(Icons.equalizer),
               title: const Text('Equalizer'),
               subtitle: Text(appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off'),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.bug_report_outlined),
+              title: const Text('Crash report'),
+              subtitle: const Text('Copy the last error log'),
+              onTap: () => CrashLog.show(),
             ),
             ListTile(
               leading: const Icon(Icons.info_outline),
@@ -175,7 +170,12 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             onChanged: (v) => set(() => s.autoRefresh = v),
           ),
           SwitchListTile(title: const Text('Confirm before delete'), value: s.confirmDelete, onChanged: (v) => set(() => s.confirmDelete = v)),
-          SwitchListTile(title: const Text('Show hidden folders'), value: s.showHiddenFolders, onChanged: (v) => set(() => s.showHiddenFolders = v)),
+          SwitchListTile(
+            title: const Text('Show hidden files'),
+            subtitle: const Text('Include dot-folders and hidden videos when scanning'),
+            value: s.showHiddenFolders,
+            onChanged: (v) => set(() => s.showHiddenFolders = v),
+          ),
           SwitchListTile(title: const Text('Haptic feedback'), value: s.hapticFeedback, onChanged: (v) => set(() => s.hapticFeedback = v)),
           ListTile(
             title: const Text('Visible tabs'),
@@ -541,20 +541,35 @@ class _EqualizerPageState extends State<EqualizerPage> {
   }
 
   Future<void> _push() async {
-    await AndroidBridge.initEqualizer(0);
-    await AndroidBridge.setEqEnabled(appSettings.eqEnabled);
-    await AndroidBridge.setEqBands(appSettings.eqBands);
-    await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
-    await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+    try {
+      if (!appSettings.eqEnabled) {
+        await AndroidBridge.setEqEnabled(false);
+        return;
+      }
+      await AndroidBridge.initEqualizer(0);
+      await AndroidBridge.setEqEnabled(true);
+      await AndroidBridge.setEqBands(appSettings.eqBands);
+      await AndroidBridge.setBassBoost(on: appSettings.bassBoostOn, strength: appSettings.bassBoost);
+      await AndroidBridge.setSurround(on: appSettings.surroundOn, strength: appSettings.surround);
+    } catch (e, s) {
+      CrashLog.record('EQ', '$e', s);
+    }
   }
 
   Future<void> _persist() async {
-    await appSettings.save();
-    await _push();
-    if (mounted) setState(() {});
+    try {
+      await appSettings.save();
+      await _push();
+      if (mounted) setState(() {});
+    } catch (e, s) {
+      CrashLog.record('EQ', '$e', s);
+    }
   }
 
-  double _bandDb(int i) => (appSettings.eqBands[i] / 100).clamp(minDb, maxDb);
+  double _bandDb(int i) {
+    if (i < 0 || i >= appSettings.eqBands.length) return 0;
+    return (appSettings.eqBands[i] / 100).clamp(minDb, maxDb);
+  }
 
   @override
   Widget build(BuildContext context) {
