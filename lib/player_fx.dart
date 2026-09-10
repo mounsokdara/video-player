@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -23,6 +24,12 @@ class RippleSpec {
   final TapZone zone;
 }
 
+class MidBurst {
+  MidBurst({required this.id, required this.playing});
+  final int id;
+  final bool playing;
+}
+
 class PlayerRippleLayer extends StatelessWidget {
   const PlayerRippleLayer({
     super.key,
@@ -32,10 +39,10 @@ class PlayerRippleLayer extends StatelessWidget {
     required this.rightCount,
     required this.leftOn,
     required this.rightOn,
-    required this.midOn,
-    required this.playing,
+    required this.midBursts,
     required this.reduceMotion,
     required this.onRippleDone,
+    required this.onMidDone,
   });
 
   final Size size;
@@ -44,10 +51,10 @@ class PlayerRippleLayer extends StatelessWidget {
   final int rightCount;
   final bool leftOn;
   final bool rightOn;
-  final bool midOn;
-  final bool playing;
+  final List<MidBurst> midBursts;
   final bool reduceMotion;
   final ValueChanged<int> onRippleDone;
+  final ValueChanged<int> onMidDone;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +95,7 @@ class PlayerRippleLayer extends StatelessWidget {
                       reduceMotion: reduceMotion,
                       onDone: () => onRippleDone(r.id),
                     ),
-                  if (leftOn) _SeekIndicator(seconds: leftCount, left: true),
+                  _SeekIndicator(seconds: leftCount, left: true, wide: size.width >= 700, visible: leftOn),
                 ],
               ),
             ),
@@ -110,12 +117,18 @@ class PlayerRippleLayer extends StatelessWidget {
                       reduceMotion: reduceMotion,
                       onDone: () => onRippleDone(r.id),
                     ),
-                  if (rightOn) _SeekIndicator(seconds: rightCount, left: false),
+                  _SeekIndicator(seconds: rightCount, left: false, wide: size.width >= 700, visible: rightOn),
                 ],
               ),
             ),
           ),
-          if (midOn) _PlayPauseIndicator(playing: playing),
+          for (final b in midBursts)
+            _PlayPauseBurst(
+              key: ValueKey(b.id),
+              playing: b.playing,
+              wide: size.width >= 700,
+              onDone: () => onMidDone(b.id),
+            ),
         ],
       ),
     );
@@ -128,7 +141,7 @@ class _DPadClipper extends CustomClipper<Path> {
 
   @override
   Path getClip(Size size) {
-    final r = Radius.elliptical(size.width, size.height / 2);
+    final r = Radius.elliptical(size.width * 0.5, size.height * 0.5);
     final rect = Offset.zero & size;
     final rrect = fromLeft
         ? RRect.fromRectAndCorners(rect, topRight: r, bottomRight: r)
@@ -181,18 +194,18 @@ class _RippleBlobState extends State<_RippleBlob> with SingleTickerProviderState
   Widget build(BuildContext context) {
     final spec = widget.spec;
     final d = spec.radius * 2;
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, _) {
-        final t = _c.value;
-        final scale = t < 0.70 ? const Cubic(0.18, 0.62, 0.30, 1).transform(t / 0.70) : 1.0;
-        final opacity = t < 0.70 ? 0.55 : 0.55 * (1 - (t - 0.70) / 0.30);
-        return Positioned(
-          left: spec.local.dx - spec.radius,
-          top: spec.local.dy - spec.radius,
-          width: d,
-          height: d,
-          child: Transform.scale(
+    return Positioned(
+      left: spec.local.dx - spec.radius,
+      top: spec.local.dy - spec.radius,
+      width: d,
+      height: d,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, _) {
+          final t = _c.value;
+          final scale = t < 0.70 ? const Cubic(0.18, 0.62, 0.30, 1).transform(t / 0.70) : 1.0;
+          final opacity = t < 0.70 ? 0.55 : 0.55 * (1 - (t - 0.70) / 0.30);
+          return Transform.scale(
             scale: scale,
             child: Opacity(
               opacity: opacity.clamp(0.0, 1.0),
@@ -203,34 +216,84 @@ class _RippleBlobState extends State<_RippleBlob> with SingleTickerProviderState
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
 
-class _SeekIndicator extends StatelessWidget {
-  const _SeekIndicator({required this.seconds, required this.left});
+class _SeekIndicator extends StatefulWidget {
+  const _SeekIndicator({required this.seconds, required this.left, required this.wide, required this.visible});
   final int seconds;
   final bool left;
+  final bool wide;
+  final bool visible;
+
+  @override
+  State<_SeekIndicator> createState() => _SeekIndicatorState();
+}
+
+class _SeekIndicatorState extends State<_SeekIndicator> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 390));
+    if (widget.visible) _c.value = 1;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SeekIndicator old) {
+    super.didUpdateWidget(old);
+    if (widget.visible && !old.visible) {
+      _c.duration = const Duration(milliseconds: 390);
+      _c.forward();
+    } else if (!widget.visible && old.visible) {
+      _c.duration = const Duration(milliseconds: 390);
+      _c.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final chevs = _Chevrons(left: left);
-    final secs = _PopSecs(key: ValueKey(seconds), value: seconds);
-    return Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: left ? [secs, const SizedBox(width: 14), chevs] : [chevs, const SizedBox(width: 14), secs],
+    final gap = widget.wide ? 16.0 : 14.0;
+    final chevs = _Chevrons(left: widget.left, wide: widget.wide);
+    final secs = _PopSecs(key: ValueKey(widget.seconds), value: widget.seconds, wide: widget.wide);
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, child) {
+          final t = const Cubic(0.2, 0.8, 0.2, 1).transform(_c.value);
+          // HTML: opacity 280ms ease, transform 390ms cubic-bezier(0.2, 0.8, 0.2, 1)
+          final opacity = Curves.ease.transform(_c.value.clamp(0.0, 1.0));
+          return Opacity(
+            opacity: opacity,
+            child: Transform.scale(scale: 0.86 + 0.14 * t, child: child),
+          );
+        },
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: widget.left ? [secs, SizedBox(width: gap), chevs] : [chevs, SizedBox(width: gap), secs],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _PopSecs extends StatefulWidget {
-  const _PopSecs({super.key, required this.value});
+  const _PopSecs({super.key, required this.value, required this.wide});
   final int value;
+  final bool wide;
 
   @override
   State<_PopSecs> createState() => _PopSecsState();
@@ -262,13 +325,14 @@ class _PopSecsState extends State<_PopSecs> with SingleTickerProviderStateMixin 
       },
       child: Text(
         '${widget.value}',
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
-          fontSize: 26,
+          fontSize: widget.wide ? 30 : 26,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.5,
           height: 1,
-          shadows: [Shadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 2))],
+          fontFeatures: const [FontFeature.tabularFigures()],
+          shadows: const [Shadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 2))],
         ),
       ),
     );
@@ -276,20 +340,22 @@ class _PopSecsState extends State<_PopSecs> with SingleTickerProviderStateMixin 
 }
 
 class _Chevrons extends StatelessWidget {
-  const _Chevrons({required this.left});
+  const _Chevrons({required this.left, required this.wide});
   final bool left;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final angle = left ? -135 * math.pi / 180 : 45 * math.pi / 180;
+    final s = wide ? 14.0 : 12.0;
     Widget chev(double opacity) {
       return Opacity(
         opacity: opacity,
         child: Transform.rotate(
           angle: angle,
           child: Container(
-            width: 12,
-            height: 12,
+            width: s,
+            height: s,
             margin: const EdgeInsets.symmetric(horizontal: 0.5),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(2),
@@ -308,35 +374,89 @@ class _Chevrons extends StatelessWidget {
   }
 }
 
-class _PlayPauseIndicator extends StatelessWidget {
-  const _PlayPauseIndicator({required this.playing});
+class _PlayPauseBurst extends StatefulWidget {
+  const _PlayPauseBurst({super.key, required this.playing, required this.wide, required this.onDone});
   final bool playing;
+  final bool wide;
+  final VoidCallback onDone;
+
+  @override
+  State<_PlayPauseBurst> createState() => _PlayPauseBurstState();
+}
+
+class _PlayPauseBurstState extends State<_PlayPauseBurst> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  bool _out = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 480))..forward();
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      setState(() => _out = true);
+      _c.duration = const Duration(milliseconds: 200);
+      _c.reverse();
+      Future<void>.delayed(const Duration(milliseconds: 240), () {
+        if (mounted) widget.onDone();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: 88,
-        height: 88,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.black.withValues(alpha: 0.30),
-          boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 28, offset: Offset(0, 8))],
-        ),
-        child: Center(
-          child: playing
-              ? Padding(
-                  padding: const EdgeInsets.only(left: 6),
-                  child: CustomPaint(size: const Size(26, 32), painter: _PlayPainter()),
-                )
-              : const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _PauseBar(),
-                    SizedBox(width: 9),
-                    _PauseBar(),
-                  ],
+    final box = widget.wide ? 104.0 : 88.0;
+    final barW = widget.wide ? 11.0 : 9.0;
+    final barH = widget.wide ? 38.0 : 32.0;
+    final playW = widget.wide ? 30.0 : 26.0;
+    final playH = widget.wide ? 38.0 : 32.0;
+    return IgnorePointer(
+      child: Center(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) {
+            final t = _c.value;
+            final scale = _out
+                ? const Cubic(0.4, 0, 1, 0.6).transform(t)
+                : const Cubic(0.34, 1.75, 0.64, 1).transform(t);
+            final opacity = _out ? Curves.linear.transform(t).clamp(0.0, 1.0) : Curves.ease.transform(t.clamp(0.0, 1.0));
+            return Opacity(
+              opacity: opacity,
+              child: Transform.scale(
+                scale: scale.clamp(0.0, 1.35),
+                child: Container(
+                  width: box,
+                  height: box,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.30),
+                    boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 28, offset: Offset(0, 8))],
+                  ),
+                  child: Center(
+                    child: widget.playing
+                        ? Padding(
+                            padding: EdgeInsets.only(left: widget.wide ? 8 : 7),
+                            child: CustomPaint(size: Size(playW, playH), painter: _PlayPainter()),
+                          )
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _PauseBar(width: barW, height: barH),
+                              const SizedBox(width: 9),
+                              _PauseBar(width: barW, height: barH),
+                            ],
+                          ),
+                  ),
                 ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -344,12 +464,14 @@ class _PlayPauseIndicator extends StatelessWidget {
 }
 
 class _PauseBar extends StatelessWidget {
-  const _PauseBar();
+  const _PauseBar({this.width = 9, this.height = 32});
+  final double width;
+  final double height;
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 9,
-      height: 32,
+      width: width,
+      height: height,
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(3)),
     );
   }

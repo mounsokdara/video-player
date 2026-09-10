@@ -188,7 +188,9 @@ class MainActivity : FlutterActivity() {
                                 "portrait_normal" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                 "portrait_reverse" -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
                                 "locked" -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
-                                else -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                                "user" -> ActivityInfo.SCREEN_ORIENTATION_USER
+                                "sensor", "auto" -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                                else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                             }
                             result.success(true)
                         }

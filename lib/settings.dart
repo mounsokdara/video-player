@@ -118,6 +118,22 @@ class AppSettings {
     'rotate': 'Rotate',
     'share': 'Share',
     'night': 'Night mode',
+    'zoom': 'Zoom',
+    'skipBack': 'Seek back',
+    'skipForward': 'Seek forward',
+    'popup': 'Pop-up',
+    'color': 'Color',
+    'timer': 'Timer',
+    'properties': 'Properties',
+    'playopt': 'Play option',
+    'decoder': 'Decoder',
+    'mirror': 'Mirror',
+    'invert': 'Invert',
+    'subtitle': 'Subtitle',
+    'repeat': 'Playlist',
+    'delete': 'Delete',
+    'cast': 'Cast',
+    'navbar': 'Hide navigation bar',
   };
 
   List<String> quickActions = List<String>.from(defaultQuickActions);

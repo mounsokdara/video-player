@@ -173,6 +173,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _rightOn = false;
   bool _midOn = false;
   bool _midPlayingIcon = true;
+  final _midBursts = <MidBurst>[];
   String? _currentSide;
   Timer? _leftHide;
   Timer? _rightHide;
@@ -180,8 +181,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   DateTime _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _midTap = DateTime.fromMillisecondsSinceEpoch(0);
+  String _gesture = '';
   bool _previewBusy = false;
   double? _previewWant;
+  bool _tapBurst = false;
+  bool _ateTap = false;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -300,8 +304,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _applyRotation() {
     final m = switch (appSettings.rotation) {
-      RotationLock.auto => 'auto',
-      RotationLock.autoVideo => 'auto',
+      RotationLock.auto => 'sensor',
+      RotationLock.autoVideo => _orientForVideo(),
       RotationLock.landscape => 'landscape',
       RotationLock.portrait => 'portrait',
       RotationLock.landscapeNormal => 'landscape_normal',
@@ -311,6 +315,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       RotationLock.locked => 'locked',
     };
     AndroidBridge.setOrientation(m);
+  }
+
+  String _orientForVideo() {
+    Size? s;
+    try {
+      s = vc?.value.size;
+    } catch (_) {}
+    if (s == null || s.width <= 0 || s.height <= 0) return 'sensor';
+    if (s.width > s.height) return 'landscape';
+    if (s.width < s.height) return 'portrait';
+    return 'sensor';
   }
 
   void _applySystemUi() {
@@ -448,6 +463,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_applySpeed());
       unawaited(AndroidBridge.preparePreview(item.path));
       unawaited(_applyEq());
+      _applyRotation();
       if (mounted && gen == _playerGen) setState(() => ready = true);
       _armHide();
     } catch (e, s) {
@@ -657,17 +673,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     AndroidBridge.setKeepScreenOn(false);
     AndroidBridge.setPlaying(false);
     AndroidBridge.setPipEnabled(false);
-    AndroidBridge.setOrientation('auto');
+    AndroidBridge.setOrientation('sensor');
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
+  }
+
+  double _safeBottom(BuildContext context) {
+    // View padding is the real nav / cutout. Gesture insets are not layout
+    // padding — treating them as such built a full-screen hit sink that ate
+    // every control tap.
+    final pad = MediaQuery.viewPaddingOf(context);
+    return pad.bottom.clamp(0.0, 56.0);
   }
 
   @override
   Widget build(BuildContext context) {
     final c = vc;
     final size = MediaQuery.sizeOf(context);
-    final pad = MediaQuery.paddingOf(context);
-    final insets = MediaQuery.viewInsetsOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
+    final safeBottom = _safeBottom(context);
     return Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
@@ -681,14 +705,36 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           children: [
             GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTapDown: (d) => _tapPos = d.localPosition,
+              onTapDown: (d) {
+                _tapPos = d.localPosition;
+                _tapBurst = false;
+                if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') {
+                  _ateTap = true;
+                  return;
+                }
+                if (_wouldBurst(_tapPos ?? Offset.zero, size)) {
+                  _tapBurst = true;
+                  _ateTap = true;
+                  _onVideoTap(_tapPos ?? Offset.zero, size);
+                } else {
+                  _armFirstTap(_tapPos ?? Offset.zero, size);
+                }
+              },
               onTap: () {
-                if (locked || _pts.length >= 2 || _pinching) return;
-                _onVideoTap(_tapPos ?? Offset.zero, size);
+                if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') return;
+                if (_tapBurst || _ateTap) {
+                  _tapBurst = false;
+                  _ateTap = false;
+                  return;
+                }
+                _uiBeforeTap = showUi;
+                _setUi(!showUi);
               },
               onLongPressStart: (_) async {
                 if (locked || !appSettings.longPress2x || c == null) return;
-                if (_pts.length >= 2 || _pinching) return;
+                if (_pts.length >= 2 || _pinching || _gesture == 'pan') return;
+                _gesture = 'hold';
+                _ateTap = true;
                 speeding = true;
                 unawaited(_applySpeed());
                 if (appSettings.longPressVibration) {
@@ -701,12 +747,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               onLongPressEnd: (_) async {
                 if (!speeding) return;
                 speeding = false;
+                _gesture = '';
                 unawaited(_applySpeed());
                 setState(() {});
               },
               onPanStart: (d) {
                 if (locked || !appSettings.gestureControl) return;
-                if (_pts.length >= 2 || _pinching) return;
+                if (_pts.length >= 2 || _pinching || _gesture == 'hold' || _gesture == 'pinch') return;
+                _gesture = 'pan';
+                _tapBurst = false;
+                _ateTap = true;
+                _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
+                _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
+                _midTap = DateTime.fromMillisecondsSinceEpoch(0);
                 panStart = d.localPosition;
                 panKind = '';
               },
@@ -758,6 +811,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 panKind = '';
                 _scrub = null;
                 _previewBytes = null;
+                _gesture = '';
                 if (mounted) setState(() {});
               },
               child: ColoredBox(
@@ -781,8 +835,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               rightCount: _rightCount,
               leftOn: _leftOn,
               rightOn: _rightOn,
-              midOn: _midOn,
-              playing: _midPlayingIcon,
+              midBursts: _midBursts,
               reduceMotion: appSettings.reduceMotion,
               onRippleDone: (id) {
                 if (!mounted) return;
@@ -790,6 +843,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   _ripples.removeWhere((e) => e.id == id);
                   _activeRipples = (_activeRipples - 1).clamp(0, 99);
                 });
+              },
+              onMidDone: (id) {
+                if (!mounted) return;
+                setState(() => _midBursts.removeWhere((e) => e.id == id));
               },
             ),
             if (speeding)
@@ -823,7 +880,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             if (locked)
               Positioned(
                 right: 16 + pad.right,
-                bottom: 24 + pad.bottom + insets.bottom,
+                bottom: 24 + safeBottom,
                 child: IconButton.filledTonal(
                   onPressed: () {
                     setState(() {
@@ -838,17 +895,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               ),
             if (showUi && !locked) ..._chrome(c, size),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
-            if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
-              Positioned(
-                left: (size.width * _scrub!).clamp(16, size.width - 156),
-                bottom: (showUi && !locked ? 118 : 88) + pad.bottom,
-                child: IgnorePointer(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.memory(_previewBytes!, width: 140, fit: BoxFit.cover),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -858,6 +904,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _pinchDown(PointerDownEvent e, Size size) {
     _pts[e.pointer] = e.localPosition;
     if (_pts.length == 2 && appSettings.allowZoom) {
+      if (_gesture == 'pan' || _gesture == 'hold') return;
+      _gesture = 'pinch';
+      _ateTap = true;
       final pts = _pts.values.toList();
       _pinchStart = (pts[0] - pts[1]).distance;
       _pinchBase = _zoomScale;
@@ -883,7 +932,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _pinchStartFocal = focal;
       return;
     }
-    final nextScale = (_pinchBase * dist / _pinchStart).clamp(1.0, 6.0);
+    final nextScale = (_pinchBase * dist / _pinchStart).clamp(0.01, 10.0);
     final center = Offset(size.width / 2, size.height / 2);
     Offset nextPan;
     if (nextScale <= 1.001) {
@@ -897,8 +946,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     if ((nextScale - _zoomScale).abs() > 0.004 || (nextPan - _zoomPan).distance > 0.5) {
       setState(() {
-        _zoomScale = nextScale <= 1.001 ? 1 : nextScale;
-        _zoomPan = nextPan;
+        _zoomScale = nextScale;
+        _zoomPan = nextScale <= 0.011 ? Offset.zero : nextPan;
         _pinching = true;
         _showZoomHud = true;
       });
@@ -909,8 +958,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _pts.remove(pointer);
     if (_pts.length < 2 && _pinching) {
       _pinching = false;
-      if (_zoomScale <= 1.001) {
-        _zoomScale = 1;
+      _gesture = '';
+      if (_zoomScale < 0.011) {
+        _zoomScale = 0.01;
         _zoomPan = Offset.zero;
       }
       _zoomHudTimer?.cancel();
@@ -918,6 +968,36 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (mounted) setState(() => _showZoomHud = false);
       });
       if (mounted) setState(() {});
+    }
+  }
+
+  bool _wouldBurst(Offset pos, Size size) {
+    final now = DateTime.now();
+    final zone = tapZoneFor(pos, size);
+    final last = switch (zone) {
+      TapZone.left => _leftTap,
+      TapZone.right => _rightTap,
+      TapZone.middle => _midTap,
+    };
+    final zoneOn = switch (zone) {
+      TapZone.left => _leftOn,
+      TapZone.right => _rightOn,
+      TapZone.middle => _midOn,
+    };
+    return _activeRipples > 0 || now.difference(last) < const Duration(milliseconds: 320) || zoneOn;
+  }
+
+  void _armFirstTap(Offset pos, Size size) {
+    final now = DateTime.now();
+    final zone = tapZoneFor(pos, size);
+    _uiBeforeTap = showUi;
+    switch (zone) {
+      case TapZone.left:
+        _leftTap = now;
+      case TapZone.right:
+        _rightTap = now;
+      case TapZone.middle:
+        _midTap = now;
     }
   }
 
@@ -947,7 +1027,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _tapAt = now;
     _tapPos = pos;
 
-    // HTML first tap is a no-op; here it toggles chrome so the controller stays snappy.
     if (!rippleActive && !isDouble && !zoneOn) {
       if (zone == TapZone.left) _leftTap = now;
       if (zone == TapZone.right) _rightTap = now;
@@ -957,9 +1036,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
 
-    if (isDouble) {
-      _setUi(_uiBeforeTap);
-    }
+    _setUi(_uiBeforeTap);
 
     if (zone == TapZone.left || zone == TapZone.right) {
       if (!appSettings.doubleTapSeek) {
@@ -1019,6 +1096,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _togglePlay();
     _midPlayingIcon = !playing;
     _spawnRipple(TapZone.middle, pos, size);
+    _midBursts.add(MidBurst(id: _rippleSeq, playing: !playing));
     _midHide?.cancel();
     _midHide = Timer(midHide, () {
       if (!mounted) return;
@@ -1116,7 +1194,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final w = screen.width <= 0 ? 1.0 : screen.width;
     final h = screen.height <= 0 ? 1.0 : screen.height;
     player = SizedBox(width: w, height: h, child: player);
-    if (_zoomScale > 1.001 || _zoomPan != Offset.zero) {
+    if (_zoomScale > 1.001 || _zoomScale < 0.999 || _zoomPan != Offset.zero) {
       player = Transform(
         alignment: Alignment.center,
         transform: Matrix4.identity()
@@ -1170,10 +1248,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       case AspectMode.stretch:
         return SizedBox(width: screen.width, height: screen.height, child: child);
       case AspectMode.original:
-        return OverflowBox(
-          maxWidth: vw,
-          maxHeight: vh,
-          child: SizedBox(width: vw, height: vh, child: child),
+        final scale = math.min(1.0, math.min(screen.width / vw, screen.height / vh));
+        return Center(
+          child: SizedBox(
+            width: vw * scale,
+            height: vh * scale,
+            child: child,
+          ),
         );
       case AspectMode.ratio16_9:
         return AspectRatio(aspectRatio: 16 / 9, child: child);
@@ -1195,10 +1276,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final dur = c?.value.duration ?? Duration.zero;
     final playing = c?.value.isPlaying ?? false;
     final remain = dur - pos;
-    final pad = MediaQuery.paddingOf(context);
-    final insets = MediaQuery.viewInsetsOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
+    final safeBottom = _safeBottom(context);
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
+    final wide = size.width >= 600;
     return [
       Positioned(
         top: 0,
@@ -1275,7 +1357,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           onPointerUp: (_) => _holdChrome(false),
           onPointerCancel: (_) => _holdChrome(false),
           child: Container(
-          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom + insets.bottom),
+          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + safeBottom),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
           ),
@@ -1301,34 +1383,52 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           child: Container(width: 2, height: 22, color: color),
                         );
                       }
-                      return Stack(
-                        alignment: Alignment.center,
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              overlayColor: Colors.white24,
-                              trackHeight: 2,
+                          if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
+                            Align(
+                              alignment: Alignment((frac * 2 - 1).clamp(-1.0, 1.0), 0),
+                              child: Transform.translate(
+                                offset: const Offset(0, -6),
+                                child: IgnorePointer(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.memory(_previewBytes!, width: 140, height: 80, fit: BoxFit.cover),
+                                  ),
+                                ),
+                              ),
                             ),
-                            child: Slider(
-                              value: frac,
-                              onChangeStart: (_) => _holdChrome(true),
-                              onChanged: (v) {
-                                setState(() => _scrub = v);
-                                _queuePreview(v);
-                              },
-                              onChangeEnd: (v) async {
-                                _holdChrome(false);
-                                if (c == null) return;
-                                await c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
-                                setState(() {
-                                  _scrub = null;
-                                  _previewBytes = null;
-                                });
-                              },
-                            ),
+                          Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  overlayColor: Colors.white24,
+                                  trackHeight: 2,
+                                ),
+                                child: Slider(
+                                  value: frac,
+                                  onChangeStart: (_) => _holdChrome(true),
+                                  onChanged: (v) {
+                                    setState(() => _scrub = v);
+                                    _queuePreview(v);
+                                  },
+                                  onChangeEnd: (v) async {
+                                    _holdChrome(false);
+                                    if (c == null) return;
+                                    await c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
+                                    setState(() {
+                                      _scrub = null;
+                                      _previewBytes = null;
+                                    });
+                                  },
+                                ),
+                              ),
+                              mark(abA, const Color(0xFFFFC107)),
+                              mark(abB, const Color(0xFFFF7043)),
+                            ],
                           ),
-                          mark(abA, const Color(0xFFFFC107)),
-                          mark(abB, const Color(0xFFFF7043)),
                         ],
                       );
                     }),
@@ -1361,6 +1461,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
+                          if (wide)
+                            IconButton(
+                              tooltip: 'Seek back',
+                              onPressed: () => unawaited(_seekBy(-appSettings.seekStepSeconds)),
+                              icon: Icon(Icons.replay_10, color: Colors.white, size: iconSize),
+                            ),
                           IconButton(
                             tooltip: 'Previous',
                             onPressed: () => unawaited(_prev()),
@@ -1375,6 +1481,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                             onPressed: () => unawaited(_next()),
                             icon: Icon(Icons.skip_next, color: Colors.white, size: iconSize),
                           ),
+                          if (wide)
+                            IconButton(
+                              tooltip: 'Seek forward',
+                              onPressed: () => unawaited(_seekBy(appSettings.seekStepSeconds)),
+                              icon: Icon(Icons.forward_10, color: Colors.white, size: iconSize),
+                            ),
                         ],
                       ),
                     ),
@@ -1403,21 +1515,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         'ab' => abA != null,
         _ => false,
       };
-      final icon = switch (id) {
-        'speed' => Icons.speed,
-        'background' => Icons.headphones_outlined,
-        'screenshot' => Icons.camera_alt_outlined,
-        'lock' => Icons.lock_outline,
-        'aspect' => Icons.aspect_ratio,
-        'ab' => Icons.repeat,
-        'eq' => Icons.equalizer,
-        'bookmark' => Icons.bookmark_outline,
-        'brightness' => Icons.brightness_6_outlined,
-        'rotate' => Icons.screen_rotation,
-        'share' => Icons.share_outlined,
-        'night' => Icons.nights_stay_outlined,
-        _ => Icons.tune,
-      };
+      final icon = _actionIcon(id);
       final label = AppSettings.allQuickActions[id] ?? id;
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1519,6 +1617,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _flash('${appSettings.decoder.name.toUpperCase()} decoder');
       case 'screenshot':
         _screenshot();
+      case 'zoom':
+        await _zoomSheet();
+      case 'skipBack':
+        unawaited(_seekBy(-appSettings.seekStepSeconds));
+      case 'skipForward':
+        unawaited(_seekBy(appSettings.seekStepSeconds));
       case 'quickbar':
         if (mounted) {
           await Navigator.push(
@@ -1530,8 +1634,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
       case 'properties':
         await showProperties(context, item);
+      case 'navbar':
+        appSettings.alwaysHideNavBar = !appSettings.alwaysHideNavBar;
+        await appSettings.save();
+        _applySystemUi();
+        _flash(appSettings.alwaysHideNavBar ? 'Navigation bar hidden' : 'Navigation bar follows controls');
       default:
-        await _more();
+        break;
     }
   }
 
@@ -1689,122 +1798,88 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, ss) {
-          void refresh() {
-            ss(() {});
-            setState(() {});
-          }
-
-          Widget go(IconData i, String t, String id, {String? sub}) => ListTile(
-                leading: Icon(i),
-                title: Text(t),
-                subtitle: sub == null ? null : Text(sub),
+        final pad = MediaQuery.viewPaddingOf(ctx);
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.86,
+          builder: (_, sc) => ListView(
+            controller: sc,
+            padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom + 16),
+            children: [
+              const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+              ListTile(
+                leading: const Icon(Icons.dashboard_customize_outlined),
+                title: const Text('Organize quick actions'),
+                subtitle: const Text('Everything in More lives in this catalog'),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await _runAction(id);
+                  if (!mounted) return;
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: () { if (mounted) setState(() {}); })),
+                  );
                 },
-              );
-
-          Widget tog(IconData i, String t, bool v, Future<void> Function(bool) on, {String? sub}) => SwitchListTile(
-                secondary: Icon(i),
-                title: Text(t),
-                subtitle: sub == null ? null : Text(sub),
-                value: v,
-                onChanged: (n) async {
-                  await on(n);
-                  await appSettings.save();
-                  refresh();
-                },
-              );
-
-          Widget head(String t) => Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text(t, style: TextStyle(color: Theme.of(ctx).colorScheme.primary, fontWeight: FontWeight.w600)),
-              );
-
-          final pad = MediaQuery.paddingOf(ctx);
-          final insets = MediaQuery.viewInsetsOf(ctx);
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.86,
-            builder: (_, sc) => ListView(
-              controller: sc,
-              padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom + 16),
-              children: [
-                const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+              ),
+              for (final e in AppSettings.allQuickActions.entries)
                 ListTile(
-                  leading: const Icon(Icons.dashboard_customize_outlined),
-                  title: const Text('Organize quick actions'),
-                  subtitle: const Text('Drag to reorder, check to show on the bar'),
+                  leading: Icon(_actionIcon(e.key)),
+                  title: Text(e.value),
+                  subtitle: _actionSub(e.key) == null ? null : Text(_actionSub(e.key)!),
                   onTap: () async {
                     Navigator.pop(ctx);
-                    if (!mounted) return;
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: () { if (mounted) setState(() {}); })),
-                    );
+                    await _runAction(e.key);
                   },
                 ),
-                head('Playback'),
-                go(Icons.lock_outline, 'Lock', 'lock'),
-                go(Icons.aspect_ratio, 'Screen mode', 'aspect'),
-                go(Icons.speed, 'Speed', 'speed', sub: '${speed.toStringAsFixed(2)}×'),
-                go(Icons.tune, 'Play option', 'playopt'),
-                go(Icons.repeat, 'AB Repeat', 'ab'),
-                go(Icons.queue_music, 'Repeat mode', 'repeat'),
-                go(Icons.memory, 'Decoder', 'decoder', sub: appSettings.decoder.name.toUpperCase()),
-                head('Audio'),
-                tog(Icons.headphones_outlined, 'Background play', appSettings.backgroundPlay, _toggleBackground, sub: 'Music-style notification, keeps audio going'),
-                tog(Icons.graphic_eq, 'Pitch shift', appSettings.pitchShift, (n) async {
-                  appSettings.pitchShift = n;
-                  await _applySpeed();
-                }, sub: 'On: pitch follows speed. Off: time-stretch.'),
-                go(Icons.equalizer, 'Equalizer', 'eq', sub: appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off'),
-                head('Picture'),
-                tog(Icons.subtitles_outlined, 'Subtitle', appSettings.captions, (n) async {
-                  appSettings.captions = n;
-                }),
-                tog(Icons.nights_stay_outlined, 'Night mode', night, (n) async {
-                  night = n;
-                  appSettings.nightMode = n;
-                }),
-                tog(Icons.flip, 'Mirror', mirror, (n) async {
-                  mirror = n;
-                  appSettings.mirror = n;
-                }),
-                tog(Icons.invert_colors, 'Invert filter', invert, (n) async {
-                  invert = n;
-                  appSettings.invertColors = n;
-                }),
-                tog(Icons.color_lens_outlined, 'Color correction', appSettings.colorCorrection, (n) async {
-                  appSettings.colorCorrection = n;
-                }, sub: 'Contrast, saturation, gamma, hue'),
-                go(Icons.tune, 'Color correction sliders', 'color'),
-                go(Icons.screen_rotation, 'Rotation control', 'rotate'),
-                go(Icons.brightness_6_outlined, 'Brightness', 'brightness'),
-                head('System'),
-                tog(Icons.picture_in_picture_alt, 'Pop-up', appSettings.autoMiniplayer, _togglePopup, sub: 'Only while playing'),
-                tog(Icons.navigation_outlined, 'Always hide navigation bar', appSettings.alwaysHideNavBar, (n) async {
-                  appSettings.alwaysHideNavBar = n;
-                  _applySystemUi();
-                }, sub: 'Otherwise the system bar follows the controller'),
-                go(Icons.timer_outlined, 'Timer', 'timer'),
-                go(Icons.cast, 'Cast', 'cast'),
-                head('File'),
-                tog(item.bookmarked ? Icons.bookmark : Icons.bookmark_border, 'Bookmark', item.bookmarked, (n) async {
-                  _toggleBookmark();
-                }),
-                go(Icons.camera_alt_outlined, 'Screenshot', 'screenshot', sub: 'Saves the current frame to DCIM/Screenshots'),
-                go(Icons.share_outlined, 'Share', 'share'),
-                go(Icons.delete_outline, 'Delete', 'delete'),
-                go(Icons.info_outline, 'Properties', 'properties'),
-              ],
-            ),
-          );
-        });
+            ],
+          ),
+        );
       },
     );
   }
+
+  IconData _actionIcon(String id) => switch (id) {
+        'speed' => Icons.speed,
+        'background' => Icons.headphones_outlined,
+        'screenshot' => Icons.camera_alt_outlined,
+        'lock' => Icons.lock_outline,
+        'aspect' => Icons.aspect_ratio,
+        'ab' => Icons.repeat,
+        'eq' => Icons.equalizer,
+        'bookmark' => Icons.bookmark_outline,
+        'brightness' => Icons.brightness_6_outlined,
+        'rotate' => Icons.screen_rotation,
+        'share' => Icons.share_outlined,
+        'night' => Icons.nights_stay_outlined,
+        'zoom' => Icons.zoom_in,
+        'skipBack' => Icons.replay_10,
+        'skipForward' => Icons.forward_10,
+        'popup' => Icons.picture_in_picture_alt,
+        'color' => Icons.color_lens_outlined,
+        'timer' => Icons.timer_outlined,
+        'properties' => Icons.info_outline,
+        'playopt' => Icons.tune,
+        'decoder' => Icons.memory,
+        'mirror' => Icons.flip,
+        'invert' => Icons.invert_colors,
+        'subtitle' => Icons.subtitles_outlined,
+        'repeat' => Icons.queue_music,
+        'delete' => Icons.delete_outline,
+        'cast' => Icons.cast,
+        'navbar' => Icons.navigation_outlined,
+        _ => Icons.tune,
+      };
+
+  String? _actionSub(String id) => switch (id) {
+        'speed' => '${speed.toStringAsFixed(2)}×',
+        'zoom' => '${(_zoomScale * 100).round()}%',
+        'decoder' => appSettings.decoder.name.toUpperCase(),
+        'eq' => appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off',
+        'background' => appSettings.backgroundPlay ? 'On' : 'Off',
+        'popup' => appSettings.autoMiniplayer ? 'On' : 'Off',
+        'navbar' => appSettings.alwaysHideNavBar ? 'Always hidden' : 'Follows controls',
+        _ => null,
+      };
 
   Future<void> _simple(String t, String b) async {
     if (!mounted) return;
@@ -1911,6 +1986,75 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         });
       },
     );
+  }
+
+  Future<void> _zoomSheet() async {
+    var local = (_zoomScale * 100).clamp(1, 1000);
+    final box = TextEditingController(text: local.round().toString());
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        final pad = MediaQuery.viewPaddingOf(ctx);
+        return StatefulBuilder(builder: (ctx, ss) {
+          void apply(double pct) {
+            local = pct.clamp(1, 1000);
+            box.text = local.round().toString();
+            setState(() {
+              _zoomScale = local / 100;
+              if (_zoomScale <= 1.001) _zoomPan = Offset.zero;
+              _showZoomHud = true;
+            });
+            _zoomHudTimer?.cancel();
+            _zoomHudTimer = Timer(const Duration(milliseconds: 900), () {
+              if (mounted) setState(() => _showZoomHud = false);
+            });
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Zoom', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                Slider(
+                  min: 1,
+                  max: 1000,
+                  value: local.toDouble(),
+                  onChanged: (v) => ss(() => apply(v)),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: box,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Percent',
+                          suffixText: '%',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (t) {
+                          final n = double.tryParse(t);
+                          if (n != null) ss(() => apply(n));
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    TextButton(
+                      onPressed: () => ss(() => apply(100)),
+                      child: const Text('Reset'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+    box.dispose();
   }
 
   Future<void> _brightnessSheet() async {

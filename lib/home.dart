@@ -10,6 +10,7 @@ import 'android_bridge.dart';
 import 'crash.dart';
 import 'library.dart';
 import 'main.dart';
+import 'mini_player.dart';
 import 'models.dart';
 import 'player.dart';
 import 'settings.dart';
@@ -42,8 +43,6 @@ class _HomeShellState extends State<HomeShell> {
 
   String? folderPath;
   final folderTrail = <String>[];
-  Offset? _miniPos;
-  bool _miniDragging = false;
   bool _miniPlaying = false;
 
   @override
@@ -490,13 +489,27 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     final body = pageFor(current);
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
 
     Widget shell(Widget child) {
       return Stack(
         children: [
           child,
-          if (PlaybackSession.active) _miniPlayer(scheme, pad, wide),
+          if (PlaybackSession.active)
+            MiniPlayerOverlay(
+              pad: pad,
+              navH: wide || tabs.length <= 1 ? 16.0 : 88.0,
+              onExpand: () {
+                final item = PlaybackSession.item;
+                if (item != null) unawaited(_open(item, playlist: PlaybackSession.playlist));
+              },
+              onClose: () async {
+                await PlaybackSession.stop();
+                if (mounted) setState(() {});
+              },
+              onPrev: () => _sessionSkip(-1),
+              onNext: () => _sessionSkip(1),
+            ),
         ],
       );
     }
@@ -540,161 +553,6 @@ class _HomeShellState extends State<HomeShell> {
               destinations: [for (final id in tabs) dest(id)],
             ),
       backgroundColor: scheme.surface,
-    );
-  }
-
-  Widget _miniPlayer(ColorScheme scheme, EdgeInsets pad, bool wide) {
-    final c = PlaybackSession.controller;
-    final item = PlaybackSession.item;
-    final playing = c?.value.isPlaying ?? false;
-    const w = 220.0;
-    const videoH = 124.0;
-    const barH = 40.0;
-    const h = videoH + barH;
-    final size = MediaQuery.sizeOf(context);
-    final navH = wide || tabs.length <= 1 ? 16.0 : 88.0;
-    final defLeft = size.width - w - 12;
-    final defTop = size.height - h - 12 - navH - pad.bottom;
-    final pos = _miniPos ?? Offset(defLeft.clamp(8, size.width - w - 8), defTop.clamp(pad.top + 8, size.height - h - 8));
-
-    Widget video;
-    try {
-      if (c != null && c.value.isInitialized) {
-        video = FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: c.value.size.width.clamp(1, 4000),
-            height: c.value.size.height.clamp(1, 4000),
-            child: VideoPlayer(key: ValueKey(item?.path), c),
-          ),
-        );
-      } else {
-        video = ColoredBox(color: scheme.surfaceContainerHighest, child: const Center(child: Icon(Icons.play_circle, color: Colors.white70)));
-      }
-    } catch (_) {
-      video = ColoredBox(color: scheme.surfaceContainerHighest);
-    }
-
-    Widget ctrl({required String tooltip, required VoidCallback onPressed, required IconData icon}) {
-      return IconButton(
-        visualDensity: VisualDensity.compact,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-        color: scheme.onSurface,
-        tooltip: tooltip,
-        onPressed: onPressed,
-        icon: Icon(icon, size: 22),
-      );
-    }
-
-    return Positioned(
-      left: pos.dx,
-      top: pos.dy,
-      width: w,
-      height: h,
-      child: Material(
-        elevation: 12,
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        clipBehavior: Clip.antiAlias,
-        child: GestureDetector(
-          onPanStart: (_) {
-            _miniDragging = false;
-          },
-          onPanUpdate: (d) {
-            _miniDragging = true;
-            final next = Offset(
-              (pos.dx + d.delta.dx).clamp(8, size.width - w - 8),
-              (pos.dy + d.delta.dy).clamp(pad.top + 8, size.height - h - 8),
-            );
-            setState(() => _miniPos = next);
-          },
-          onPanEnd: (_) {
-            Future<void>.delayed(const Duration(milliseconds: 40), () => _miniDragging = false);
-          },
-          child: Column(
-            children: [
-              SizedBox(
-                width: w,
-                height: videoH,
-                child: GestureDetector(
-                  onTap: () {
-                    if (_miniDragging) return;
-                    if (item != null) _open(item, playlist: PlaybackSession.playlist);
-                  },
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      video,
-                      if (!playing)
-                        const IgnorePointer(
-                          child: ColoredBox(
-                            color: Color(0x33000000),
-                            child: Center(child: Icon(Icons.play_arrow, color: Colors.white, size: 36)),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(
-                height: barH,
-                child: Row(
-                  children: [
-                    ctrl(
-                      tooltip: 'Previous',
-                      onPressed: () => unawaited(_sessionSkip(-1)),
-                      icon: Icons.skip_previous,
-                    ),
-                    ctrl(
-                      tooltip: playing ? 'Pause' : 'Play',
-                      onPressed: () async {
-                        final live = PlaybackSession.controller;
-                        if (live == null) return;
-                        if (live.value.isPlaying) {
-                          await live.pause();
-                        } else {
-                          await AndroidBridge.requestAudioFocus();
-                          await live.play();
-                        }
-                        await AndroidBridge.updateBackground(
-                          playing: live.value.isPlaying,
-                          positionMs: live.value.position.inMilliseconds,
-                          durationMs: live.value.duration.inMilliseconds,
-                        );
-                        setState(() {});
-                      },
-                      icon: playing ? Icons.pause : Icons.play_arrow,
-                    ),
-                    ctrl(
-                      tooltip: 'Next',
-                      onPressed: () => unawaited(_sessionSkip(1)),
-                      icon: Icons.skip_next,
-                    ),
-                    Expanded(
-                      child: Text(
-                        item?.title ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: scheme.onSurface, fontSize: 11, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    ctrl(
-                      tooltip: 'Close',
-                      onPressed: () async {
-                        await PlaybackSession.stop();
-                        _miniPos = null;
-                        setState(() {});
-                      },
-                      icon: Icons.close,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 

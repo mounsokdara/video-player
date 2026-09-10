@@ -50,7 +50,7 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:excludeFromRecents="false"
-            android:screenOrientation="fullUser">
+            android:screenOrientation="fullSensor">
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
