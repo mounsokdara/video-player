@@ -99,7 +99,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
       widget.pad.top + 8,
       math.max(widget.pad.top + 8, screen.height - 80),
     );
-    return Offset(x, y);
+    return Offset(x, y.toDouble());
   }
 
   @override
@@ -242,7 +242,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
       x = cx < screen.width / 2 ? 10.0 : screen.width - w - 10;
     }
 
-    _animateTo(Offset(x, y), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0));
+    _animateTo(Offset(x, y.toDouble()), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0));
   }
 
   void _reveal(Size screen, Size box) {
