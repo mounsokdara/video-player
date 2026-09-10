@@ -270,10 +270,12 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<String?> screenshotWindow({String? title}) async {
+  static Future<String?> screenshotWindow({String? title, String? path, int positionMs = 0}) async {
     try {
       return await _ch.invokeMethod<String>('screenshotWindow', {
         'title': title ?? 'frame',
+        if (path != null) 'path': path,
+        'positionMs': positionMs,
       });
     } catch (_) {
       return null;

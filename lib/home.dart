@@ -200,10 +200,32 @@ class _HomeShellState extends State<HomeShell> {
       selecting = true;
       if (selected.contains(item.id)) {
         selected.remove(item.id);
-        if (selected.isEmpty) selecting = false;
       } else {
         selected.add(item.id);
       }
+    });
+  }
+
+  void _toggleMasterVisible() {
+    _toggleMaster(visible.map((v) => v.id));
+  }
+
+  void _toggleMasterFolder() {
+    final path = folderPath;
+    if (path == null) {
+      _toggleMaster(library.videos.map((v) => v.id));
+      return;
+    }
+    _toggleMaster(library.listDir(path).whereType<File>().map((e) => e.path));
+  }
+
+  void _toggleMaster(Iterable<String> ids) {
+    final list = ids.toList();
+    setState(() {
+      selecting = true;
+      final allOn = list.isNotEmpty && list.every(selected.contains);
+      selected.clear();
+      if (!allOn) selected.addAll(list);
     });
   }
 
@@ -223,42 +245,6 @@ class _HomeShellState extends State<HomeShell> {
     final items = library.videos.where((v) => selected.contains(v.id)).toList();
     if (items.isEmpty) return;
     await SharePlus.instance.share(ShareParams(files: items.map((e) => XFile(e.path)).toList()));
-  }
-
-  void _selectAllVisible() {
-    setState(() {
-      selecting = true;
-      selected
-        ..clear()
-        ..addAll(visible.map((v) => v.id));
-    });
-  }
-
-  void _selectAllInFolder() {
-    final path = folderPath;
-    if (path == null) {
-      setState(() {
-        selecting = true;
-        selected
-          ..clear()
-          ..addAll(library.videos.map((v) => v.id));
-      });
-      return;
-    }
-    final ents = library.listDir(path);
-    setState(() {
-      selecting = true;
-      for (final e in ents) {
-        if (e is File) selected.add(e.path);
-      }
-    });
-  }
-
-  void _deselectAll() {
-    setState(() {
-      selected.clear();
-      selecting = false;
-    });
   }
 
   void _openHiddenTab(String id) {
@@ -291,8 +277,7 @@ class _HomeShellState extends State<HomeShell> {
             selected.clear();
           }),
           onSelectMode: () => setState(() => selecting = true),
-          onSelectAll: _selectAllVisible,
-          onDeselectAll: _deselectAll,
+          onToggleMaster: _toggleMasterVisible,
           onRefresh: _refresh,
           overflow: _overflowItems(includeSelect: true),
           onOverflow: _onOverflow,
@@ -314,8 +299,7 @@ class _HomeShellState extends State<HomeShell> {
           selecting: selecting,
           selected: selected,
           onSelectMode: () => setState(() => selecting = true),
-          onSelectAll: _selectAllInFolder,
-          onDeselectAll: _deselectAll,
+          onToggleMaster: _toggleMasterFolder,
           onClearSelect: () => setState(() {
             selecting = false;
             selected.clear();
@@ -406,8 +390,7 @@ class _HomeShellState extends State<HomeShell> {
               selecting: selecting,
               selected: selected,
               onSelectMode: () => setState(() => selecting = true),
-              onSelectAll: _selectAllInFolder,
-              onDeselectAll: _deselectAll,
+              onToggleMaster: _toggleMasterFolder,
               onClearSelect: () => setState(() {
                 selecting = false;
                 selected.clear();
@@ -448,8 +431,7 @@ class _HomeShellState extends State<HomeShell> {
               selected.clear();
             }),
             onSelectMode: () => setState(() => selecting = true),
-            onSelectAll: _selectAllVisible,
-            onDeselectAll: _deselectAll,
+            onToggleMaster: _toggleMasterVisible,
             onRefresh: _refresh,
             overflow: _overflowItems(includeSelect: true),
             onOverflow: _onOverflow,
@@ -665,8 +647,7 @@ class VideosHub extends StatelessWidget {
     required this.onDeleteSelected,
     required this.onClearSelect,
     required this.onSelectMode,
-    required this.onSelectAll,
-    required this.onDeselectAll,
+    required this.onToggleMaster,
     required this.onRefresh,
     required this.overflow,
     this.onOverflow,
@@ -694,8 +675,7 @@ class VideosHub extends StatelessWidget {
   final Future<void> Function() onDeleteSelected;
   final VoidCallback onClearSelect;
   final VoidCallback onSelectMode;
-  final VoidCallback onSelectAll;
-  final VoidCallback onDeselectAll;
+  final VoidCallback onToggleMaster;
   final Future<void> Function() onRefresh;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
@@ -728,8 +708,6 @@ class VideosHub extends StatelessWidget {
             title: Text(selecting ? '${selected.length} selected' : 'Videos'),
             actions: [
               if (selecting) ...[
-                IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
-                IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
                 IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
                 IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
                 IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
@@ -758,7 +736,12 @@ class VideosHub extends StatelessWidget {
                           style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
                         ),
                       ),
-                      if (!selecting) ...[
+                      if (selecting)
+                        Checkbox(
+                          value: items.isNotEmpty && items.every((v) => selected.contains(v.id)),
+                          onChanged: items.isEmpty ? null : (_) => onToggleMaster(),
+                        )
+                      else ...[
                         IconButton(
                           tooltip: layout == LayoutMode.list ? 'Grid' : 'List',
                           onPressed: () => onLayout(layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list),
@@ -913,8 +896,7 @@ class FoldersHub extends StatelessWidget {
     required this.selecting,
     this.selected = const {},
     this.onSelectMode,
-    this.onSelectAll,
-    this.onDeselectAll,
+    this.onToggleMaster,
     this.onClearSelect,
     this.overflow = const [],
     this.onOverflow,
@@ -930,8 +912,7 @@ class FoldersHub extends StatelessWidget {
   final bool selecting;
   final Set<String> selected;
   final VoidCallback? onSelectMode;
-  final VoidCallback? onSelectAll;
-  final VoidCallback? onDeselectAll;
+  final VoidCallback? onToggleMaster;
   final VoidCallback? onClearSelect;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
@@ -957,8 +938,6 @@ class FoldersHub extends StatelessWidget {
             title: Text(selecting ? '${selected.length} selected' : 'Folders'),
             actions: [
               if (selecting) ...[
-                IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
-                IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
                 IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
               ] else ...[
                 IconButton(
@@ -1028,6 +1007,8 @@ class FoldersHub extends StatelessWidget {
     }
 
     final ents = library.listDir(path);
+    final files = ents.whereType<File>().toList();
+    final allOn = files.isNotEmpty && files.every((f) => selected.contains(f.path));
     return Column(
       children: [
         AppBar(
@@ -1035,8 +1016,6 @@ class FoldersHub extends StatelessWidget {
           title: Text(selecting ? '${selected.length} selected' : (p.basename(path).isEmpty ? path : p.basename(path))),
           actions: [
             if (selecting) ...[
-              IconButton(onPressed: onSelectAll, icon: const Icon(Icons.select_all), tooltip: 'Select all'),
-              IconButton(onPressed: onDeselectAll, icon: const Icon(Icons.deselect), tooltip: 'Deselect all'),
               IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
             ] else ...[
               if (library.clipPath != null)
@@ -1061,6 +1040,24 @@ class FoldersHub extends StatelessWidget {
             ],
           ],
         ),
+        if (selecting)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${files.length} videos',
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+                  ),
+                ),
+                Checkbox(
+                  value: allOn,
+                  onChanged: files.isEmpty ? null : (_) => onToggleMaster?.call(),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: RefreshIndicator(
             displacement: 40,

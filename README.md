@@ -10,7 +10,7 @@ This app under development it's may have alot bugs
 - Hide individual library tabs from Settings > General; hidden ones stay reachable from the Videos / Folders 3-dot menu
 - Gesture playback: seek, brightness, volume, double-tap ripples (paused / playing / skip), 2× long-press with a persistent badge
 - Pinch-to-zoom around your fingers, two-finger pan, and a live zoom percent
-- Previous and next sit around skip-back / play / skip-forward; lock and screen mode sit to the right
+- Previous, play, and next stay centered; lock and screen mode sit to the right
 - Playlist modes: order, loop all, repeat one, shuffle, no autoplay
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
 - Quick actions: screenshot, background play, speed (reorder and check from player More)

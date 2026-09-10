@@ -714,7 +714,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   child: _HudChip(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
                 ),
               ),
-            if (_showZoomHud || _pinching || _zoomScale > 1.01)
+            if (_showZoomHud || _pinching)
               Positioned(
                 top: pad.top + 56,
                 left: 0,
@@ -1132,18 +1132,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                             icon: Icon(Icons.skip_previous, color: Colors.white, size: iconSize),
                           ),
                           IconButton(
-                            tooltip: 'Seek back',
-                            onPressed: () => unawaited(_seekBy(-appSettings.seekStepSeconds)),
-                            icon: Icon(Icons.keyboard_double_arrow_left, color: Colors.white, size: iconSize),
-                          ),
-                          IconButton(
                             onPressed: _togglePlay,
                             icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
-                          ),
-                          IconButton(
-                            tooltip: 'Seek forward',
-                            onPressed: () => unawaited(_seekBy(appSettings.seekStepSeconds)),
-                            icon: Icon(Icons.keyboard_double_arrow_right, color: Colors.white, size: iconSize),
                           ),
                           IconButton(
                             tooltip: 'Next',
@@ -1963,9 +1953,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void _screenshot() {
-    _flash('Saving');
+    final path = item.path;
+    final pos = vc?.value.position.inMilliseconds ?? 0;
     unawaited(() async {
-      final saved = await AndroidBridge.screenshotWindow(title: item.title);
+      final saved = await AndroidBridge.screenshotWindow(title: item.title, path: path, positionMs: pos);
       if (!mounted) return;
       if (saved != null) {
         _flash('Saved to DCIM/Screenshots');
@@ -1974,6 +1965,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _flash('Could not capture frame');
       }
     }());
+    _flash('Saving');
   }
 }
 

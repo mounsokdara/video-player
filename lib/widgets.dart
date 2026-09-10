@@ -128,21 +128,7 @@ class VideoListTile extends StatelessWidget {
               SizedBox(
                 width: 128,
                 height: 72,
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: VideoThumb(item: item, radius: 10)),
-                    if (selecting)
-                      Positioned(
-                        left: 6,
-                        top: 6,
-                        child: Icon(
-                          selected ? Icons.check_circle : Icons.circle_outlined,
-                          color: selected ? scheme.primary : Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                  ],
-                ),
+                child: VideoThumb(item: item, radius: 10),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -175,7 +161,13 @@ class VideoListTile extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(onPressed: onMenu, icon: const Icon(Icons.more_vert), visualDensity: VisualDensity.compact),
+              if (selecting)
+                Checkbox(
+                  value: selected,
+                  onChanged: (_) => onTap(),
+                )
+              else
+                IconButton(onPressed: onMenu, icon: const Icon(Icons.more_vert), visualDensity: VisualDensity.compact),
             ],
           ),
         ),
