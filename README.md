@@ -13,7 +13,7 @@ This app under development it's may have alot bugs
 - YouTube-style mini player with previous, play, next, and close; drag it anywhere
 - Brightness only while the player is open; leaving the video restores the system brightness
 - Equalizer attaches to the playing video's audio session
-- Does not mix with other apps: other media pauses this player, and this player pauses other media
+- Does not mix with other apps: audio focus is requested like MediaPlayer (pause on loss, duck on transient duck, no self-pause)
 - Playlist modes: order, loop all, repeat one, shuffle, no autoplay
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
 - Quick actions: screenshot, background play, speed (reorder and check from player More)

@@ -90,9 +90,15 @@ class _HomeShellState extends State<HomeShell> {
       final c = PlaybackSession.controller;
       switch (action) {
         case 'play':
+          unawaited(AndroidBridge.requestAudioFocus());
+          c?.setVolume(1);
           c?.play();
         case 'pause':
           c?.pause();
+        case 'duck':
+          c?.setVolume(0.2);
+        case 'unduck':
+          c?.setVolume(1);
         case 'next':
           unawaited(_sessionSkip(1));
         case 'prev':
@@ -648,8 +654,8 @@ class _HomeShellState extends State<HomeShell> {
                         if (live.value.isPlaying) {
                           await live.pause();
                         } else {
-                          await live.play();
                           await AndroidBridge.requestAudioFocus();
+                          await live.play();
                         }
                         await AndroidBridge.updateBackground(
                           playing: live.value.isPlaying,

@@ -55,13 +55,14 @@ class PlaybackSession {
     final old = controller;
     VideoPlayerController? c;
     try {
-      final opts = VideoPlayerOptions(mixWithOthers: false, allowBackgroundPlayback: true);
+      final opts = VideoPlayerOptions(mixWithOthers: true, allowBackgroundPlayback: true);
       if (next.path.startsWith('content:')) {
         c = VideoPlayerController.contentUri(Uri.parse(next.path), videoPlayerOptions: opts);
       } else {
         c = VideoPlayerController.file(File(next.path), videoPlayerOptions: opts);
       }
       await c.initialize();
+      await AndroidBridge.requestAudioFocus();
       await c.play();
       controller = c;
       item = next;
@@ -73,7 +74,6 @@ class PlaybackSession {
         await old?.dispose();
       } catch (_) {}
       await AndroidBridge.preparePreview(next.path);
-      await AndroidBridge.requestAudioFocus();
       try {
         await c.setPlaybackSpeed(speed);
       } catch (_) {}
@@ -243,9 +243,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (e['type'] == 'media') {
         switch (e['action']) {
           case 'play':
+            unawaited(AndroidBridge.requestAudioFocus());
+            vc?.setVolume(1);
             vc?.play();
           case 'pause':
             vc?.pause();
+          case 'duck':
+            vc?.setVolume(0.2);
+          case 'unduck':
+            vc?.setVolume(1);
           case 'next':
             unawaited(_next());
           case 'prev':
@@ -260,7 +266,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _persistProgress();
       if (!appSettings.backgroundPlay) {
         vc?.pause();
@@ -393,7 +399,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
       final opts = VideoPlayerOptions(
-        mixWithOthers: false,
+        mixWithOthers: true,
         allowBackgroundPlayback: true,
       );
       if (item.path.startsWith('content:')) {
@@ -434,13 +440,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         throw StateError(c.value.errorDescription ?? 'Player failed to start');
       }
       vc = c;
+      await AndroidBridge.requestAudioFocus();
       await c.play();
       _lastPlaying = true;
       _syncPip();
       unawaited(_syncBackground());
       unawaited(_applySpeed());
       unawaited(AndroidBridge.preparePreview(item.path));
-      unawaited(AndroidBridge.requestAudioFocus());
       unawaited(_applyEq());
       if (mounted && gen == _playerGen) setState(() => ready = true);
       _armHide();
@@ -916,7 +922,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void _onVideoTap(Offset pos, Size size) {
-    const window = Duration(milliseconds: 320);
+    const tapWindow = Duration(milliseconds: 320);
+    const hideDelay = Duration(milliseconds: 900);
+    const midHide = Duration(milliseconds: 700);
     final now = DateTime.now();
     final zone = tapZoneFor(pos, size);
     final side = switch (zone) {
@@ -934,11 +942,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       TapZone.right => _rightOn,
       TapZone.middle => _midOn,
     };
-    final isDouble = now.difference(last) < window;
+    final isDouble = now.difference(last) < tapWindow;
     final rippleActive = _activeRipples > 0;
     _tapAt = now;
     _tapPos = pos;
 
+    // HTML first tap is a no-op; here it toggles chrome so the controller stays snappy.
     if (!rippleActive && !isDouble && !zoneOn) {
       if (zone == TapZone.left) _leftTap = now;
       if (zone == TapZone.right) _rightTap = now;
@@ -973,7 +982,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _leftOn = true;
         _spawnRipple(zone, pos, size);
         _leftHide?.cancel();
-        _leftHide = Timer(const Duration(milliseconds: 900), () {
+        _leftHide = Timer(hideDelay, () {
           if (!mounted) return;
           setState(() {
             _leftOn = false;
@@ -989,7 +998,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _rightOn = true;
         _spawnRipple(zone, pos, size);
         _rightHide?.cancel();
-        _rightHide = Timer(const Duration(milliseconds: 900), () {
+        _rightHide = Timer(hideDelay, () {
           if (!mounted) return;
           setState(() {
             _rightOn = false;
@@ -1011,7 +1020,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _midPlayingIcon = !playing;
     _spawnRipple(TapZone.middle, pos, size);
     _midHide?.cancel();
-    _midHide = Timer(const Duration(milliseconds: 700), () {
+    _midHide = Timer(midHide, () {
       if (!mounted) return;
       setState(() {
         _midOn = false;
@@ -1297,12 +1306,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         children: [
                           SliderTheme(
                             data: SliderTheme.of(context).copyWith(
-                              thumbColor: const Color(0xFF4CAF50),
-                              activeTrackColor: const Color(0xFF4CAF50),
-                              inactiveTrackColor: Colors.white38,
-                              overlayColor: const Color(0x334CAF50),
-                              trackHeight: 2.5,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                              overlayColor: Colors.white24,
+                              trackHeight: 2,
                             ),
                             child: Slider(
                               value: frac,
@@ -1363,7 +1368,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           ),
                           IconButton(
                             onPressed: _togglePlay,
-                            icon: Icon(playing ? Icons.pause_circle_outline : Icons.play_circle_outline, color: Colors.white, size: playSize),
+                            icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
                           ),
                           IconButton(
                             tooltip: 'Next',
@@ -1587,8 +1592,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (c.value.isPlaying) {
       c.pause();
     } else {
-      c.play();
       unawaited(AndroidBridge.requestAudioFocus());
+      c.play();
     }
     setState(() {});
     _armHide();

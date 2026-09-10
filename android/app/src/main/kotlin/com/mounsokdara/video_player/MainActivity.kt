@@ -202,7 +202,6 @@ class MainActivity : FlutterActivity() {
                         }
                         "setPlaying" -> {
                             isPlaying = call.argument<Boolean>("on") ?: false
-                            if (isPlaying) requestAudioFocus()
                             result.success(true)
                         }
                         "enterPip" -> {
@@ -327,7 +326,6 @@ class MainActivity : FlutterActivity() {
                             } catch (t: Throwable) {
                                 writeCrash("startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
                             }
-                            if (playing) requestAudioFocus()
                             result.success(true)
                         }
                         "updateBackground" -> {
@@ -569,17 +567,60 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private var hasAudioFocus = false
+    private var resumeOnFocusGain = false
+    private var ducked = false
+
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        when (change) {
-            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> emitMedia("pause")
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> emitMedia("pause")
+        mainHandler.post {
+            when (change) {
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    hasAudioFocus = false
+                    resumeOnFocusGain = false
+                    if (ducked) {
+                        ducked = false
+                        emitMedia("unduck")
+                    }
+                    isPlaying = false
+                    emitMedia("pause")
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    resumeOnFocusGain = isPlaying
+                    hasAudioFocus = false
+                    if (ducked) {
+                        ducked = false
+                        emitMedia("unduck")
+                    }
+                    isPlaying = false
+                    emitMedia("pause")
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    if (!ducked) {
+                        ducked = true
+                        emitMedia("duck")
+                    }
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    hasAudioFocus = true
+                    if (ducked) {
+                        ducked = false
+                        emitMedia("unduck")
+                    }
+                    if (resumeOnFocusGain) {
+                        resumeOnFocusGain = false
+                        isPlaying = true
+                        emitMedia("play")
+                    }
+                }
+            }
         }
     }
 
     private fun requestAudioFocus() {
         val am = audioManager ?: return
+        if (hasAudioFocus) return
         try {
-            if (Build.VERSION.SDK_INT >= 26) {
+            val granted = if (Build.VERSION.SDK_INT >= 26) {
                 val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(
                         AudioAttributes.Builder()
@@ -587,16 +628,20 @@ class MainActivity : FlutterActivity() {
                             .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
                             .build()
                     )
-                    .setOnAudioFocusChangeListener(focusListener)
+                    .setOnAudioFocusChangeListener(focusListener, mainHandler)
                     .setAcceptsDelayedFocusGain(false)
-                    .setWillPauseWhenDucked(true)
+                    .setWillPauseWhenDucked(false)
                     .build()
                 focusRequest = req
-                am.requestAudioFocus(req)
+                am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
                 @Suppress("DEPRECATION")
-                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
+                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
+            hasAudioFocus = granted
+            if (granted) isPlaying = true
+            breadcrumb("audio focus granted=$granted")
         } catch (t: Throwable) {
             breadcrumb("audio focus: ${t.message}")
         }
@@ -604,6 +649,9 @@ class MainActivity : FlutterActivity() {
 
     private fun abandonAudioFocus() {
         val am = audioManager ?: return
+        hasAudioFocus = false
+        resumeOnFocusGain = false
+        ducked = false
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 focusRequest?.let { am.abandonAudioFocusRequest(it) }
@@ -1447,13 +1495,15 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         var eventsSink: EventChannel.EventSink? = null
+        private val emitHandler = Handler(Looper.getMainLooper())
 
         fun emitMedia(action: String, extra: Map<String, Any?> = emptyMap()) {
             val payload = HashMap<String, Any?>(extra.size + 2)
             payload["type"] = "media"
             payload["action"] = action
             payload.putAll(extra)
-            eventsSink?.success(payload)
+            val send = Runnable { eventsSink?.success(payload) }
+            if (Looper.myLooper() == Looper.getMainLooper()) send.run() else emitHandler.post(send)
         }
 
         private val videoExt = setOf(
