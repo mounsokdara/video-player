@@ -209,6 +209,44 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> applyEqualizer({
+    required bool enabled,
+    required List<int> bands,
+    required bool bassOn,
+    required int bass,
+    required bool surroundOn,
+    required int surround,
+  }) async {
+    try {
+      await _ch.invokeMethod('applyEqualizer', {
+        'enabled': enabled,
+        'bands': bands,
+        'bassOn': bassOn,
+        'bass': bass,
+        'surroundOn': surroundOn,
+        'surround': surround,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> preparePreview(String path) async {
+    try {
+      await _ch.invokeMethod('preparePreview', {'path': path});
+    } catch (_) {}
+  }
+
+  static Future<void> requestAudioFocus() async {
+    try {
+      await _ch.invokeMethod('requestAudioFocus');
+    } catch (_) {}
+  }
+
+  static Future<void> abandonAudioFocus() async {
+    try {
+      await _ch.invokeMethod('abandonAudioFocus');
+    } catch (_) {}
+  }
+
   static Future<void> setBassBoost({required bool on, required int strength}) async {
     try {
       await _ch.invokeMethod('setBassBoost', {'on': on, 'strength': strength});

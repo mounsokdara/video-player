@@ -19,6 +19,7 @@ import 'crash.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
+import 'player_fx.dart';
 import 'settings.dart';
 import 'settings_ui.dart';
 import 'widgets.dart';
@@ -47,15 +48,59 @@ class PlaybackSession {
     item = null;
     playlist = [];
     await AndroidBridge.stopBackground();
+    await AndroidBridge.abandonAudioFocus();
   }
-}
 
-class _Burst {
-  _Burst({required this.id, required this.pos, required this.label, required this.icon});
-  final int id;
-  final Offset pos;
-  final String label;
-  final IconData icon;
+  static Future<void> swapTo(VideoItem next, {required List<VideoItem> list, required int at}) async {
+    final old = controller;
+    VideoPlayerController? c;
+    try {
+      final opts = VideoPlayerOptions(mixWithOthers: false, allowBackgroundPlayback: true);
+      if (next.path.startsWith('content:')) {
+        c = VideoPlayerController.contentUri(Uri.parse(next.path), videoPlayerOptions: opts);
+      } else {
+        c = VideoPlayerController.file(File(next.path), videoPlayerOptions: opts);
+      }
+      await c.initialize();
+      await c.play();
+      controller = c;
+      item = next;
+      playlist = List<VideoItem>.from(list);
+      index = at;
+      keepAlive = true;
+      try {
+        old?.removeListener(() {});
+        await old?.dispose();
+      } catch (_) {}
+      await AndroidBridge.preparePreview(next.path);
+      await AndroidBridge.requestAudioFocus();
+      try {
+        await c.setPlaybackSpeed(speed);
+      } catch (_) {}
+      await AndroidBridge.setPlaybackParams(speed: speed, pitchShift: appSettings.pitchShift);
+      await AndroidBridge.applyEqualizer(
+        enabled: appSettings.eqEnabled,
+        bands: appSettings.eqBands,
+        bassOn: appSettings.bassBoostOn,
+        bass: appSettings.bassBoost,
+        surroundOn: appSettings.surroundOn,
+        surround: appSettings.surround,
+      );
+      if (appSettings.backgroundPlay) {
+        await AndroidBridge.startBackground(
+          title: next.title,
+          artist: next.folderName,
+          playing: true,
+          positionMs: 0,
+          durationMs: c.value.duration.inMilliseconds,
+        );
+      }
+    } catch (_) {
+      try {
+        await c?.dispose();
+      } catch (_) {}
+    }
+  }
 }
 
 class PlayerPage extends StatefulWidget {
@@ -99,8 +144,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool invert = false;
   bool _lastPlaying = false;
   DateTime _lastUi = DateTime.fromMillisecondsSinceEpoch(0);
-  final bursts = <_Burst>[];
-  int _burstSeq = 0;
   StreamSubscription<Map<String, dynamic>>? events;
   double _zoomScale = 1;
   final _pts = <int, Offset>{};
@@ -108,7 +151,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   double _pinchBase = 1;
   double? _scrub;
   Uint8List? _previewBytes;
-  Timer? _previewDebounce;
   int _playerGen = 0;
   double? _systemBrightness;
   Offset _zoomPan = Offset.zero;
@@ -120,6 +162,26 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   DateTime? _tapAt;
   Offset? _tapPos;
   DateTime _lastBg = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _chromeHeld = false;
+  bool _uiBeforeTap = true;
+  final _ripples = <RippleSpec>[];
+  int _rippleSeq = 0;
+  int _activeRipples = 0;
+  int _leftCount = 0;
+  int _rightCount = 0;
+  bool _leftOn = false;
+  bool _rightOn = false;
+  bool _midOn = false;
+  bool _midPlayingIcon = true;
+  String? _currentSide;
+  Timer? _leftHide;
+  Timer? _rightHide;
+  Timer? _midHide;
+  DateTime _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _midTap = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _previewBusy = false;
+  double? _previewWant;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -152,6 +214,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       PlaybackSession.keepAlive = false;
       vc?.addListener(_tick);
       _lastPlaying = vc?.value.isPlaying ?? false;
+      unawaited(WakelockPlus.enable());
+      unawaited(AndroidBridge.setKeepScreenOn(true));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_hookBrightness());
+      });
+      unawaited(AndroidBridge.requestAudioFocus());
+      unawaited(_applyEq());
       _applySystemUi();
       _applyRotation();
       _applySpeed();
@@ -213,14 +282,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _applySystemUi();
     _applyRotation();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        brightness = await ScreenBrightness().application;
-        _systemBrightness ??= brightness;
-        if (appSettings.rememberBrightness && appSettings.brightness >= 0) {
-          brightness = appSettings.brightness;
-          await ScreenBrightness().setApplicationScreenBrightness(brightness);
-        }
-      } catch (_) {}
+      await _hookBrightness();
       try {
         VolumeController.instance.showSystemUI = false;
         volume = await VolumeController.instance.getVolume();
@@ -331,7 +393,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
       final opts = VideoPlayerOptions(
-        mixWithOthers: true,
+        mixWithOthers: false,
         allowBackgroundPlayback: true,
       );
       if (item.path.startsWith('content:')) {
@@ -377,6 +439,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _syncPip();
       unawaited(_syncBackground());
       unawaited(_applySpeed());
+      unawaited(AndroidBridge.preparePreview(item.path));
+      unawaited(AndroidBridge.requestAudioFocus());
+      unawaited(_applyEq());
       if (mounted && gen == _playerGen) setState(() => ready = true);
       _armHide();
     } catch (e, s) {
@@ -478,12 +543,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _armHide() {
     hideTimer?.cancel();
-    if (locked) return;
+    if (locked || _chromeHeld || _scrub != null) return;
     hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && (vc?.value.isPlaying ?? false) && !locked) {
+      if (mounted && (vc?.value.isPlaying ?? false) && !locked && !_chromeHeld && _scrub == null) {
         _setUi(false);
       }
     });
+  }
+
+  void _holdChrome(bool on) {
+    _chromeHeld = on;
+    if (on) {
+      hideTimer?.cancel();
+    } else {
+      _armHide();
+    }
   }
 
   void _flash(String text) {
@@ -494,12 +568,33 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  void _ripple(Offset pos, String label, IconData icon) {
-    final burst = _Burst(id: _burstSeq++, pos: pos, label: label, icon: icon);
-    setState(() => bursts.add(burst));
-    Future.delayed(const Duration(milliseconds: 520), () {
-      if (mounted) setState(() => bursts.removeWhere((b) => b.id == burst.id));
-    });
+  Future<void> _applyEq() async {
+    await AndroidBridge.applyEqualizer(
+      enabled: appSettings.eqEnabled,
+      bands: appSettings.eqBands,
+      bassOn: appSettings.bassBoostOn,
+      bass: appSettings.bassBoost,
+      surroundOn: appSettings.surroundOn,
+      surround: appSettings.surround,
+    );
+  }
+
+  Future<void> _hookBrightness() async {
+    try {
+      _systemBrightness ??= await ScreenBrightness().system;
+      brightness = await ScreenBrightness().application;
+      if (appSettings.rememberBrightness && appSettings.brightness >= 0) {
+        brightness = appSettings.brightness;
+        await ScreenBrightness().setApplicationScreenBrightness(brightness);
+      }
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _unhookBrightness() async {
+    try {
+      await ScreenBrightness().resetApplicationScreenBrightness();
+    } catch (_) {}
   }
 
   Future<void> _seekBy(int seconds) async {
@@ -519,13 +614,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     persistTimer?.cancel();
     sleepTimer?.cancel();
     events?.cancel();
-    _previewDebounce?.cancel();
     _zoomHudTimer?.cancel();
+    _leftHide?.cancel();
+    _rightHide?.cancel();
+    _midHide?.cancel();
     vc?.removeListener(_tick);
     _persistProgress();
+    unawaited(_unhookBrightness());
     var keep = false;
     try {
-      keep = appSettings.backgroundPlay && (vc?.value.isPlaying ?? false);
+      keep = vc != null && ready && (vc?.value.isInitialized ?? false);
     } catch (_) {
       keep = false;
     }
@@ -546,6 +644,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         dying?.dispose();
       } catch (_) {}
       unawaited(AndroidBridge.stopBackground());
+      unawaited(AndroidBridge.abandonAudioFocus());
+      unawaited(AndroidBridge.preparePreview(''));
     }
     WakelockPlus.disable();
     AndroidBridge.setKeepScreenOn(false);
@@ -668,40 +768,24 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 }(),
               ),
             ),
-            for (final b in bursts)
-              Positioned(
-                left: b.pos.dx - 72,
-                top: b.pos.dy - 72,
-                child: IgnorePointer(
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0.15, end: 1),
-                    duration: appSettings.reduceMotion ? Duration.zero : const Duration(milliseconds: 480),
-                    builder: (_, t, child) {
-                      return Opacity(
-                        opacity: (1 - t).clamp(0, 1),
-                        child: Transform.scale(scale: 0.7 + t * 0.7, child: child),
-                      );
-                    },
-                    child: Container(
-                      width: 144,
-                      height: 144,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.16),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 2),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(b.icon, color: Colors.white, size: 34),
-                          const SizedBox(height: 4),
-                          Text(b.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            PlayerRippleLayer(
+              size: size,
+              ripples: _ripples,
+              leftCount: _leftCount,
+              rightCount: _rightCount,
+              leftOn: _leftOn,
+              rightOn: _rightOn,
+              midOn: _midOn,
+              playing: _midPlayingIcon,
+              reduceMotion: appSettings.reduceMotion,
+              onRippleDone: (id) {
+                if (!mounted) return;
+                setState(() {
+                  _ripples.removeWhere((e) => e.id == id);
+                  _activeRipples = (_activeRipples - 1).clamp(0, 99);
+                });
+              },
+            ),
             if (speeding)
               const IgnorePointer(
                 child: Center(
@@ -832,28 +916,129 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void _onVideoTap(Offset pos, Size size) {
+    const window = Duration(milliseconds: 320);
     final now = DateTime.now();
-    final isDouble = _tapAt != null &&
-        now.difference(_tapAt!) < const Duration(milliseconds: 280) &&
-        _tapPos != null &&
-        (pos - _tapPos!).distance < 64;
+    final zone = tapZoneFor(pos, size);
+    final side = switch (zone) {
+      TapZone.left => 'left',
+      TapZone.right => 'right',
+      TapZone.middle => 'mid',
+    };
+    final last = switch (zone) {
+      TapZone.left => _leftTap,
+      TapZone.right => _rightTap,
+      TapZone.middle => _midTap,
+    };
+    final zoneOn = switch (zone) {
+      TapZone.left => _leftOn,
+      TapZone.right => _rightOn,
+      TapZone.middle => _midOn,
+    };
+    final isDouble = now.difference(last) < window;
+    final rippleActive = _activeRipples > 0;
     _tapAt = now;
     _tapPos = pos;
-    if (isDouble) {
-      if (pos.dx < size.width * 0.28 && appSettings.doubleTapSeek) {
-        _ripple(pos, '-${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_left);
-        unawaited(_seekBy(-appSettings.seekStepSeconds));
-      } else if (pos.dx > size.width * 0.72 && appSettings.doubleTapSeek) {
-        _ripple(pos, '+${appSettings.seekStepSeconds}s', Icons.keyboard_double_arrow_right);
-        unawaited(_seekBy(appSettings.seekStepSeconds));
-      } else if (!_inCenterDead(pos, size)) {
-        final playing = vc?.value.isPlaying ?? false;
-        _ripple(pos, playing ? 'Paused' : 'Playing', playing ? Icons.pause : Icons.play_arrow);
-        _togglePlay();
-      }
+
+    if (!rippleActive && !isDouble && !zoneOn) {
+      if (zone == TapZone.left) _leftTap = now;
+      if (zone == TapZone.right) _rightTap = now;
+      if (zone == TapZone.middle) _midTap = now;
+      _uiBeforeTap = showUi;
+      _setUi(!showUi);
       return;
     }
-    _setUi(!showUi);
+
+    if (isDouble) {
+      _setUi(_uiBeforeTap);
+    }
+
+    if (zone == TapZone.left || zone == TapZone.right) {
+      if (!appSettings.doubleTapSeek) {
+        _setUi(!showUi);
+        return;
+      }
+      if (_currentSide != null && _currentSide != side) {
+        _resetSide(_currentSide!);
+        if (side == 'left') {
+          _leftCount = 0;
+        } else {
+          _rightCount = 0;
+        }
+      }
+      _currentSide = side;
+      final step = appSettings.seekStepSeconds;
+      if (zone == TapZone.left) {
+        _leftTap = now;
+        _leftCount += step;
+        _leftOn = true;
+        _spawnRipple(zone, pos, size);
+        _leftHide?.cancel();
+        _leftHide = Timer(const Duration(milliseconds: 900), () {
+          if (!mounted) return;
+          setState(() {
+            _leftOn = false;
+            _leftCount = 0;
+            _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
+            if (_currentSide == 'left') _currentSide = null;
+          });
+        });
+        unawaited(_seekBy(-step));
+      } else {
+        _rightTap = now;
+        _rightCount += step;
+        _rightOn = true;
+        _spawnRipple(zone, pos, size);
+        _rightHide?.cancel();
+        _rightHide = Timer(const Duration(milliseconds: 900), () {
+          if (!mounted) return;
+          setState(() {
+            _rightOn = false;
+            _rightCount = 0;
+            _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
+            if (_currentSide == 'right') _currentSide = null;
+          });
+        });
+        unawaited(_seekBy(step));
+      }
+      setState(() {});
+      return;
+    }
+
+    _midTap = now;
+    _midOn = true;
+    final playing = vc?.value.isPlaying ?? false;
+    _togglePlay();
+    _midPlayingIcon = !playing;
+    _spawnRipple(TapZone.middle, pos, size);
+    _midHide?.cancel();
+    _midHide = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      setState(() {
+        _midOn = false;
+        _midTap = DateTime.fromMillisecondsSinceEpoch(0);
+      });
+    });
+    setState(() {});
+  }
+
+  void _resetSide(String side) {
+    if (side == 'left') {
+      _leftHide?.cancel();
+      _leftOn = false;
+      _leftCount = 0;
+      _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
+    } else if (side == 'right') {
+      _rightHide?.cancel();
+      _rightOn = false;
+      _rightCount = 0;
+      _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
+    }
+  }
+
+  void _spawnRipple(TapZone zone, Offset pos, Size size) {
+    final spec = makeRipple(id: _rippleSeq++, zone: zone, pos: pos, size: size);
+    _ripples.add(spec);
+    _activeRipples++;
   }
 
   Widget _seekHud(VideoPlayerController? c, EdgeInsets pad) {
@@ -886,22 +1071,27 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  bool _inCenterDead(Offset p, Size size) {
-    return (p.dx - size.width / 2).abs() < 48 && (p.dy - size.height / 2).abs() < 48;
-  }
-
   void _queuePreview(double frac) {
     if (!appSettings.showSeekPreview) return;
-    _previewDebounce?.cancel();
-    _previewDebounce = Timer(const Duration(milliseconds: 90), () async {
+    _previewWant = frac;
+    if (_previewBusy) return;
+    unawaited(_runPreview());
+  }
+
+  Future<void> _runPreview() async {
+    _previewBusy = true;
+    while (_previewWant != null && mounted && _scrub != null) {
+      final frac = _previewWant!;
+      _previewWant = null;
       final dur = vc?.value.duration.inMilliseconds ?? 0;
-      if (dur <= 0) return;
+      if (dur <= 0) break;
       final bytes = await AndroidBridge.previewFrame(
         path: item.path,
         positionMs: (frac.clamp(0.0, 1.0) * dur).round(),
       );
       if (mounted && _scrub != null) setState(() => _previewBytes = bytes);
-    });
+    }
+    _previewBusy = false;
   }
 
   Widget _video(VideoPlayerController c, Size screen) {
@@ -1005,7 +1195,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         top: 0,
         left: 0,
         right: 0,
-        child: Container(
+        child: Listener(
+          onPointerDown: (_) => _holdChrome(true),
+          onPointerUp: (_) => _holdChrome(false),
+          onPointerCancel: (_) => _holdChrome(false),
+          child: Container(
           padding: EdgeInsets.only(top: pad.top),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent]),
@@ -1028,15 +1222,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       try {
                         appSettings.eqEnabled = !appSettings.eqEnabled;
                         await appSettings.save();
+                        await _applyEq();
                         if (mounted) setState(() {});
                         _flash(appSettings.eqEnabled ? 'Equalizer on' : 'Equalizer off');
                       } catch (e, s) {
                         CrashLog.record('EQ', '$e', s);
                       }
                     },
-                    onLongPress: () {
+                    onLongPress: () async {
                       CrashLog.breadcrumb('Open equalizer');
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+                      await Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+                      await _applyEq();
                     },
                     icon: Icon(Icons.equalizer, color: appSettings.eqEnabled ? Colors.white : Colors.white54),
                   ),
@@ -1059,12 +1255,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ],
           ),
         ),
+        ),
       ),
       Positioned(
         left: 0,
         right: 0,
         bottom: 0,
-        child: Container(
+        child: Listener(
+          onPointerDown: (_) => _holdChrome(true),
+          onPointerUp: (_) => _holdChrome(false),
+          onPointerCancel: (_) => _holdChrome(false),
+          child: Container(
           padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom + insets.bottom),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
@@ -1073,7 +1274,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             children: [
               Row(
                 children: [
-                  Text(_stamp(_scrub != null ? Duration(milliseconds: ((_scrub! * dur.inMilliseconds).round())) : pos), style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 12)),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Text(_stamp(_scrub != null ? Duration(milliseconds: ((_scrub! * dur.inMilliseconds).round())) : pos), style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 13)),
+                  ),
                   Expanded(
                     child: LayoutBuilder(builder: (ctx, box) {
                       final frac = dur.inMilliseconds == 0
@@ -1091,20 +1295,32 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       return Stack(
                         alignment: Alignment.center,
                         children: [
-                          Slider(
-                            value: frac,
-                            onChanged: (v) {
-                              setState(() => _scrub = v);
-                              _queuePreview(v);
-                            },
-                            onChangeEnd: (v) async {
-                              if (c == null) return;
-                              await c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
-                              setState(() {
-                                _scrub = null;
-                                _previewBytes = null;
-                              });
-                            },
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              thumbColor: const Color(0xFF4CAF50),
+                              activeTrackColor: const Color(0xFF4CAF50),
+                              inactiveTrackColor: Colors.white38,
+                              overlayColor: const Color(0x334CAF50),
+                              trackHeight: 2.5,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                            ),
+                            child: Slider(
+                              value: frac,
+                              onChangeStart: (_) => _holdChrome(true),
+                              onChanged: (v) {
+                                setState(() => _scrub = v);
+                                _queuePreview(v);
+                              },
+                              onChangeEnd: (v) async {
+                                _holdChrome(false);
+                                if (c == null) return;
+                                await c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
+                                setState(() {
+                                  _scrub = null;
+                                  _previewBytes = null;
+                                });
+                              },
+                            ),
                           ),
                           mark(abA, const Color(0xFFFFC107)),
                           mark(abB, const Color(0xFFFF7043)),
@@ -1112,9 +1328,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       );
                     }),
                   ),
-                  Text(
-                    appSettings.showRemaining ? '-${_stamp(remain)}' : _stamp(dur),
-                    style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      appSettings.showRemaining ? '-${_stamp(remain)}' : _stamp(dur),
+                      style: const TextStyle(color: Colors.white, fontFeatures: [ui.FontFeature.tabularFigures()], fontSize: 13),
+                    ),
                   ),
                 ],
               ),
@@ -1122,27 +1341,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 height: playSize + 12,
                 child: Row(
                   children: [
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            tooltip: 'Previous',
-                            onPressed: () => unawaited(_prev()),
-                            icon: Icon(Icons.skip_previous, color: Colors.white, size: iconSize),
-                          ),
-                          IconButton(
-                            onPressed: _togglePlay,
-                            icon: Icon(playing ? Icons.pause_circle : Icons.play_circle, color: Colors.white, size: playSize),
-                          ),
-                          IconButton(
-                            tooltip: 'Next',
-                            onPressed: () => unawaited(_next()),
-                            icon: Icon(Icons.skip_next, color: Colors.white, size: iconSize),
-                          ),
-                        ],
-                      ),
-                    ),
                     IconButton(
                       onPressed: () {
                         setState(() {
@@ -1154,6 +1352,27 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       icon: const Icon(Icons.lock_outline, color: Colors.white),
                       tooltip: 'Lock',
                     ),
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            tooltip: 'Previous',
+                            onPressed: () => unawaited(_prev()),
+                            icon: Icon(Icons.skip_previous, color: Colors.white, size: iconSize),
+                          ),
+                          IconButton(
+                            onPressed: _togglePlay,
+                            icon: Icon(playing ? Icons.pause_circle_outline : Icons.play_circle_outline, color: Colors.white, size: playSize),
+                          ),
+                          IconButton(
+                            tooltip: 'Next',
+                            onPressed: () => unawaited(_next()),
+                            icon: Icon(Icons.skip_next, color: Colors.white, size: iconSize),
+                          ),
+                        ],
+                      ),
+                    ),
                     IconButton(
                       onPressed: _aspectSheet,
                       icon: const Icon(Icons.aspect_ratio, color: Colors.white),
@@ -1164,6 +1383,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               ),
             ],
           ),
+        ),
         ),
       ),
     ];
@@ -1253,6 +1473,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           await CrashLog.breadcrumb('Open equalizer');
           if (mounted) {
             await Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+            await _applyEq();
           }
         } catch (e, s) {
           CrashLog.record('EQ', '$e', s);
@@ -1367,6 +1588,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       c.pause();
     } else {
       c.play();
+      unawaited(AndroidBridge.requestAudioFocus());
     }
     setState(() {});
     _armHide();
@@ -1725,11 +1947,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: () async {
-                        final reset = _systemBrightness ?? 0.5;
-                        ss(() => brightness = reset);
                         try {
-                          await ScreenBrightness().setApplicationScreenBrightness(reset);
-                        } catch (_) {}
+                          await ScreenBrightness().resetApplicationScreenBrightness();
+                          final sys = await ScreenBrightness().system;
+                          ss(() => brightness = sys);
+                          _systemBrightness = sys;
+                        } catch (_) {
+                          final reset = _systemBrightness ?? 0.5;
+                          ss(() => brightness = reset);
+                        }
                         appSettings.brightness = -1;
                         await appSettings.save();
                       },

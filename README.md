@@ -8,9 +8,12 @@ This app under development it's may have alot bugs
 
 - Library of all videos on the device (Videos / Folders / Settings)
 - Hide individual library tabs from Settings > General; hidden ones stay reachable from the Videos / Folders 3-dot menu
-- Gesture playback: seek, brightness, volume, double-tap ripples (paused / playing / skip), 2× long-press with a persistent badge
-- Pinch-to-zoom around your fingers, two-finger pan, and a live zoom percent
-- Previous, play, and next stay centered; lock and screen mode sit to the right
+- Gesture playback: D-pad double-tap skip with accumulating seconds, center double-tap play/pause, 2× long-press
+- Previous, play, and next stay centered; lock on the left and screen mode on the right
+- YouTube-style mini player with previous, play, next, and close; drag it anywhere
+- Brightness only while the player is open; leaving the video restores the system brightness
+- Equalizer attaches to the playing video's audio session
+- Does not mix with other apps: other media pauses this player, and this player pauses other media
 - Playlist modes: order, loop all, repeat one, shuffle, no autoplay
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
 - Quick actions: screenshot, background play, speed (reorder and check from player More)

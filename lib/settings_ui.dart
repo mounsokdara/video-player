@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'android_bridge.dart';
 import 'crash.dart';
 import 'main.dart';
 import 'models.dart';
@@ -538,6 +539,14 @@ class _EqualizerPageState extends State<EqualizerPage> {
   Future<void> _push() async {
     try {
       await appSettings.save();
+      await AndroidBridge.applyEqualizer(
+        enabled: appSettings.eqEnabled,
+        bands: appSettings.eqBands,
+        bassOn: appSettings.bassBoostOn,
+        bass: appSettings.bassBoost,
+        surroundOn: appSettings.surroundOn,
+        surround: appSettings.surround,
+      );
     } catch (e, s) {
       CrashLog.record('EQ', '$e', s);
     }
@@ -621,7 +630,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                                       });
                                     }
                                   : null,
-                              onChangeEnd: (_) => s.save(),
+                              onChangeEnd: (_) => _persist(),
                             ),
                           ),
                         ),
@@ -658,7 +667,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                     setState(() => s.bassBoost = v.round());
                   }
                 : null,
-            onChangeEnd: (_) => s.save(),
+            onChangeEnd: (_) => _persist(),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -680,7 +689,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
                     setState(() => s.surround = v.round());
                   }
                 : null,
-            onChangeEnd: (_) => s.save(),
+            onChangeEnd: (_) => _persist(),
           ),
         ],
       ),

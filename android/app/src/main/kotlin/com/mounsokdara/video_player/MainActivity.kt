@@ -7,8 +7,14 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
+import android.media.audiofx.Virtualizer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -51,11 +57,29 @@ class MainActivity : FlutterActivity() {
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val tenBandHz = intArrayOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
     private var tenBandLevels = IntArray(10)
+    private var equalizer: Equalizer? = null
+    private var bassBoostFx: BassBoost? = null
+    private var virtualizerFx: Virtualizer? = null
+    private var fxSession = 0
+    private var eqBlocked = false
+    private var audioManager: AudioManager? = null
+    private var focusRequest: AudioFocusRequest? = null
+    private var previewRetriever: MediaMetadataRetriever? = null
+    private var previewBoundPath: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         installCrashHook()
         handleIncoming(intent)
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        eqBlocked = File(filesDir, "eq_dirty.txt").exists()
+        if (eqBlocked) {
+            try {
+                File(filesDir, "eq_dirty.txt").delete()
+            } catch (_: Exception) {
+            }
+            breadcrumb("equalizer blocked after previous crash")
+        }
     }
 
     override fun onDestroy() {
@@ -64,6 +88,9 @@ class MainActivity : FlutterActivity() {
             File(filesDir, "last_action.txt").writeText("idle")
         } catch (_: Exception) {
         }
+        releaseFx()
+        bindPreview(null)
+        abandonAudioFocus()
         super.onDestroy()
     }
 
@@ -175,6 +202,7 @@ class MainActivity : FlutterActivity() {
                         }
                         "setPlaying" -> {
                             isPlaying = call.argument<Boolean>("on") ?: false
+                            if (isPlaying) requestAudioFocus()
                             result.success(true)
                         }
                         "enterPip" -> {
@@ -193,26 +221,83 @@ class MainActivity : FlutterActivity() {
                         }
                         "isPip" -> result.success(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode)
                         "initEqualizer" -> {
-                            // Never attach android.media.audiofx or walk ExoPlayer internals.
-                            // Those paths SIGSEGV on play / equalizer open.
-                            breadcrumb("initEqualizer skipped (ui-only)")
-                            result.success(emptyFx(0))
+                            val session = audioSessionId()
+                            val ok = if (session > 0) ensureFx(session) else false
+                            breadcrumb("initEqualizer session=$session ok=$ok blocked=$eqBlocked")
+                            result.success(emptyFx(session))
                         }
                         "setEqBand" -> {
                             val band = call.argument<Int>("band") ?: 0
                             val level = call.argument<Int>("level") ?: 0
                             if (band in 0..9) tenBandLevels[band] = level
+                            applyStoredEq()
                             result.success(true)
                         }
                         "setEqBands" -> {
                             val levels = call.argument<List<Int>>("levels") ?: emptyList()
                             for (i in 0 until minOf(10, levels.size)) tenBandLevels[i] = levels[i]
+                            applyStoredEq()
                             result.success(true)
                         }
                         "setEqPreset" -> result.success(true)
-                        "setEqEnabled" -> result.success(true)
-                        "setBassBoost" -> result.success(true)
-                        "setVirtualizer" -> result.success(true)
+                        "setEqEnabled" -> {
+                            val on = call.argument<Boolean>("on") ?: false
+                            if (!on) {
+                                try { equalizer?.enabled = false } catch (_: Throwable) {}
+                                try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
+                                try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
+                            } else {
+                                applyStoredEq()
+                            }
+                            result.success(true)
+                        }
+                        "setBassBoost" -> {
+                            val on = call.argument<Boolean>("on") ?: false
+                            val strength = call.argument<Int>("strength") ?: 0
+                            try {
+                                bassBoostFx?.setStrength(strength.coerceIn(0, 1000).toShort())
+                                bassBoostFx?.enabled = on
+                            } catch (_: Throwable) {}
+                            result.success(true)
+                        }
+                        "setVirtualizer" -> {
+                            val on = call.argument<Boolean>("on") ?: false
+                            val strength = call.argument<Int>("strength") ?: 0
+                            try {
+                                virtualizerFx?.setStrength(strength.coerceIn(0, 1000).toShort())
+                                virtualizerFx?.enabled = on
+                            } catch (_: Throwable) {}
+                            result.success(true)
+                        }
+                        "applyEqualizer" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: false
+                            val bands = call.argument<List<Int>>("bands") ?: emptyList()
+                            val bassOn = call.argument<Boolean>("bassOn") ?: false
+                            val bass = call.argument<Int>("bass") ?: 0
+                            val surroundOn = call.argument<Boolean>("surroundOn") ?: false
+                            val surround = call.argument<Int>("surround") ?: 0
+                            for (i in 0 until minOf(10, bands.size)) tenBandLevels[i] = bands[i]
+                            applyEq(enabled, bands, bassOn, bass, surroundOn, surround)
+                            if (enabled && equalizer == null && !eqBlocked) {
+                                mainHandler.postDelayed({
+                                    applyEq(enabled, bands, bassOn, bass, surroundOn, surround)
+                                }, 450)
+                            }
+                            result.success(true)
+                        }
+                        "preparePreview" -> {
+                            val path = call.argument<String>("path")
+                            io.execute { bindPreview(path) }
+                            result.success(true)
+                        }
+                        "requestAudioFocus" -> {
+                            requestAudioFocus()
+                            result.success(true)
+                        }
+                        "abandonAudioFocus" -> {
+                            abandonAudioFocus()
+                            result.success(true)
+                        }
                         "setPlaybackParams" -> {
                             val speed = (call.argument<Double>("speed") ?: 1.0).toFloat()
                             val pitchShift = call.argument<Boolean>("pitchShift") ?: false
@@ -242,6 +327,7 @@ class MainActivity : FlutterActivity() {
                             } catch (t: Throwable) {
                                 writeCrash("startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
                             }
+                            if (playing) requestAudioFocus()
                             result.success(true)
                         }
                         "updateBackground" -> {
@@ -355,6 +441,201 @@ class MainActivity : FlutterActivity() {
         map["sessionId"] = session
         map["presets"] = emptyList<String>()
         return map
+    }
+
+    private fun audioSessionId(): Int {
+        val exo = findExoPlayer() ?: return 0
+        return try {
+            val m = exo.javaClass.methods.firstOrNull { it.name == "getAudioSessionId" && it.parameterCount == 0 }
+            (m?.invoke(exo) as? Number)?.toInt() ?: 0
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
+    private fun releaseFx() {
+        try { equalizer?.enabled = false } catch (_: Throwable) {}
+        try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
+        try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
+        try { equalizer?.release() } catch (_: Throwable) {}
+        try { bassBoostFx?.release() } catch (_: Throwable) {}
+        try { virtualizerFx?.release() } catch (_: Throwable) {}
+        equalizer = null
+        bassBoostFx = null
+        virtualizerFx = null
+        fxSession = 0
+    }
+
+    private fun ensureFx(session: Int): Boolean {
+        if (eqBlocked || session <= 0) return false
+        if (equalizer != null && fxSession == session) return true
+        releaseFx()
+        val dirty = File(filesDir, "eq_dirty.txt")
+        return try {
+            dirty.writeText("eq")
+            val eq = Equalizer(0, session)
+            equalizer = eq
+            fxSession = session
+            try {
+                bassBoostFx = BassBoost(0, session)
+            } catch (_: Throwable) {
+            }
+            try {
+                virtualizerFx = Virtualizer(0, session)
+            } catch (_: Throwable) {
+            }
+            dirty.delete()
+            breadcrumb("equalizer attached session=$session bands=${eq.numberOfBands}")
+            true
+        } catch (t: Throwable) {
+            eqBlocked = true
+            try { dirty.delete() } catch (_: Exception) {}
+            releaseFx()
+            writeCrash("equalizer attach: ${t.message}\n${Log.getStackTraceString(t)}")
+            false
+        }
+    }
+
+    private fun interpolateBand(hz: Int, bands: List<Int>): Int {
+        if (bands.isEmpty()) return 0
+        val last = minOf(bands.size, tenBandHz.size) - 1
+        if (last < 0) return 0
+        if (hz <= tenBandHz[0]) return bands[0]
+        if (hz >= tenBandHz[last]) return bands[last]
+        for (i in 0 until last) {
+            val a = tenBandHz[i]
+            val b = tenBandHz[i + 1]
+            if (hz in a..b) {
+                val t = (hz - a).toFloat() / (b - a).coerceAtLeast(1).toFloat()
+                val va = bands[i]
+                val vb = bands[i + 1]
+                return (va + (vb - va) * t).toInt()
+            }
+        }
+        return 0
+    }
+
+    private fun applyStoredEq() {
+        applyEq(
+            true,
+            tenBandLevels.toList(),
+            bassBoostFx?.enabled == true,
+            (bassBoostFx?.roundedStrength ?: 0).toInt(),
+            virtualizerFx?.enabled == true,
+            (virtualizerFx?.roundedStrength ?: 0).toInt()
+        )
+    }
+
+    private fun applyEq(
+        enabled: Boolean,
+        bands: List<Int>,
+        bassOn: Boolean,
+        bass: Int,
+        surroundOn: Boolean,
+        surround: Int
+    ) {
+        if (!enabled) {
+            try { equalizer?.enabled = false } catch (_: Throwable) {}
+            try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
+            try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
+            return
+        }
+        val session = audioSessionId()
+        if (!ensureFx(session)) return
+        val eq = equalizer ?: return
+        try {
+            eq.enabled = true
+            val n = eq.numberOfBands.toInt()
+            val range = eq.bandLevelRange
+            val min = range[0].toInt()
+            val max = range[1].toInt()
+            for (i in 0 until n) {
+                val hz = eq.getCenterFreq(i.toShort()) / 1000
+                val milli = interpolateBand(hz, bands).coerceIn(min, max)
+                eq.setBandLevel(i.toShort(), milli.toShort())
+            }
+        } catch (t: Throwable) {
+            breadcrumb("eq bands: ${t.message}")
+        }
+        try {
+            bassBoostFx?.setStrength(bass.coerceIn(0, 1000).toShort())
+            bassBoostFx?.enabled = bassOn
+        } catch (_: Throwable) {
+        }
+        try {
+            virtualizerFx?.setStrength(surround.coerceIn(0, 1000).toShort())
+            virtualizerFx?.enabled = surroundOn
+        } catch (_: Throwable) {
+        }
+    }
+
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> emitMedia("pause")
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> emitMedia("pause")
+        }
+    }
+
+    private fun requestAudioFocus() {
+        val am = audioManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                            .build()
+                    )
+                    .setOnAudioFocusChangeListener(focusListener)
+                    .setAcceptsDelayedFocusGain(false)
+                    .setWillPauseWhenDucked(true)
+                    .build()
+                focusRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            }
+        } catch (t: Throwable) {
+            breadcrumb("audio focus: ${t.message}")
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val am = audioManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                focusRequest?.let { am.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(focusListener)
+            }
+        } catch (_: Throwable) {
+        }
+        focusRequest = null
+    }
+
+    private fun bindPreview(path: String?) {
+        if (path.isNullOrEmpty()) {
+            try { previewRetriever?.release() } catch (_: Exception) {}
+            previewRetriever = null
+            previewBoundPath = null
+            return
+        }
+        if (path == previewBoundPath && previewRetriever != null) return
+        try { previewRetriever?.release() } catch (_: Exception) {}
+        previewRetriever = null
+        previewBoundPath = null
+        val r = MediaMetadataRetriever()
+        try {
+            val file = File(path)
+            if (file.exists()) r.setDataSource(path) else r.setDataSource(this, Uri.parse(path))
+            previewRetriever = r
+            previewBoundPath = path
+        } catch (_: Exception) {
+            try { r.release() } catch (_: Exception) {}
+        }
     }
 
     private fun readLastCrash(): String? {
@@ -978,33 +1259,49 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun previewJpeg(path: String, positionMs: Long): ByteArray? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            val file = File(path)
-            if (file.exists()) retriever.setDataSource(path) else retriever.setDataSource(this, Uri.parse(path))
-            val bmp = retriever.getFrameAtTime(positionMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: retriever.frameAtTime
-                ?: return null
-            val w = 320
-            val scaled = if (bmp.width > w) {
-                val h = (bmp.height * w.toFloat() / bmp.width).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(bmp, w, h, true)
-            } else {
-                bmp
-            }
-            val out = java.io.ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 52, out)
-            if (scaled !== bmp) scaled.recycle()
-            bmp.recycle()
-            out.toByteArray()
-        } catch (_: Exception) {
-            null
-        } finally {
+        if (previewBoundPath != path || previewRetriever == null) bindPreview(path)
+        val retriever = previewRetriever
+        if (retriever != null) {
             try {
-                retriever.release()
+                return frameToJpeg(retriever, positionMs)
             } catch (_: Exception) {
+                bindPreview(path)
+                previewRetriever?.let {
+                    return try {
+                        frameToJpeg(it, positionMs)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             }
         }
+        return null
+    }
+
+    private fun frameToJpeg(retriever: MediaMetadataRetriever, positionMs: Long): ByteArray? {
+        val us = positionMs * 1000
+        val option = MediaMetadataRetriever.OPTION_PREVIOUS_SYNC
+        val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= 27) {
+            retriever.getScaledFrameAtTime(us, option, 180, 102)
+                ?: retriever.getScaledFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST, 180, 102)
+        } else {
+            val full = retriever.getFrameAtTime(us, option) ?: retriever.frameAtTime
+            if (full == null) {
+                null
+            } else if (full.width > 180) {
+                val h = (full.height * 180f / full.width).toInt().coerceAtLeast(1)
+                val scaled = Bitmap.createScaledBitmap(full, 180, h, true)
+                if (scaled !== full) full.recycle()
+                scaled
+            } else {
+                full
+            }
+        }
+        if (bmp == null) return null
+        val out = java.io.ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, 40, out)
+        bmp.recycle()
+        return out.toByteArray()
     }
 
     private fun collectViews(view: View, surfaces: MutableList<SurfaceView>, textures: MutableList<TextureView>) {

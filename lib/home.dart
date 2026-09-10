@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
 import 'crash.dart';
@@ -41,6 +42,9 @@ class _HomeShellState extends State<HomeShell> {
 
   String? folderPath;
   final folderTrail = <String>[];
+  Offset? _miniPos;
+  bool _miniDragging = false;
+  bool _miniPlaying = false;
 
   @override
   void initState() {
@@ -58,6 +62,9 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     refreshTimer?.cancel();
     events?.cancel();
+    try {
+      PlaybackSession.controller?.removeListener(_onSessionTick);
+    } catch (_) {}
     searchCtrl.dispose();
     super.dispose();
   }
@@ -156,7 +163,24 @@ class _HomeShellState extends State<HomeShell> {
         onChanged: () => setState(() {}),
       ),
     ));
+    _bindSession();
     setState(() {});
+  }
+
+  void _bindSession() {
+    try {
+      PlaybackSession.controller?.removeListener(_onSessionTick);
+    } catch (_) {}
+    PlaybackSession.controller?.addListener(_onSessionTick);
+    _miniPlaying = PlaybackSession.controller?.value.isPlaying ?? false;
+  }
+
+  void _onSessionTick() {
+    final p = PlaybackSession.controller?.value.isPlaying ?? false;
+    if (p != _miniPlaying && mounted) {
+      _miniPlaying = p;
+      setState(() {});
+    }
   }
 
   Future<void> _openPath(String path) async {
@@ -192,7 +216,9 @@ class _HomeShellState extends State<HomeShell> {
     if (next < 0) next = 0;
     if (next >= list.length) next = list.length - 1;
     if (next == PlaybackSession.index && delta != 0) return;
-    await _open(list[next], playlist: list);
+    await PlaybackSession.swapTo(list[next], list: list, at: next);
+    _bindSession();
+    if (mounted) setState(() {});
   }
 
   void _toggleSelect(VideoItem item) {
@@ -464,79 +490,7 @@ class _HomeShellState extends State<HomeShell> {
       return Stack(
         children: [
           child,
-          if (PlaybackSession.active)
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: (wide ? 16.0 : (tabs.length <= 1 ? 16.0 : 88.0)) + pad.bottom,
-              child: Material(
-                elevation: 6,
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.headphones),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          final item = PlaybackSession.item;
-                          if (item != null) _open(item, playlist: PlaybackSession.playlist);
-                        },
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(PlaybackSession.item?.title ?? 'Playing', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                            const Text('Playing in the background', style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Previous',
-                      onPressed: () => _sessionSkip(-1),
-                      icon: const Icon(Icons.skip_previous),
-                    ),
-                    IconButton(
-                      tooltip: (PlaybackSession.controller?.value.isPlaying ?? false) ? 'Pause' : 'Play',
-                      onPressed: () async {
-                        final c = PlaybackSession.controller;
-                        if (c == null) return;
-                        if (c.value.isPlaying) {
-                          await c.pause();
-                        } else {
-                          await c.play();
-                        }
-                        await AndroidBridge.updateBackground(
-                          playing: c.value.isPlaying,
-                          positionMs: c.value.position.inMilliseconds,
-                          durationMs: c.value.duration.inMilliseconds,
-                        );
-                        setState(() {});
-                      },
-                      icon: Icon((PlaybackSession.controller?.value.isPlaying ?? false) ? Icons.pause : Icons.play_arrow),
-                    ),
-                    IconButton(
-                      tooltip: 'Next',
-                      onPressed: () => _sessionSkip(1),
-                      icon: const Icon(Icons.skip_next),
-                    ),
-                    IconButton(
-                      tooltip: 'Stop',
-                      onPressed: () async {
-                        await PlaybackSession.stop();
-                        setState(() {});
-                      },
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              ),
-              ),
-            ),
+          if (PlaybackSession.active) _miniPlayer(scheme, pad, wide),
         ],
       );
     }
@@ -580,6 +534,161 @@ class _HomeShellState extends State<HomeShell> {
               destinations: [for (final id in tabs) dest(id)],
             ),
       backgroundColor: scheme.surface,
+    );
+  }
+
+  Widget _miniPlayer(ColorScheme scheme, EdgeInsets pad, bool wide) {
+    final c = PlaybackSession.controller;
+    final item = PlaybackSession.item;
+    final playing = c?.value.isPlaying ?? false;
+    const w = 220.0;
+    const videoH = 124.0;
+    const barH = 40.0;
+    const h = videoH + barH;
+    final size = MediaQuery.sizeOf(context);
+    final navH = wide || tabs.length <= 1 ? 16.0 : 88.0;
+    final defLeft = size.width - w - 12;
+    final defTop = size.height - h - 12 - navH - pad.bottom;
+    final pos = _miniPos ?? Offset(defLeft.clamp(8, size.width - w - 8), defTop.clamp(pad.top + 8, size.height - h - 8));
+
+    Widget video;
+    try {
+      if (c != null && c.value.isInitialized) {
+        video = FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: c.value.size.width.clamp(1, 4000),
+            height: c.value.size.height.clamp(1, 4000),
+            child: VideoPlayer(key: ValueKey(item?.path), c),
+          ),
+        );
+      } else {
+        video = ColoredBox(color: scheme.surfaceContainerHighest, child: const Center(child: Icon(Icons.play_circle, color: Colors.white70)));
+      }
+    } catch (_) {
+      video = ColoredBox(color: scheme.surfaceContainerHighest);
+    }
+
+    Widget ctrl({required String tooltip, required VoidCallback onPressed, required IconData icon}) {
+      return IconButton(
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+        color: scheme.onSurface,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon, size: 22),
+      );
+    }
+
+    return Positioned(
+      left: pos.dx,
+      top: pos.dy,
+      width: w,
+      height: h,
+      child: Material(
+        elevation: 12,
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: GestureDetector(
+          onPanStart: (_) {
+            _miniDragging = false;
+          },
+          onPanUpdate: (d) {
+            _miniDragging = true;
+            final next = Offset(
+              (pos.dx + d.delta.dx).clamp(8, size.width - w - 8),
+              (pos.dy + d.delta.dy).clamp(pad.top + 8, size.height - h - 8),
+            );
+            setState(() => _miniPos = next);
+          },
+          onPanEnd: (_) {
+            Future<void>.delayed(const Duration(milliseconds: 40), () => _miniDragging = false);
+          },
+          child: Column(
+            children: [
+              SizedBox(
+                width: w,
+                height: videoH,
+                child: GestureDetector(
+                  onTap: () {
+                    if (_miniDragging) return;
+                    if (item != null) _open(item, playlist: PlaybackSession.playlist);
+                  },
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      video,
+                      if (!playing)
+                        const IgnorePointer(
+                          child: ColoredBox(
+                            color: Color(0x33000000),
+                            child: Center(child: Icon(Icons.play_arrow, color: Colors.white, size: 36)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: barH,
+                child: Row(
+                  children: [
+                    ctrl(
+                      tooltip: 'Previous',
+                      onPressed: () => unawaited(_sessionSkip(-1)),
+                      icon: Icons.skip_previous,
+                    ),
+                    ctrl(
+                      tooltip: playing ? 'Pause' : 'Play',
+                      onPressed: () async {
+                        final live = PlaybackSession.controller;
+                        if (live == null) return;
+                        if (live.value.isPlaying) {
+                          await live.pause();
+                        } else {
+                          await live.play();
+                          await AndroidBridge.requestAudioFocus();
+                        }
+                        await AndroidBridge.updateBackground(
+                          playing: live.value.isPlaying,
+                          positionMs: live.value.position.inMilliseconds,
+                          durationMs: live.value.duration.inMilliseconds,
+                        );
+                        setState(() {});
+                      },
+                      icon: playing ? Icons.pause : Icons.play_arrow,
+                    ),
+                    ctrl(
+                      tooltip: 'Next',
+                      onPressed: () => unawaited(_sessionSkip(1)),
+                      icon: Icons.skip_next,
+                    ),
+                    Expanded(
+                      child: Text(
+                        item?.title ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: scheme.onSurface, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    ctrl(
+                      tooltip: 'Close',
+                      onPressed: () async {
+                        await PlaybackSession.stop();
+                        _miniPos = null;
+                        setState(() {});
+                      },
+                      icon: Icons.close,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
