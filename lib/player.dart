@@ -46,7 +46,7 @@ class PlaybackSession {
 
   static bool get active => keepAlive && controller != null && item != null;
 
-  static VideoPlayerOptions get playerOptions => const VideoPlayerOptions(
+  static final playerOptions = VideoPlayerOptions(
         mixWithOthers: true,
         allowBackgroundPlayback: true,
       );
