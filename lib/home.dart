@@ -62,6 +62,7 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     refreshTimer?.cancel();
     events?.cancel();
+    PlaybackSession.onMutated = null;
     try {
       PlaybackSession.controller?.removeListener(_onSessionTick);
     } catch (_) {}
@@ -100,9 +101,9 @@ class _HomeShellState extends State<HomeShell> {
         case 'unduck':
           c?.setVolume(1);
         case 'next':
-          unawaited(_sessionSkip(1));
+          unawaited(PlaybackSession.skip(1));
         case 'prev':
-          unawaited(_sessionSkip(-1));
+          unawaited(PlaybackSession.skip(-1));
         case 'seek':
           final ms = e['positionMs'];
           if (ms is num) unawaited(c?.seekTo(Duration(milliseconds: ms.round())) ?? Future<void>.value());
@@ -178,6 +179,15 @@ class _HomeShellState extends State<HomeShell> {
       PlaybackSession.controller?.removeListener(_onSessionTick);
     } catch (_) {}
     PlaybackSession.controller?.addListener(_onSessionTick);
+    PlaybackSession.onMutated = () {
+      if (!mounted) return;
+      try {
+        PlaybackSession.controller?.removeListener(_onSessionTick);
+      } catch (_) {}
+      PlaybackSession.controller?.addListener(_onSessionTick);
+      _miniPlaying = PlaybackSession.controller?.value.isPlaying ?? false;
+      setState(() {});
+    };
     _miniPlaying = PlaybackSession.controller?.value.isPlaying ?? false;
   }
 
@@ -215,18 +225,7 @@ class _HomeShellState extends State<HomeShell> {
     await _open(item, playlist: [item, ...visible.where((v) => v.path != path)]);
   }
 
-  Future<void> _sessionSkip(int delta) async {
-    if (!PlaybackSession.active) return;
-    final list = PlaybackSession.playlist;
-    if (list.isEmpty) return;
-    var next = PlaybackSession.index + delta;
-    if (next < 0) next = 0;
-    if (next >= list.length) next = list.length - 1;
-    if (next == PlaybackSession.index && delta != 0) return;
-    await PlaybackSession.swapTo(list[next], list: list, at: next);
-    _bindSession();
-    if (mounted) setState(() {});
-  }
+  Future<void> _sessionSkip(int delta) => PlaybackSession.skip(delta);
 
   void _toggleSelect(VideoItem item) {
     setState(() {
@@ -522,14 +521,17 @@ class _HomeShellState extends State<HomeShell> {
     final body = pageFor(current);
     final pad = SystemBars.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
-    SystemBars.alwaysHide = false;
-    SystemBars.apply(icons: dark ? Brightness.light : Brightness.dark, contrast: true);
+    final onTop = ModalRoute.of(context)?.isCurrent ?? true;
+    if (onTop) {
+      SystemBars.alwaysHide = false;
+      SystemBars.apply(icons: dark ? Brightness.light : Brightness.dark, contrast: true, hide: false);
+    }
 
     Widget shell(Widget child) {
       return Stack(
         children: [
           child,
-          if (PlaybackSession.active && appSettings.inAppMiniplayer)
+          if (PlaybackSession.active && appSettings.inAppMiniplayer && onTop)
             MiniPlayerOverlay(
               pad: pad,
               navH: wide || tabs.length <= 1 ? 16.0 : 88.0,

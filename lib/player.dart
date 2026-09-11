@@ -34,36 +34,284 @@ class PlaybackSession {
   static bool keepAlive = false;
   static double speed = 1;
   static AspectMode aspect = AspectMode.fit;
+  static VoidCallback? onMutated;
+
+  static bool _endedLatch = false;
+  static bool _busy = false;
+  static int _failStreak = 0;
+  static VoidCallback? _hook;
+
+  static const _endSlop = Duration(milliseconds: 400);
+  static const _replayAfter = Duration(seconds: 3);
 
   static bool get active => keepAlive && controller != null && item != null;
 
+  static VideoPlayerOptions get playerOptions => const VideoPlayerOptions(
+        mixWithOthers: true,
+        allowBackgroundPlayback: true,
+      );
+
+  static VideoPlayerController controllerFor(String playPath) {
+    if (playPath.startsWith('content:')) {
+      return VideoPlayerController.contentUri(Uri.parse(playPath), videoPlayerOptions: playerOptions);
+    }
+    return VideoPlayerController.file(File(playPath), videoPlayerOptions: playerOptions);
+  }
+
+  static Future<String> resolvePlayPath(String path) async {
+    if (!appSettings.decompressVideo) return path;
+    try {
+      final out = await AndroidBridge.decompressVideo(path, lowMem: appSettings.lowMemoryBuffer);
+      if (out.isNotEmpty) return out;
+    } catch (_) {}
+    return path;
+  }
+
+  static Future<VideoPlayerController> openWithFallback(VideoItem next) async {
+    var playPath = await resolvePlayPath(next.path);
+    VideoPlayerController? c;
+    try {
+      c = controllerFor(playPath);
+      await c.initialize();
+      if (c.value.hasError) {
+        throw StateError(c.value.errorDescription ?? 'Source error');
+      }
+      return c;
+    } catch (e, s) {
+      try {
+        await c?.dispose();
+      } catch (_) {}
+      if (playPath == next.path) {
+        CrashLog.record('PLAY', '$e', s);
+        rethrow;
+      }
+      VideoPlayerController? original;
+      try {
+        original = controllerFor(next.path);
+        await original.initialize();
+        if (original.value.hasError) {
+          throw StateError(original.value.errorDescription ?? 'Source error');
+        }
+        return original;
+      } catch (e2, s2) {
+        CrashLog.record('PLAY', '$e2', s2);
+        try {
+          await original?.dispose();
+        } catch (_) {}
+        rethrow;
+      }
+    }
+  }
+
+  static void _listen() {
+    _unlisten();
+    final c = controller;
+    if (c == null) return;
+    void hook() => _onTick();
+    _hook = hook;
+    c.addListener(hook);
+  }
+
+  static void _unlisten() {
+    final h = _hook;
+    if (h != null) {
+      try {
+        controller?.removeListener(h);
+      } catch (_) {}
+    }
+    _hook = null;
+  }
+
+  static void _onTick() {
+    if (!keepAlive || _busy) return;
+    final c = controller;
+    if (c == null) return;
+    try {
+      if (c.value.hasError) {
+        unawaited(_onSourceError(c.value.errorDescription));
+        return;
+      }
+      if (!c.value.isInitialized) return;
+      final dur = c.value.duration;
+      if (dur > Duration.zero && c.value.position >= dur - _endSlop && !c.value.isPlaying) {
+        unawaited(onEnded());
+      }
+    } catch (e, s) {
+      CrashLog.record('SESSION', '$e', s);
+    }
+  }
+
+  static Future<void> _onSourceError(String? desc) async {
+    if (_busy || !keepAlive) return;
+    await CrashLog.breadcrumb('Source error ${item?.path}: ${desc ?? ''}');
+    await skip(1, fromError: true);
+    if (_failStreak >= playlist.length) {
+      CrashLog.record('PLAY', desc ?? 'Source error', null);
+    }
+  }
+
+  static void claim({
+    required VideoPlayerController c,
+    required VideoItem item,
+    required List<VideoItem> list,
+    required int at,
+    required double speed,
+    required AspectMode aspect,
+  }) {
+    controller = c;
+    PlaybackSession.item = item;
+    playlist = List<VideoItem>.from(list);
+    index = at;
+    PlaybackSession.speed = speed;
+    PlaybackSession.aspect = aspect;
+    keepAlive = true;
+    _endedLatch = false;
+    _failStreak = 0;
+    _listen();
+  }
+
+  static VideoPlayerController? take() {
+    _unlisten();
+    keepAlive = false;
+    _endedLatch = false;
+    return controller;
+  }
+
   static Future<void> stop() async {
     keepAlive = false;
-    try {
-      await controller?.pause();
-    } catch (_) {}
-    try {
-      controller?.removeListener(() {});
-      await controller?.dispose();
-    } catch (_) {}
+    _unlisten();
+    _endedLatch = false;
+    _busy = false;
+    _failStreak = 0;
+    final dying = controller;
     controller = null;
     item = null;
     playlist = [];
+    onMutated?.call();
+    await Future<void>.delayed(Duration.zero);
+    try {
+      await dying?.pause();
+    } catch (_) {}
+    try {
+      await dying?.dispose();
+    } catch (_) {}
     await AndroidBridge.stopBackground();
     await AndroidBridge.abandonAudioFocus();
   }
 
-  static Future<void> swapTo(VideoItem next, {required List<VideoItem> list, required int at}) async {
+  static Future<void> applyOutput(VideoPlayerController c, VideoItem next) async {
+    try {
+      await c.setLooping(appSettings.playMode == PlayMode.repeatOne);
+    } catch (_) {}
+    try {
+      await c.setPlaybackSpeed(speed);
+    } catch (_) {}
+    await AndroidBridge.setPlaybackParams(speed: speed, pitchShift: appSettings.pitchShift);
+    await AndroidBridge.applyEqualizer(
+      enabled: appSettings.eqEnabled,
+      bands: appSettings.eqBands,
+      bassOn: appSettings.bassBoostOn,
+      bass: appSettings.bassBoost,
+      surroundOn: appSettings.surroundOn,
+      surround: appSettings.surround,
+    );
+    if (appSettings.backgroundPlay) {
+      await AndroidBridge.startBackground(
+        title: next.title,
+        artist: next.folderName,
+        playing: c.value.isPlaying,
+        positionMs: c.value.position.inMilliseconds,
+        durationMs: c.value.duration.inMilliseconds,
+      );
+    }
+  }
+
+  static Future<void> onEnded() async {
+    if (_endedLatch || _busy || !keepAlive) return;
+    _endedLatch = true;
+    switch (appSettings.playMode) {
+      case PlayMode.repeatOne:
+        try {
+          await controller?.seekTo(Duration.zero);
+          await controller?.play();
+        } catch (_) {}
+        _endedLatch = false;
+      case PlayMode.noAutoplay:
+        return;
+      case PlayMode.loopAll:
+      case PlayMode.order:
+      case PlayMode.shuffle:
+        if (appSettings.autoPlayNext ||
+            appSettings.playMode == PlayMode.loopAll ||
+            appSettings.playMode == PlayMode.shuffle) {
+          await skip(1, fromEnd: true);
+        }
+    }
+  }
+
+  static int nextIndex({required int delta}) {
+    final list = playlist;
+    if (list.isEmpty) return index;
+    final mode = appSettings.playMode;
+    if (delta > 0) {
+      if (mode == PlayMode.shuffle) {
+        if (list.length == 1) return 0;
+        var n = math.Random().nextInt(list.length);
+        if (n == index) n = (n + 1) % list.length;
+        return n;
+      }
+      if (index >= list.length - 1) {
+        return mode == PlayMode.loopAll ? 0 : index;
+      }
+      return index + 1;
+    }
+    if (index > 0) return index - 1;
+    return mode == PlayMode.loopAll ? list.length - 1 : 0;
+  }
+
+  static Future<void> skip(int delta, {bool fromEnd = false, bool fromError = false}) async {
+    if (_busy) return;
+    if (controller == null && item == null) return;
+    final list = playlist;
+    if (list.isEmpty) return;
+
+    if (delta < 0 && !fromEnd && !fromError) {
+      final pos = controller?.value.position ?? Duration.zero;
+      if (pos > _replayAfter) {
+        try {
+          await controller?.seekTo(Duration.zero);
+          if (!(controller?.value.isPlaying ?? false)) await controller?.play();
+        } catch (_) {}
+        return;
+      }
+    }
+
+    var next = nextIndex(delta: delta);
+    if (fromError && next == index && list.length > 1) {
+      next = (index + 1) % list.length;
+    }
+    if (next == index && !fromError) return;
+    if (fromError) {
+      _failStreak++;
+      if (_failStreak >= list.length) return;
+    } else {
+      _failStreak = 0;
+    }
+    final ok = await swapTo(list[next], list: list, at: next);
+    if (!ok && list.length > 1 && _failStreak < list.length) {
+      await skip(1, fromError: true);
+    }
+  }
+
+  static Future<bool> swapTo(VideoItem next, {required List<VideoItem> list, required int at}) async {
+    if (_busy) return false;
+    _busy = true;
+    _endedLatch = true;
     final old = controller;
+    _unlisten();
     VideoPlayerController? c;
     try {
-      final opts = VideoPlayerOptions(mixWithOthers: true, allowBackgroundPlayback: true);
-      if (next.path.startsWith('content:')) {
-        c = VideoPlayerController.contentUri(Uri.parse(next.path), videoPlayerOptions: opts);
-      } else {
-        c = VideoPlayerController.file(File(next.path), videoPlayerOptions: opts);
-      }
-      await c.initialize();
+      c = await openWithFallback(next);
       await AndroidBridge.requestAudioFocus();
       await c.play();
       controller = c;
@@ -71,39 +319,32 @@ class PlaybackSession {
       playlist = List<VideoItem>.from(list);
       index = at;
       keepAlive = true;
+      _endedLatch = false;
+      _failStreak = 0;
+      _listen();
+      onMutated?.call();
+      await AndroidBridge.preparePreview(next.path);
+      await applyOutput(c, next);
+      await Future<void>.delayed(Duration.zero);
       try {
-        old?.removeListener(() {});
         await old?.dispose();
       } catch (_) {}
-      await AndroidBridge.preparePreview(next.path);
-      try {
-        await c.setPlaybackSpeed(speed);
-      } catch (_) {}
-      await AndroidBridge.setPlaybackParams(speed: speed, pitchShift: appSettings.pitchShift);
-      await AndroidBridge.applyEqualizer(
-        enabled: appSettings.eqEnabled,
-        bands: appSettings.eqBands,
-        bassOn: appSettings.bassBoostOn,
-        bass: appSettings.bassBoost,
-        surroundOn: appSettings.surroundOn,
-        surround: appSettings.surround,
-      );
-      if (appSettings.backgroundPlay) {
-        await AndroidBridge.startBackground(
-          title: next.title,
-          artist: next.folderName,
-          playing: true,
-          positionMs: 0,
-          durationMs: c.value.duration.inMilliseconds,
-        );
-      }
-    } catch (_) {
+      return true;
+    } catch (e, s) {
+      CrashLog.record('PLAY', '$e', s);
       try {
         await c?.dispose();
       } catch (_) {}
+      controller = old;
+      keepAlive = old != null;
+      if (old != null) _listen();
+      return false;
+    } finally {
+      _busy = false;
     }
   }
 }
+
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.playlist, required this.index, required this.onChanged});
@@ -189,6 +430,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _tapBurst = false;
   bool _ateTap = false;
   bool _handedOff = false;
+  bool _endedLatch = false;
+  int _openFails = 0;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -214,13 +457,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       kept = false;
     }
     if (kept) {
-      vc = PlaybackSession.controller;
+      vc = PlaybackSession.take();
       ready = true;
       speed = PlaybackSession.speed;
       aspect = PlaybackSession.aspect;
-      PlaybackSession.keepAlive = false;
       vc?.addListener(_tick);
       _lastPlaying = vc?.value.isPlaying ?? false;
+      _endedLatch = false;
+      _openFails = 0;
       unawaited(WakelockPlus.enable());
       unawaited(AndroidBridge.setKeepScreenOn(true));
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -342,12 +586,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (mounted) {
       covered = ModalRoute.of(context)?.isCurrent == false || SystemBars.popupCount > 0;
     }
-    SystemBars.apply(icons: Brightness.light, contrast: true, forceShow: covered);
-    unawaited(AndroidBridge.applySystemBars(
-      lightIcons: true,
-      contrast: true,
-      hide: appSettings.alwaysHideNavBar && !covered,
-    ));
+    final hide = !covered && (appSettings.alwaysHideNavBar || !showUi);
+    SystemBars.apply(icons: Brightness.light, contrast: true, hide: hide);
   }
 
   void _syncPip() {
@@ -403,6 +643,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final gen = ++_playerGen;
     vc = null;
     ready = false;
+    _endedLatch = false;
     _scrub = null;
     _previewBytes = null;
     _zoomScale = 1;
@@ -420,37 +661,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     VideoPlayerController? c;
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
-      var playPath = item.path;
-      if (appSettings.decompressVideo) {
-        try {
-          playPath = await AndroidBridge.decompressVideo(item.path, lowMem: appSettings.lowMemoryBuffer);
-        } catch (_) {
-          playPath = item.path;
-        }
-      }
-      final opts = VideoPlayerOptions(
-        mixWithOthers: true,
-        allowBackgroundPlayback: true,
-      );
-      if (playPath.startsWith('content:')) {
-        c = VideoPlayerController.contentUri(Uri.parse(playPath), videoPlayerOptions: opts);
-      } else {
-        final file = File(playPath);
-        var exists = false;
-        try {
-          exists = file.existsSync();
-        } catch (_) {}
-        if (!exists) {
-          if (mounted) {
-            setState(() => ready = false);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File not found: ${item.title}')));
-          }
-          return;
-        }
-        c = VideoPlayerController.file(file, videoPlayerOptions: opts);
-      }
-      await c.initialize();
-      await CrashLog.breadcrumb('Initialized ${item.title}');
+      c = await PlaybackSession.openWithFallback(item);
       if (!mounted || gen != _playerGen) {
         try {
           await c.dispose();
@@ -465,11 +676,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         }
       }
       c.addListener(_tick);
-      c.setLooping(appSettings.playMode == PlayMode.repeatOne);
+      await c.setLooping(appSettings.playMode == PlayMode.repeatOne);
       if (c.value.hasError) {
         throw StateError(c.value.errorDescription ?? 'Player failed to start');
       }
       vc = c;
+      _openFails = 0;
+      _endedLatch = false;
       await AndroidBridge.requestAudioFocus();
       await c.play();
       _lastPlaying = true;
@@ -482,12 +695,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (mounted && gen == _playerGen) setState(() => ready = true);
       _armHide();
     } catch (e, s) {
-      CrashLog.record('PLAY', '$e', s);
+      await CrashLog.breadcrumb('Open failed ${item.path}: $e');
       try {
         await c?.dispose();
       } catch (_) {}
       if (gen == _playerGen) vc = null;
       if (mounted) setState(() => ready = false);
+      if (mounted && gen == _playerGen) {
+        _openFails++;
+        if (_openFails < list.length && appSettings.playMode != PlayMode.noAutoplay) {
+          await _next();
+        } else {
+          CrashLog.record('PLAY', '$e', s);
+        }
+      }
     }
   }
 
@@ -496,6 +717,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (c == null || !mounted) return;
     try {
       if (!c.value.isInitialized) return;
+      if (c.value.hasError) {
+        unawaited(CrashLog.breadcrumb('Source error ${item.path}: ${c.value.errorDescription}'));
+        if (!_endedLatch) {
+          _endedLatch = true;
+          unawaited(_next());
+        }
+        return;
+      }
       final pos = c.value.position.inMilliseconds.toDouble();
       final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
       final p = (pos / dur).clamp(0.0, 1.0).toDouble();
@@ -515,7 +744,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _lastBg = nowTick;
         unawaited(_syncBackground());
       }
-      if (c.value.position >= c.value.duration - const Duration(milliseconds: 400) && !c.value.isPlaying) {
+      if (!_endedLatch &&
+          c.value.position >= c.value.duration - const Duration(milliseconds: 400) &&
+          !c.value.isPlaying) {
+        _endedLatch = true;
         _onEnded();
       }
       if (nowTick.difference(_lastUi) >= const Duration(milliseconds: 120)) {
@@ -532,6 +764,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       case PlayMode.repeatOne:
         await vc?.seekTo(Duration.zero);
         await vc?.play();
+        _endedLatch = false;
       case PlayMode.noAutoplay:
         return;
       case PlayMode.loopAll:
@@ -549,7 +782,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       index = math.Random().nextInt(list.length);
     } else {
       if (index >= list.length - 1) {
-        if (appSettings.playMode == PlayMode.loopAll) {
+        if (appSettings.playMode == PlayMode.loopAll || _openFails > 0) {
           index = 0;
         } else {
           return;
@@ -568,6 +801,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     if (index > 0) {
       index -= 1;
+      await _openCurrent();
+    } else if (appSettings.playMode == PlayMode.loopAll && list.isNotEmpty) {
+      index = list.length - 1;
       await _openCurrent();
     }
   }
@@ -678,14 +914,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       } catch (_) {
         keep = false;
       }
-      if (keep && vc != null) {
-        PlaybackSession.keepAlive = true;
-        PlaybackSession.controller = vc;
-        PlaybackSession.item = item;
-        PlaybackSession.playlist = List<VideoItem>.from(list);
-        PlaybackSession.index = index;
-        PlaybackSession.speed = speed;
-        PlaybackSession.aspect = aspect;
+    if (keep && vc != null) {
+        PlaybackSession.claim(
+          c: vc!,
+          item: item,
+          list: list,
+          at: index,
+          speed: speed,
+          aspect: aspect,
+        );
         unawaited(_syncBackground());
       } else {
         PlaybackSession.keepAlive = false;
@@ -704,7 +941,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     AndroidBridge.setPlaying(false);
     AndroidBridge.setPipEnabled(false);
     AndroidBridge.setOrientation('none');
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemBars.alwaysHide = false;
+    SystemBars.apply(icons: Brightness.light, contrast: true, hide: false);
     super.dispose();
   }
 
@@ -719,13 +957,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       keep = false;
     }
     if (keep && vc != null) {
-      PlaybackSession.keepAlive = true;
-      PlaybackSession.controller = vc;
-      PlaybackSession.item = item;
-      PlaybackSession.playlist = List<VideoItem>.from(list);
-      PlaybackSession.index = index;
-      PlaybackSession.speed = speed;
-      PlaybackSession.aspect = aspect;
+      PlaybackSession.claim(
+        c: vc!,
+        item: item,
+        list: list,
+        at: index,
+        speed: speed,
+        aspect: aspect,
+      );
       unawaited(_syncBackground());
     } else {
       PlaybackSession.keepAlive = false;
@@ -744,12 +983,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (didPop) return;
         _armMiniThenPop();
       },
-      child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: SystemBars.overlay(icons: Brightness.light),
-        child: Scaffold(
-      backgroundColor: Colors.black,
-      resizeToAvoidBottomInset: false,
-      body: Listener(
+      child: _playerChrome(
+        Listener(
         onPointerDown: (e) => _pinchDown(e, size),
         onPointerMove: (e) => _pinchMove(e, size),
         onPointerUp: (e) => _pinchUp(e.pointer),
@@ -960,7 +1195,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         ),
       ),
     ),
-    ),
+    );
+  }
+
+  Widget _playerChrome(Widget body) {
+    final scaffold = Scaffold(
+      backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
+      body: body,
+    );
+    if (appSettings.alwaysHideNavBar || !showUi) return scaffold;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemBars.overlay(icons: Brightness.light),
+      child: scaffold,
     );
   }
 

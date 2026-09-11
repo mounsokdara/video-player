@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'android_bridge.dart';
 
 /// System bars (status + navigation + cutout) as layout padding.
 /// Uses [MediaQuery.viewPadding] only — never gesture insets or IME viewInsets
@@ -35,15 +39,20 @@ class SystemBars {
     );
   }
 
-  static void apply({required Brightness icons, bool contrast = true, bool forceShow = false}) {
+  static void apply({required Brightness icons, bool contrast = true, bool forceShow = false, bool? hide}) {
     iconBrightness = icons;
-    final hide = alwaysHide && popupCount <= 0 && !forceShow;
-    if (hide) {
+    final shouldHide = hide ?? (alwaysHide && popupCount <= 0 && !forceShow);
+    if (shouldHide) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setSystemUIOverlayStyle(overlay(icons: icons, contrast: contrast));
     }
+    unawaited(AndroidBridge.applySystemBars(
+      lightIcons: icons == Brightness.light,
+      contrast: contrast,
+      hide: shouldHide,
+    ));
   }
 
   static Future<T?> modal<T>(Future<T?> Function() run) async {

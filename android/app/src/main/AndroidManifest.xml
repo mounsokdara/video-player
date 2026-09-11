@@ -79,6 +79,12 @@
                 android:resource="@xml/usb_device_filter" />
         </activity>
 
+        <activity
+            android:name=".CrashReportActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:excludeFromRecents="true" />
+
         <service
             android:name=".PlaybackService"
             android:exported="false"

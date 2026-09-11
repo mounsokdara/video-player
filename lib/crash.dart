@@ -110,7 +110,10 @@ class CrashLog {
     };
     if (autoShow.contains(kind)) {
       final low = message.toLowerCase();
-      if (low.contains('no active player') || low.contains('no active stream to cancel')) {
+      if (low.contains('no active player') ||
+          low.contains('no active stream to cancel') ||
+          low.contains('source error') ||
+          low.contains('exoplaybackexception')) {
         return;
       }
       scheduleShow();

@@ -443,6 +443,12 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> openCrashReport({String? report}) async {
+    try {
+      await _ch.invokeMethod('openCrashReport', {'report': report});
+    } catch (_) {}
+  }
+
   static Future<void> breadcrumb(String action) async {
     try {
       await _ch.invokeMethod('breadcrumb', {'action': action});

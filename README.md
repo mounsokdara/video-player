@@ -10,7 +10,7 @@ This app under development it's may have alot bugs
 - Hide individual library tabs from Settings > General; hidden ones stay reachable from the Videos / Folders 3-dot menu
 - Gesture playback: D-pad double-tap skip with accumulating seconds, center double-tap play/pause, 2× long-press
 - Previous, play, and next stay centered; lock on the left and screen mode on the right
-- YouTube-style mini player with previous, play, next, and close; drag it anywhere
+- YouTube-style mini player: pinch to scale, swipe off-screen to a thin edge handle (pauses while hidden), drag down to close
 - Brightness only while the player is open; leaving the video restores the system brightness
 - Equalizer attaches to the playing video's audio session
 - Does not mix with other apps: audio focus is requested like MediaPlayer (pause on loss, duck on transient duck, no self-pause)

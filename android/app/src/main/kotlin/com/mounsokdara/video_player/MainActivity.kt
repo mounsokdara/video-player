@@ -1,26 +1,18 @@
 package com.mounsokdara.video_player
 
 import android.app.Activity
-import android.app.ActivityManager
 import android.app.PictureInPictureParams
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
-import android.media.audiofx.BassBoost
-import android.media.audiofx.Equalizer
-import android.media.audiofx.Virtualizer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -42,13 +34,10 @@ import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -58,8 +47,8 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "app.videoplayer/android"
-    private val eventName = "app.videoplayer/events"
+    private val channelName = NativeConstants.CHANNEL
+    private val eventName = NativeConstants.EVENTS
     private var wantPip = false
     private var isPlaying = false
     private var keepScreenOn = false
@@ -67,46 +56,63 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val tenBandHz = intArrayOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-    private var tenBandLevels = IntArray(10)
-    private var equalizer: Equalizer? = null
-    private var bassBoostFx: BassBoost? = null
-    private var virtualizerFx: Virtualizer? = null
-    private var fxSession = 0
-    private var eqBlocked = false
-    private var audioManager: AudioManager? = null
-    private var focusRequest: AudioFocusRequest? = null
     private var previewRetriever: MediaMetadataRetriever? = null
     private var previewBoundPath: String? = null
     private var pickResult: MethodChannel.Result? = null
-    private val pickVideoCode = 47
+    private val pickVideoCode = NativeConstants.PICK_VIDEO_CODE
+    private lateinit var systemBars: SystemBarController
+    private lateinit var audioFocus: AudioFocusController
+    private lateinit var equalizer: EqualizerController
+    private lateinit var appNative: AppNative
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        systemBars = SystemBarController(this)
+        equalizer = EqualizerController(
+            this,
+            { flutterEngine },
+            mainHandler,
+            { NativeCrashLog.breadcrumb(this, it) },
+            { NativeCrashLog.write(this, it) }
+        )
+        audioFocus = AudioFocusController(
+            this,
+            mainHandler,
+            { MainActivity.emitMedia(it) },
+            { NativeCrashLog.breadcrumb(this, it) },
+            isPlaying
+        ) { isPlaying = it }
+        appNative = AppNative(this, systemBars, audioFocus, equalizer)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        installCrashHook()
+        systemBars.enableEdgeToEdge()
+        NativeCrashLog.installHook(this) { emit(it) }
         handleIncoming(intent)
-        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        eqBlocked = File(filesDir, "eq_dirty.txt").exists()
-        if (eqBlocked) {
-            try {
-                File(filesDir, "eq_dirty.txt").delete()
-            } catch (_: Exception) {
-            }
-            breadcrumb("equalizer blocked after previous crash")
-        }
     }
 
     override fun onDestroy() {
         try {
-            File(filesDir, "session_dirty.txt").delete()
-            File(filesDir, "last_action.txt").writeText("idle")
+            File(filesDir, NativeConstants.FILE_DIRTY).delete()
+            File(filesDir, NativeConstants.FILE_ACTION).writeText("idle")
         } catch (_: Exception) {
         }
-        releaseFx()
+        equalizer.release()
         bindPreview(null)
-        abandonAudioFocus()
+        audioFocus.release()
         super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) systemBars.reapply()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::systemBars.isInitialized) systemBars.reapply()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (::systemBars.isInitialized) systemBars.reapply()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -151,6 +157,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 try {
+                    if (appNative.handleLocal(call.method, call, result)) return@setMethodCallHandler
                     when (call.method) {
                         "hasAllFilesAccess" -> {
                             result.success(
@@ -211,23 +218,6 @@ class MainActivity : FlutterActivity() {
                             val dest = File(src.parentFile, name)
                             result.success(if (src.renameTo(dest)) dest.absolutePath else null)
                         }
-                        "setOrientation" -> {
-                            val mode = call.argument<String>("mode") ?: "auto"
-                            requestedOrientation = when (mode) {
-                                "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                                "landscape_normal" -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                "landscape_reverse" -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                                "portrait_normal" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                "portrait_reverse" -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
-                                "locked" -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
-                                "user" -> ActivityInfo.SCREEN_ORIENTATION_USER
-                                "sensor", "auto" -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                                "none", "unspecified" -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                            }
-                            result.success(true)
-                        }
                         "setKeepScreenOn" -> {
                             keepScreenOn = call.argument<Boolean>("on") ?: false
                             runOnUiThread {
@@ -238,6 +228,7 @@ class MainActivity : FlutterActivity() {
                         }
                         "setPlaying" -> {
                             isPlaying = call.argument<Boolean>("on") ?: false
+                            audioFocus.setPlaying(isPlaying)
                             result.success(true)
                         }
                         "enterPip" -> {
@@ -255,69 +246,32 @@ class MainActivity : FlutterActivity() {
                             result.success(wantPip)
                         }
                         "isPip" -> result.success(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode)
-                        "initEqualizer" -> {
-                            val session = audioSessionId()
-                            val ok = if (session > 0) ensureFx(session) else false
-                            breadcrumb("initEqualizer session=$session ok=$ok blocked=$eqBlocked")
-                            result.success(emptyFx(session))
-                        }
+                        "initEqualizer" -> result.success(equalizer.initAndDescribe())
                         "setEqBand" -> {
-                            val band = call.argument<Int>("band") ?: 0
-                            val level = call.argument<Int>("level") ?: 0
-                            if (band in 0..9) tenBandLevels[band] = level
-                            applyStoredEq()
+                            equalizer.setBand(call.argument<Int>("band") ?: 0, call.argument<Int>("level") ?: 0)
                             result.success(true)
                         }
                         "setEqBands" -> {
-                            val levels = call.argument<List<Int>>("levels") ?: emptyList()
-                            for (i in 0 until minOf(10, levels.size)) tenBandLevels[i] = levels[i]
-                            applyStoredEq()
+                            equalizer.setBands(call.argument<List<Int>>("levels") ?: emptyList())
                             result.success(true)
                         }
                         "setEqPreset" -> result.success(true)
                         "setEqEnabled" -> {
-                            val on = call.argument<Boolean>("on") ?: false
-                            if (!on) {
-                                try { equalizer?.enabled = false } catch (_: Throwable) {}
-                                try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
-                                try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
-                            } else {
-                                applyStoredEq()
-                            }
+                            equalizer.setEnabled(call.argument<Boolean>("on") ?: false)
                             result.success(true)
                         }
                         "setBassBoost" -> {
-                            val on = call.argument<Boolean>("on") ?: false
-                            val strength = call.argument<Int>("strength") ?: 0
-                            try {
-                                bassBoostFx?.setStrength(strength.coerceIn(0, 1000).toShort())
-                                bassBoostFx?.enabled = on
-                            } catch (_: Throwable) {}
+                            equalizer.setBass(
+                                call.argument<Boolean>("on") ?: false,
+                                call.argument<Int>("strength") ?: 0
+                            )
                             result.success(true)
                         }
                         "setVirtualizer" -> {
-                            val on = call.argument<Boolean>("on") ?: false
-                            val strength = call.argument<Int>("strength") ?: 0
-                            try {
-                                virtualizerFx?.setStrength(strength.coerceIn(0, 1000).toShort())
-                                virtualizerFx?.enabled = on
-                            } catch (_: Throwable) {}
-                            result.success(true)
-                        }
-                        "applyEqualizer" -> {
-                            val enabled = call.argument<Boolean>("enabled") ?: false
-                            val bands = call.argument<List<Int>>("bands") ?: emptyList()
-                            val bassOn = call.argument<Boolean>("bassOn") ?: false
-                            val bass = call.argument<Int>("bass") ?: 0
-                            val surroundOn = call.argument<Boolean>("surroundOn") ?: false
-                            val surround = call.argument<Int>("surround") ?: 0
-                            for (i in 0 until minOf(10, bands.size)) tenBandLevels[i] = bands[i]
-                            applyEq(enabled, bands, bassOn, bass, surroundOn, surround)
-                            if (enabled && equalizer == null && !eqBlocked) {
-                                mainHandler.postDelayed({
-                                    applyEq(enabled, bands, bassOn, bass, surroundOn, surround)
-                                }, 450)
-                            }
+                            equalizer.setVirtualizer(
+                                call.argument<Boolean>("on") ?: false,
+                                call.argument<Int>("strength") ?: 0
+                            )
                             result.success(true)
                         }
                         "preparePreview" -> {
@@ -325,18 +279,10 @@ class MainActivity : FlutterActivity() {
                             io.execute { bindPreview(path) }
                             result.success(true)
                         }
-                        "requestAudioFocus" -> {
-                            requestAudioFocus()
-                            result.success(true)
-                        }
-                        "abandonAudioFocus" -> {
-                            abandonAudioFocus()
-                            result.success(true)
-                        }
                         "setPlaybackParams" -> {
                             val speed = (call.argument<Double>("speed") ?: 1.0).toFloat()
                             val pitchShift = call.argument<Boolean>("pitchShift") ?: false
-                            applyPlaybackParams(speed, pitchShift)
+                            equalizer.applyPlaybackParams(speed, pitchShift)
                             result.success(true)
                         }
                         "toast" -> {
@@ -360,7 +306,7 @@ class MainActivity : FlutterActivity() {
                             try {
                                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
                             } catch (t: Throwable) {
-                                writeCrash("startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
+                                NativeCrashLog.write(this, "startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
                             }
                             result.success(true)
                         }
@@ -450,9 +396,9 @@ class MainActivity : FlutterActivity() {
                             pendingOpen = null
                             result.success(path)
                         }
-                        "lastCrash" -> result.success(readLastCrash())
+                        "lastCrash" -> result.success(NativeCrashLog.readLast(this))
                         "breadcrumb" -> {
-                            breadcrumb(call.argument<String>("action") ?: "")
+                            NativeCrashLog.breadcrumb(this, call.argument<String>("action") ?: "")
                             result.success(true)
                         }
                         "pickVideo" -> {
@@ -499,256 +445,13 @@ class MainActivity : FlutterActivity() {
                             val path = call.argument<String>("path") ?: ""
                             transcribeVideo(path, result)
                         }
-                        "applySystemBars" -> {
-                            val light = call.argument<Boolean>("lightIcons") ?: true
-                            val contrast = call.argument<Boolean>("contrast") ?: true
-                            val hide = call.argument<Boolean>("hide") ?: false
-                            applySystemBars(light, contrast, hide)
-                            result.success(true)
-                        }
                         else -> result.notImplemented()
                     }
                 } catch (e: Throwable) {
-                    writeCrash("channel ${call.method}: ${e.message}\n${Log.getStackTraceString(e)}")
+                    NativeCrashLog.write(this, "channel ${call.method}: ${e.message}\n${Log.getStackTraceString(e)}")
                     result.error("ERR", e.message, null)
                 }
             }
-    }
-
-    private fun emptyFx(session: Int): Map<String, Any> {
-        val map = HashMap<String, Any>()
-        map["bands"] = 10
-        map["deviceBands"] = 0
-        map["min"] = -1500
-        map["max"] = 1500
-        map["freqs"] = tenBandHz.toList()
-        map["levels"] = tenBandLevels.toList()
-        map["sessionId"] = session
-        map["presets"] = emptyList<String>()
-        return map
-    }
-
-    private fun audioSessionId(): Int {
-        val exo = findExoPlayer() ?: return 0
-        return try {
-            val m = exo.javaClass.methods.firstOrNull { it.name == "getAudioSessionId" && it.parameterCount == 0 }
-            (m?.invoke(exo) as? Number)?.toInt() ?: 0
-        } catch (_: Throwable) {
-            0
-        }
-    }
-
-    private fun releaseFx() {
-        try { equalizer?.enabled = false } catch (_: Throwable) {}
-        try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
-        try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
-        try { equalizer?.release() } catch (_: Throwable) {}
-        try { bassBoostFx?.release() } catch (_: Throwable) {}
-        try { virtualizerFx?.release() } catch (_: Throwable) {}
-        equalizer = null
-        bassBoostFx = null
-        virtualizerFx = null
-        fxSession = 0
-    }
-
-    private fun ensureFx(session: Int): Boolean {
-        if (eqBlocked || session <= 0) return false
-        if (equalizer != null && fxSession == session) return true
-        releaseFx()
-        val dirty = File(filesDir, "eq_dirty.txt")
-        return try {
-            dirty.writeText("eq")
-            val eq = Equalizer(0, session)
-            equalizer = eq
-            fxSession = session
-            try {
-                bassBoostFx = BassBoost(0, session)
-            } catch (_: Throwable) {
-            }
-            try {
-                virtualizerFx = Virtualizer(0, session)
-            } catch (_: Throwable) {
-            }
-            dirty.delete()
-            breadcrumb("equalizer attached session=$session bands=${eq.numberOfBands}")
-            true
-        } catch (t: Throwable) {
-            eqBlocked = true
-            try { dirty.delete() } catch (_: Exception) {}
-            releaseFx()
-            writeCrash("equalizer attach: ${t.message}\n${Log.getStackTraceString(t)}")
-            false
-        }
-    }
-
-    private fun interpolateBand(hz: Int, bands: List<Int>): Int {
-        if (bands.isEmpty()) return 0
-        val last = minOf(bands.size, tenBandHz.size) - 1
-        if (last < 0) return 0
-        if (hz <= tenBandHz[0]) return bands[0]
-        if (hz >= tenBandHz[last]) return bands[last]
-        for (i in 0 until last) {
-            val a = tenBandHz[i]
-            val b = tenBandHz[i + 1]
-            if (hz in a..b) {
-                val t = (hz - a).toFloat() / (b - a).coerceAtLeast(1).toFloat()
-                val va = bands[i]
-                val vb = bands[i + 1]
-                return (va + (vb - va) * t).toInt()
-            }
-        }
-        return 0
-    }
-
-    private fun applyStoredEq() {
-        applyEq(
-            true,
-            tenBandLevels.toList(),
-            bassBoostFx?.enabled == true,
-            (bassBoostFx?.roundedStrength ?: 0).toInt(),
-            virtualizerFx?.enabled == true,
-            (virtualizerFx?.roundedStrength ?: 0).toInt()
-        )
-    }
-
-    private fun applyEq(
-        enabled: Boolean,
-        bands: List<Int>,
-        bassOn: Boolean,
-        bass: Int,
-        surroundOn: Boolean,
-        surround: Int
-    ) {
-        if (!enabled) {
-            try { equalizer?.enabled = false } catch (_: Throwable) {}
-            try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
-            try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
-            return
-        }
-        val session = audioSessionId()
-        if (!ensureFx(session)) return
-        val eq = equalizer ?: return
-        try {
-            eq.enabled = true
-            val n = eq.numberOfBands.toInt()
-            val range = eq.bandLevelRange
-            val min = range[0].toInt()
-            val max = range[1].toInt()
-            for (i in 0 until n) {
-                val hz = eq.getCenterFreq(i.toShort()) / 1000
-                val milli = interpolateBand(hz, bands).coerceIn(min, max)
-                eq.setBandLevel(i.toShort(), milli.toShort())
-            }
-        } catch (t: Throwable) {
-            breadcrumb("eq bands: ${t.message}")
-        }
-        try {
-            bassBoostFx?.setStrength(bass.coerceIn(0, 1000).toShort())
-            bassBoostFx?.enabled = bassOn
-        } catch (_: Throwable) {
-        }
-        try {
-            virtualizerFx?.setStrength(surround.coerceIn(0, 1000).toShort())
-            virtualizerFx?.enabled = surroundOn
-        } catch (_: Throwable) {
-        }
-    }
-
-    private var hasAudioFocus = false
-    private var resumeOnFocusGain = false
-    private var ducked = false
-
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        mainHandler.post {
-            when (change) {
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    hasAudioFocus = false
-                    resumeOnFocusGain = false
-                    if (ducked) {
-                        ducked = false
-                        emitMedia("unduck")
-                    }
-                    isPlaying = false
-                    emitMedia("pause")
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    resumeOnFocusGain = isPlaying
-                    hasAudioFocus = false
-                    if (ducked) {
-                        ducked = false
-                        emitMedia("unduck")
-                    }
-                    isPlaying = false
-                    emitMedia("pause")
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    if (!ducked) {
-                        ducked = true
-                        emitMedia("duck")
-                    }
-                }
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    hasAudioFocus = true
-                    if (ducked) {
-                        ducked = false
-                        emitMedia("unduck")
-                    }
-                    if (resumeOnFocusGain) {
-                        resumeOnFocusGain = false
-                        isPlaying = true
-                        emitMedia("play")
-                    }
-                }
-            }
-        }
-    }
-
-    private fun requestAudioFocus() {
-        val am = audioManager ?: return
-        if (hasAudioFocus) return
-        try {
-            val granted = if (Build.VERSION.SDK_INT >= 26) {
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                            .build()
-                    )
-                    .setOnAudioFocusChangeListener(focusListener, mainHandler)
-                    .setAcceptsDelayedFocusGain(false)
-                    .setWillPauseWhenDucked(false)
-                    .build()
-                focusRequest = req
-                am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            } else {
-                @Suppress("DEPRECATION")
-                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) ==
-                    AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            }
-            hasAudioFocus = granted
-            if (granted) isPlaying = true
-            breadcrumb("audio focus granted=$granted")
-        } catch (t: Throwable) {
-            breadcrumb("audio focus: ${t.message}")
-        }
-    }
-
-    private fun abandonAudioFocus() {
-        val am = audioManager ?: return
-        hasAudioFocus = false
-        resumeOnFocusGain = false
-        ducked = false
-        try {
-            if (Build.VERSION.SDK_INT >= 26) {
-                focusRequest?.let { am.abandonAudioFocusRequest(it) }
-            } else {
-                @Suppress("DEPRECATION")
-                am.abandonAudioFocus(focusListener)
-            }
-        } catch (_: Throwable) {
-        }
-        focusRequest = null
     }
 
     private fun bindPreview(path: String?) {
@@ -771,39 +474,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             try { r.release() } catch (_: Exception) {}
         }
-    }
-
-    private fun readLastCrash(): String? {
-        val crash = File(filesDir, "last_crash.txt")
-        val dirty = File(filesDir, "session_dirty.txt")
-        val actionFile = File(filesDir, "last_action.txt")
-        val hasCrash = crash.exists()
-        val died = dirty.exists()
-        val action = try {
-            if (actionFile.exists()) actionFile.readText() else ""
-        } catch (_: Exception) {
-            ""
-        }
-        val interesting = action.contains("Open video", ignoreCase = true) ||
-            action.contains("Play ", ignoreCase = true) ||
-            action.contains("equalizer", ignoreCase = true) ||
-            action.contains("initEqualizer", ignoreCase = true) ||
-            action.contains("audiofx", ignoreCase = true)
-        val buf = StringBuilder()
-        if (action.isNotBlank()) buf.append("Last action: ").append(action).append('\n')
-        if (hasCrash) {
-            buf.append(crash.readText())
-            crash.delete()
-        } else if (died && interesting) {
-            buf.append("===== PROCESS_DIED =====\nThe app process was killed during the last action (native crash / SIGSEGV). No Java stack trace.\n")
-        }
-        try {
-            dirty.delete()
-            dirty.writeText("running")
-        } catch (_: Exception) {
-        }
-        val out = buf.toString().trim()
-        return if (out.isEmpty() || (!hasCrash && !(died && interesting))) null else out
     }
 
     @Suppress("DEPRECATION")
@@ -1050,40 +720,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun installCrashHook() {
-        val prev = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { _, e ->
-            writeCrash("${e.javaClass.name}: ${e.message}\n${Log.getStackTraceString(e)}")
-            try {
-                emit(
-                    mapOf(
-                        "type" to "crash",
-                        "message" to "${e.javaClass.name}: ${e.message}",
-                        "stack" to Log.getStackTraceString(e)
-                    )
-                )
-            } catch (_: Exception) {
-            }
-            prev?.uncaughtException(Thread.currentThread(), e)
-        }
-    }
-
-    private fun writeCrash(text: String) {
-        try {
-            File(filesDir, "last_crash.txt").writeText(
-                "===== NATIVE ${SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())} =====\n$text"
-            )
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun breadcrumb(action: String) {
-        try {
-            File(filesDir, "last_action.txt").writeText(action)
-        } catch (_: Exception) {
-        }
-    }
-
     private fun enterPipNow() {
         if (!isPlaying) return
         if (Build.VERSION.SDK_INT >= 26 && !isInPictureInPictureMode) {
@@ -1150,7 +786,7 @@ class MainActivity : FlutterActivity() {
 
     private fun scanVideos(dir: File, depth: Int, hidden: Boolean): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
-        scanVideosInto(dir, depth, hidden, out, intArrayOf(2500))
+        scanVideosInto(dir, depth, hidden, out, intArrayOf(NativeConstants.SCAN_BUDGET))
         return out
     }
 
@@ -1199,100 +835,6 @@ class MainActivity : FlutterActivity() {
             low == "notifications"
     }
 
-    private fun applyPlaybackParams(speed: Float, pitchShift: Boolean) {
-        val pitch = if (pitchShift) speed else 1f
-        val exo = findExoPlayer() ?: return
-        val params = playbackParameters(speed, pitch) ?: return
-        try {
-            val method = exo.javaClass.methods.firstOrNull {
-                it.name == "setPlaybackParameters" && it.parameterTypes.size == 1
-            } ?: return
-            method.invoke(exo, params)
-            breadcrumb("setPlaybackParams speed=$speed pitch=$pitch")
-        } catch (t: Throwable) {
-            writeCrash("setPlaybackParams: ${t.message}\n${Log.getStackTraceString(t)}")
-        }
-    }
-
-    private fun playbackParameters(speed: Float, pitch: Float): Any? {
-        val names = arrayOf(
-            "androidx.media3.common.PlaybackParameters",
-            "com.google.android.exoplayer2.PlaybackParameters"
-        )
-        for (name in names) {
-            try {
-                val cls = Class.forName(name)
-                val ctor = cls.getConstructor(Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
-                return ctor.newInstance(speed, pitch)
-            } catch (_: Throwable) {
-            }
-        }
-        return null
-    }
-
-    /**
-     * Surgical lookup only: FlutterEngine plugin registry → VideoPlayerPlugin.videoPlayers
-     * (LongSparseArray) → VideoPlayer.exoPlayer / player. Never walk media3 internals.
-     */
-    private fun findExoPlayer(): Any? {
-        val engine = flutterEngine ?: return null
-        return try {
-            val registry = engine.plugins
-            val map = fieldValue(registry, "map") ?: fieldValue(registry, "pluginMap") ?: fieldValue(registry, "plugins")
-            val plugins: Collection<Any?> = when (map) {
-                is Map<*, *> -> map.values
-                else -> emptyList()
-            }
-            for (plugin in plugins) {
-                if (plugin == null) continue
-                val name = plugin.javaClass.name
-                if (!name.contains("videoplayer", ignoreCase = true)) continue
-                val array = fieldValue(plugin, "videoPlayers") ?: continue
-                val wrapper = lastSparseValue(array) ?: continue
-                val exo = fieldValue(wrapper, "exoPlayer")
-                    ?: fieldValue(wrapper, "player")
-                    ?: fieldValue(wrapper, "exo")
-                if (exo != null) return exo
-            }
-            null
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
-    private fun findField(obj: Any, name: String): java.lang.reflect.Field? {
-        var c: Class<*>? = obj.javaClass
-        while (c != null) {
-            try {
-                val f = c.getDeclaredField(name)
-                f.isAccessible = true
-                return f
-            } catch (_: NoSuchFieldException) {
-                c = c.superclass
-            }
-        }
-        return null
-    }
-
-    private fun fieldValue(obj: Any, name: String): Any? {
-        return try {
-            findField(obj, name)?.get(obj)
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
-    private fun lastSparseValue(array: Any): Any? {
-        return try {
-            val size = array.javaClass.getMethod("size").invoke(array) as Int
-            if (size <= 0) return null
-            array.javaClass.getMethod("valueAt", Int::class.javaPrimitiveType)
-                .invoke(array, size - 1)
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
     @Suppress("DEPRECATION")
     private fun listIndexedVideos(): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
@@ -1329,7 +871,7 @@ class MainActivity : FlutterActivity() {
                 val iW = c.getColumnIndex(MediaStore.Video.Media.WIDTH)
                 val iH = c.getColumnIndex(MediaStore.Video.Media.HEIGHT)
                 val iMime = c.getColumnIndex(MediaStore.Video.Media.MIME_TYPE)
-                while (c.moveToNext() && out.size < 5000) {
+                while (c.moveToNext() && out.size < NativeConstants.INDEXED_CAP) {
                     val path = if (iData >= 0) c.getString(iData) else null
                     if (path.isNullOrBlank()) continue
                     val file = File(path)
@@ -1577,55 +1119,6 @@ class MainActivity : FlutterActivity() {
             file.absolutePath
         } catch (_: Exception) {
             null
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun enableEdgeToEdge() {
-        try {
-            if (Build.VERSION.SDK_INT >= 30) {
-                window.setDecorFitsSystemWindows(false)
-            }
-            window.statusBarColor = Color.TRANSPARENT
-            window.navigationBarColor = Color.TRANSPARENT
-            if (Build.VERSION.SDK_INT >= 29) {
-                window.isNavigationBarContrastEnforced = true
-                window.isStatusBarContrastEnforced = false
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun applySystemBars(lightIcons: Boolean, contrast: Boolean, hide: Boolean) {
-        runOnUiThread {
-            try {
-                if (hide) {
-                    window.decorView.systemUiVisibility = (
-                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                            View.SYSTEM_UI_FLAG_FULLSCREEN
-                        )
-                } else {
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        window.setDecorFitsSystemWindows(false)
-                        window.insetsController?.show(WindowInsets.Type.systemBars())
-                        val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-                        window.insetsController?.setSystemBarsAppearance(if (lightIcons) 0 else light, light)
-                    }
-                    window.statusBarColor = Color.TRANSPARENT
-                    window.navigationBarColor = Color.TRANSPARENT
-                    if (Build.VERSION.SDK_INT >= 29) {
-                        window.isNavigationBarContrastEnforced = contrast
-                        window.isStatusBarContrastEnforced = false
-                    }
-                }
-            } catch (_: Exception) {
-            }
         }
     }
 
@@ -1984,24 +1477,13 @@ class MainActivity : FlutterActivity() {
             if (Looper.myLooper() == Looper.getMainLooper()) send.run() else emitHandler.post(send)
         }
 
-        private val videoExt = setOf(
-            "mp4", "mkv", "webm", "avi", "mov", "m4v", "3gp", "flv", "wmv",
-            "mpeg", "mpg", "m2ts", "mts", "vob", "f4v", "ogv"
-        )
-        private val textExt = setOf(
-            "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "txt", "md", "css",
-            "html", "htm", "xml", "svg", "map", "yml", "yaml", "py", "java",
-            "kt", "dart", "c", "h", "cpp", "go", "rs", "sh", "log", "csv",
-            "toml", "ini", "cfg", "d.ts"
-        )
-
         fun isVideoFile(f: File): Boolean {
             val name = f.name.lowercase()
             if (name.endsWith(".d.ts")) return false
             val ext = f.extension.lowercase()
             if (ext == "ts") return isMpegTs(f)
-            if (ext in textExt) return false
-            return ext in videoExt
+            if (ext in NativeConstants.TEXT_EXT) return false
+            return ext in NativeConstants.VIDEO_EXT
         }
 
         private fun isMpegTs(f: File): Boolean {
