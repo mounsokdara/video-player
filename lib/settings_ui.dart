@@ -260,21 +260,13 @@ class _VideoSettingsState extends State<VideoSettings> {
                 RotationLock.portraitNormal,
                 RotationLock.portraitReverse,
               ];
-              final v = await showModalBottomSheet<RotationLock>(
+              final v = await showAppSheet<RotationLock>(
                 context: context,
-                isScrollControlled: true,
-                showDragHandle: true,
-                builder: (ctx) {
-                  final pad = MediaQuery.viewPaddingOf(context);
-                  return ListView(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 16),
-                    children: [
-                      for (final e in modes)
-                        ListTile(title: Text(e.label), onTap: () => Navigator.pop(ctx, e)),
-                    ],
-                  );
-                },
+                initial: 0.62,
+                children: (ctx) => [
+                  for (final e in modes)
+                    ListTile(title: Text(e.label), onTap: () => Navigator.pop(ctx, e)),
+                ],
               );
               if (v != null) set(() => s.rotation = v);
             },

@@ -329,7 +329,6 @@ class _TitleBarEditorState extends State<TitleBarEditor> {
 
   static const catalog = <String, String>{
     'hdr': 'HDR',
-    'eq': 'Equalizer',
     'playlist': 'Playlist',
     'more': 'More',
     ...AppSettings.allQuickActions,

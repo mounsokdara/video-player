@@ -12,6 +12,14 @@ class SystemBars {
 
   static EdgeInsets of(BuildContext context) => MediaQuery.viewPaddingOf(context);
 
+  /// Unconsumed window insets. Scaffold / NavigationBar / SafeArea call
+  /// [MediaQuery.removePadding], which also zeroes [MediaQuery.viewPadding]
+  /// for descendants — so a modal opened from the library would otherwise
+  /// sit under the 3-button nav. [MediaQueryData.fromView] reads the view.
+  static EdgeInsets rawOf(BuildContext context) {
+    return MediaQueryData.fromView(View.of(context)).viewPadding;
+  }
+
   static SystemUiOverlayStyle overlay({required Brightness icons, bool contrast = true}) {
     final status = icons;
     final bar = icons == Brightness.light ? Brightness.dark : Brightness.light;

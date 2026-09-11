@@ -1800,7 +1800,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        final pad = MediaQuery.viewPaddingOf(ctx);
+        final pad = SystemBars.rawOf(context);
         final insets = MediaQuery.viewInsetsOf(ctx);
         return DraggableScrollableSheet(
           expand: false,
@@ -1896,7 +1896,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        final pad = MediaQuery.viewPaddingOf(ctx);
+        final pad = SystemBars.rawOf(context);
         return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.86,
@@ -2027,7 +2027,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = MediaQuery.viewPaddingOf(ctx);
+        final pad = SystemBars.rawOf(context);
         return StatefulBuilder(builder: (ctx, ss) {
           return Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
@@ -2125,7 +2125,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = MediaQuery.viewPaddingOf(ctx);
+        final pad = SystemBars.rawOf(context);
         return StatefulBuilder(builder: (ctx, ss) {
           void apply(double pct) {
             local = pct.clamp(1, 1000);
@@ -2304,26 +2304,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     await showAppSheet<void>(
       context: context,
       initial: 0.62,
-      builder: (ctx, sc) {
-        return ListView(
-          controller: sc,
-          children: [
-            const ListTile(title: Text('Rotation', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-            for (final e in modes)
-              RadioListTile<RotationLock>(
-                value: e,
-                groupValue: appSettings.rotation,
-                title: Text(e.label),
-                onChanged: (v) {
-                  appSettings.rotation = v!;
-                  appSettings.save();
-                  _applyRotation();
-                  Navigator.pop(ctx);
-                },
-              ),
-          ],
-        );
-      },
+      children: (ctx) => [
+        const ListTile(title: Text('Rotation', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+        for (final e in modes)
+          RadioListTile<RotationLock>(
+            value: e,
+            groupValue: appSettings.rotation,
+            title: Text(e.label),
+            onChanged: (v) {
+              appSettings.rotation = v!;
+              appSettings.save();
+              _applyRotation();
+              Navigator.pop(ctx);
+            },
+          ),
+      ],
     );
   }
 

@@ -265,28 +265,58 @@ class VideoGridCard extends StatelessWidget {
 
 Future<T?> showAppSheet<T>({
   required BuildContext context,
-  required Widget Function(BuildContext ctx, ScrollController sc) builder,
+  required List<Widget> Function(BuildContext ctx) children,
   double initial = 0.56,
 }) {
-  final pad = MediaQuery.viewPaddingOf(context);
+  // Raw view padding — Scaffold + NavigationBar consume MediaQuery.viewPadding
+  // so a sheet opened from the library would otherwise sit under 3-button nav.
+  // Flutter useSafeArea on modal sheets pads top/left/right, never bottom.
+  final pad = SystemBars.rawOf(context);
   return SystemBars.modal(
     () => showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
       enableDrag: true,
+      showDragHandle: false,
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: initial.clamp(0.34, 0.92),
-          minChildSize: 0.32,
-          maxChildSize: 0.95,
-          builder: (_, sc) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(pad.left, 0, pad.right, pad.bottom),
-              child: builder(ctx, sc),
-            );
-          },
+        final scheme = Theme.of(ctx).colorScheme;
+        return Padding(
+          padding: EdgeInsets.only(left: pad.left, right: pad.right),
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: initial.clamp(0.38, 0.92),
+            minChildSize: 0.28,
+            maxChildSize: 0.95,
+            builder: (_, sc) {
+              return Material(
+                color: scheme.surface,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: ListView(
+                  controller: sc,
+                  padding: EdgeInsets.only(bottom: pad.bottom + 12),
+                  children: [
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Container(
+                        width: 32,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...children(ctx),
+                  ],
+                ),
+              );
+            },
+          ),
         );
       },
     ),
@@ -297,94 +327,88 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
   final scheme = Theme.of(context).colorScheme;
   await showAppSheet<void>(
     context: context,
-    initial: 0.62,
-    builder: (ctx, sc) {
-      return ListView(
-        controller: sc,
-        children: [
-          ListTile(
-            leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: item, radius: 8)),
-            title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(formatBytes(item.size)),
-          ),
-          const Divider(height: 1),
-          ListTile(leading: const Icon(Icons.play_arrow), title: const Text('Play'), onTap: () { Navigator.pop(ctx); onPlay(); }),
-          ListTile(
-            leading: const Icon(Icons.drive_file_rename_outline),
-            title: const Text('Rename'),
-            onTap: () async {
-              Navigator.pop(ctx);
-              await Future<void>.delayed(const Duration(milliseconds: 160));
-              if (!context.mounted) return;
-              final name = await promptText(context, 'Rename', item.title);
-              if (name != null && name.trim().isNotEmpty) {
-                await library.rename(item, name.trim());
-                onChanged();
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.share_outlined),
-            title: const Text('Share'),
-            onTap: () async {
-              Navigator.pop(ctx);
-              await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
-            },
-          ),
-          ListTile(
-            leading: Icon(item.bookmarked ? Icons.bookmark : Icons.bookmark_border),
-            title: Text(item.bookmarked ? 'Remove bookmark' : 'Bookmark'),
-            onTap: () {
-              Navigator.pop(ctx);
-              if (appSettings.bookmarks.contains(item.path)) {
-                appSettings.bookmarks.remove(item.path);
-                item.bookmarked = false;
-              } else {
-                appSettings.bookmarks.add(item.path);
-                item.bookmarked = true;
-              }
-              appSettings.save();
-              onChanged();
-            },
-          ),
-          ListTile(
-            leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
-            title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
-            onTap: () {
-              Navigator.pop(ctx);
-              if (appSettings.pinned.contains(item.path)) {
-                appSettings.pinned.remove(item.path);
-              } else {
-                appSettings.pinned.add(item.path);
-              }
-              appSettings.save();
-              onChanged();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.delete_outline, color: scheme.error),
-            title: Text('Delete', style: TextStyle(color: scheme.error)),
-            onTap: () async {
-              Navigator.pop(ctx);
-              final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
-              if (ok == true) {
-                await library.deleteVideos([item]);
-                onChanged();
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('Properties'),
-            onTap: () {
-              Navigator.pop(ctx);
-              showProperties(context, item);
-            },
-          ),
-          const SizedBox(height: 12),
-        ],
-      );
-    },
+    initial: 0.72,
+    children: (ctx) => [
+      ListTile(
+        leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: item, radius: 8)),
+        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(formatBytes(item.size)),
+      ),
+      const Divider(height: 1),
+      ListTile(leading: const Icon(Icons.play_arrow), title: const Text('Play'), onTap: () { Navigator.pop(ctx); onPlay(); }),
+      ListTile(
+        leading: const Icon(Icons.drive_file_rename_outline),
+        title: const Text('Rename'),
+        onTap: () async {
+          Navigator.pop(ctx);
+          await Future<void>.delayed(const Duration(milliseconds: 160));
+          if (!context.mounted) return;
+          final name = await promptText(context, 'Rename', item.title);
+          if (name != null && name.trim().isNotEmpty) {
+            await library.rename(item, name.trim());
+            onChanged();
+          }
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.share_outlined),
+        title: const Text('Share'),
+        onTap: () async {
+          Navigator.pop(ctx);
+          await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
+        },
+      ),
+      ListTile(
+        leading: Icon(item.bookmarked ? Icons.bookmark : Icons.bookmark_border),
+        title: Text(item.bookmarked ? 'Remove bookmark' : 'Bookmark'),
+        onTap: () {
+          Navigator.pop(ctx);
+          if (appSettings.bookmarks.contains(item.path)) {
+            appSettings.bookmarks.remove(item.path);
+            item.bookmarked = false;
+          } else {
+            appSettings.bookmarks.add(item.path);
+            item.bookmarked = true;
+          }
+          appSettings.save();
+          onChanged();
+        },
+      ),
+      ListTile(
+        leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
+        title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
+        onTap: () {
+          Navigator.pop(ctx);
+          if (appSettings.pinned.contains(item.path)) {
+            appSettings.pinned.remove(item.path);
+          } else {
+            appSettings.pinned.add(item.path);
+          }
+          appSettings.save();
+          onChanged();
+        },
+      ),
+      ListTile(
+        leading: Icon(Icons.delete_outline, color: scheme.error),
+        title: Text('Delete', style: TextStyle(color: scheme.error)),
+        onTap: () async {
+          Navigator.pop(ctx);
+          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
+          if (ok == true) {
+            await library.deleteVideos([item]);
+            onChanged();
+          }
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.info_outline),
+        title: const Text('Properties'),
+        onTap: () {
+          Navigator.pop(ctx);
+          showProperties(context, item);
+        },
+      ),
+    ],
   );
 }
 
@@ -441,57 +465,33 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
     ('Resume', '${(item.progress * 100).toStringAsFixed(1)}%'),
     ('Storage', item.path.contains('usb') ? 'USB / OTG' : item.path.contains('sdcard') || item.path.contains('/storage/') && !item.path.contains('emulated') ? 'SD card / volume' : 'Internal'),
   ];
-  await showModalBottomSheet<void>(
+  await showAppSheet<void>(
     context: context,
-    isScrollControlled: true,
-    builder: (ctx) {
-      final pad = MediaQuery.viewPaddingOf(ctx);
-      final insets = MediaQuery.viewInsetsOf(ctx);
-      return DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.72,
-        maxChildSize: 0.95,
-        builder: (_, controller) {
-          return Padding(
-            padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(child: Text('Properties', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600))),
-                      IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    controller: controller,
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, i) {
-                      final r = rows[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(width: 110, child: Text(r.$1, style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant))),
-                            Expanded(child: SelectableText(r.$2, style: const TextStyle(fontWeight: FontWeight.w500))),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    },
+    initial: 0.78,
+    children: (ctx) => [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+        child: Row(
+          children: [
+            const Expanded(child: Text('Properties', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600))),
+            IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+          ],
+        ),
+      ),
+      for (var i = 0; i < rows.length; i++) ...[
+        if (i > 0) const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 110, child: Text(rows[i].$1, style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant))),
+              Expanded(child: SelectableText(rows[i].$2, style: const TextStyle(fontWeight: FontWeight.w500))),
+            ],
+          ),
+        ),
+      ],
+    ],
   );
 }
 
@@ -525,8 +525,9 @@ Future<String?> promptText(BuildContext context, String title, String initial) a
       useSafeArea: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
+        final pad = SystemBars.rawOf(context);
         return Padding(
-          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + insets.bottom),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + insets.bottom + pad.bottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -588,68 +589,62 @@ Future<void> showFolderEntryMenu(
   final name = path.split(RegExp(r'[/\\]')).last;
   await showAppSheet<void>(
     context: context,
-    initial: 0.5,
-    builder: (ctx, sc) {
-      return ListView(
-        controller: sc,
-        children: [
-          ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
-          if (onOpen != null)
-            ListTile(
-              leading: const Icon(Icons.open_in_new),
-              title: Text(isDir ? 'Open' : 'Play'),
-              onTap: () {
-                Navigator.pop(ctx);
-                onOpen();
-              },
-            ),
-          ListTile(
-            leading: const Icon(Icons.drive_file_rename_outline),
-            title: const Text('Rename'),
-            onTap: () async {
-              Navigator.pop(ctx);
-              await Future<void>.delayed(const Duration(milliseconds: 160));
-              if (!context.mounted) return;
-              final next = await promptText(context, 'Rename', name);
-              if (next != null && next.trim().isNotEmpty) {
-                await AndroidBridge.renamePath(path, next.trim());
-                onChanged();
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.copy),
-            title: const Text('Copy'),
-            onTap: () {
-              Navigator.pop(ctx);
-              library.copyEntry(path);
-              onChanged();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.content_cut),
-            title: const Text('Cut'),
-            onTap: () {
-              Navigator.pop(ctx);
-              library.cutEntry(path);
-              onChanged();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.delete_outline, color: scheme.error),
-            title: Text('Delete', style: TextStyle(color: scheme.error)),
-            onTap: () async {
-              Navigator.pop(ctx);
-              final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
-              if (ok == true) {
-                await library.deletePath(path);
-                onChanged();
-              }
-            },
-          ),
-          const SizedBox(height: 12),
-        ],
-      );
-    },
+    initial: 0.56,
+    children: (ctx) => [
+      ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
+      if (onOpen != null)
+        ListTile(
+          leading: const Icon(Icons.open_in_new),
+          title: Text(isDir ? 'Open' : 'Play'),
+          onTap: () {
+            Navigator.pop(ctx);
+            onOpen?.call();
+          },
+        ),
+      ListTile(
+        leading: const Icon(Icons.drive_file_rename_outline),
+        title: const Text('Rename'),
+        onTap: () async {
+          Navigator.pop(ctx);
+          await Future<void>.delayed(const Duration(milliseconds: 160));
+          if (!context.mounted) return;
+          final next = await promptText(context, 'Rename', name);
+          if (next != null && next.trim().isNotEmpty) {
+            await AndroidBridge.renamePath(path, next.trim());
+            onChanged();
+          }
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.copy),
+        title: const Text('Copy'),
+        onTap: () {
+          Navigator.pop(ctx);
+          library.copyEntry(path);
+          onChanged();
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.content_cut),
+        title: const Text('Cut'),
+        onTap: () {
+          Navigator.pop(ctx);
+          library.cutEntry(path);
+          onChanged();
+        },
+      ),
+      ListTile(
+        leading: Icon(Icons.delete_outline, color: scheme.error),
+        title: Text('Delete', style: TextStyle(color: scheme.error)),
+        onTap: () async {
+          Navigator.pop(ctx);
+          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
+          if (ok == true) {
+            await library.deletePath(path);
+            onChanged();
+          }
+        },
+      ),
+    ],
   );
 }
