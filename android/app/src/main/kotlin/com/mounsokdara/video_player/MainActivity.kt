@@ -84,6 +84,10 @@ class MainActivity : FlutterActivity() {
         appNative = AppNative(this, systemBars, audioFocus, equalizer)
         super.onCreate(savedInstanceState)
         systemBars.enableEdgeToEdge()
+        try {
+            VideoDecompressor.wipeCache(this)
+        } catch (_: Exception) {
+        }
         NativeCrashLog.installHook(this) { emit(it) }
         handleIncoming(intent)
     }
@@ -410,7 +414,7 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                         "applyPlaybackGuard" -> {
-                            val anti = call.argument<Boolean>("antiCrash") ?: true
+                            val anti = call.argument<Boolean>("antiCrash") ?: false
                             val low = call.argument<Boolean>("lowMem") ?: true
                             val path = call.argument<String>("path") ?: ""
                             io.execute {
@@ -432,6 +436,15 @@ class MainActivity : FlutterActivity() {
                                     path
                                 }
                                 mainHandler.post { result.success(out) }
+                            }
+                        }
+                        "wipeDecompCache" -> {
+                            io.execute {
+                                try {
+                                    VideoDecompressor.wipeCache(this)
+                                } catch (_: Exception) {
+                                }
+                                mainHandler.post { result.success(true) }
                             }
                         }
                         "extractCaptions" -> {

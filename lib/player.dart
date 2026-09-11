@@ -32,6 +32,7 @@ class PlaybackSession {
   static List<VideoItem> playlist = [];
   static int index = 0;
   static bool keepAlive = false;
+  static bool transferring = false;
   static double speed = 1;
   static AspectMode aspect = AspectMode.fit;
   static VoidCallback? onMutated;
@@ -46,9 +47,9 @@ class PlaybackSession {
 
   static bool get active => keepAlive && controller != null && item != null;
 
-  static final playerOptions = VideoPlayerOptions(
+  static VideoPlayerOptions get playerOptions => VideoPlayerOptions(
         mixWithOthers: true,
-        allowBackgroundPlayback: true,
+        allowBackgroundPlayback: appSettings.backgroundPlay,
       );
 
   static VideoPlayerController controllerFor(String playPath) {
@@ -59,19 +60,14 @@ class PlaybackSession {
   }
 
   static Future<String> resolvePlayPath(String path) async {
-    if (!appSettings.decompressVideo) return path;
-    try {
-      final out = await AndroidBridge.decompressVideo(path, lowMem: appSettings.lowMemoryBuffer);
-      if (out.isNotEmpty) return out;
-    } catch (_) {}
+    // Never block the first frame on a transcode. Play the original file.
     return path;
   }
 
   static Future<VideoPlayerController> openWithFallback(VideoItem next) async {
-    var playPath = await resolvePlayPath(next.path);
     VideoPlayerController? c;
     try {
-      c = controllerFor(playPath);
+      c = controllerFor(await resolvePlayPath(next.path));
       await c.initialize();
       if (c.value.hasError) {
         throw StateError(c.value.errorDescription ?? 'Source error');
@@ -81,25 +77,8 @@ class PlaybackSession {
       try {
         await c?.dispose();
       } catch (_) {}
-      if (playPath == next.path) {
-        CrashLog.record('PLAY', '$e', s);
-        rethrow;
-      }
-      VideoPlayerController? original;
-      try {
-        original = controllerFor(next.path);
-        await original.initialize();
-        if (original.value.hasError) {
-          throw StateError(original.value.errorDescription ?? 'Source error');
-        }
-        return original;
-      } catch (e2, s2) {
-        CrashLog.record('PLAY', '$e2', s2);
-        try {
-          await original?.dispose();
-        } catch (_) {}
-        rethrow;
-      }
+      CrashLog.record('PLAY', '$e', s);
+      rethrow;
     }
   }
 
@@ -173,6 +152,7 @@ class PlaybackSession {
   static VideoPlayerController? take() {
     _unlisten();
     keepAlive = false;
+    transferring = false;
     _endedLatch = false;
     return controller;
   }
@@ -197,6 +177,18 @@ class PlaybackSession {
     } catch (_) {}
     await AndroidBridge.stopBackground();
     await AndroidBridge.abandonAudioFocus();
+  }
+
+  static void pauseForBackground() {
+    if (appSettings.backgroundPlay) return;
+    final c = controller;
+    if (c == null) return;
+    try {
+      if (c.value.isPlaying) {
+        unawaited(c.pause());
+        unawaited(AndroidBridge.stopBackground());
+      }
+    } catch (_) {}
   }
 
   static Future<void> applyOutput(VideoPlayerController c, VideoItem next) async {
@@ -449,13 +441,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     invert = appSettings.invertColors;
     bool kept = false;
     try {
-      kept = PlaybackSession.active &&
+      kept = (PlaybackSession.active || PlaybackSession.transferring) &&
           PlaybackSession.controller != null &&
           PlaybackSession.controller!.value.isInitialized &&
           PlaybackSession.item?.path == widget.playlist[index].path;
     } catch (_) {
       kept = false;
     }
+    PlaybackSession.transferring = false;
     if (kept) {
       vc = PlaybackSession.take();
       ready = true;
@@ -582,11 +575,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _applySystemUi() {
     SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
-    var covered = false;
-    if (mounted) {
-      covered = ModalRoute.of(context)?.isCurrent == false || SystemBars.popupCount > 0;
-    }
-    final hide = !covered && (appSettings.alwaysHideNavBar || !showUi);
+    final sheetOpen = SystemBars.popupCount > 0;
+    final hide = !sheetOpen && (appSettings.alwaysHideNavBar || !showUi);
     SystemBars.apply(icons: Brightness.light, contrast: true, hide: hide);
   }
 
@@ -969,7 +959,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } else {
       PlaybackSession.keepAlive = false;
     }
-    if (mounted) Navigator.pop(context);
+    if (mounted) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.pop(context);
+      });
+    }
   }
 
   @override
@@ -1492,6 +1487,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _video(VideoPlayerController c, Size screen) {
+    if (_handedOff) return const ColoredBox(color: Colors.black);
     try {
       if (!c.value.isInitialized) {
         return const SizedBox.expand(child: Center(child: CircularProgressIndicator()));
@@ -1961,8 +1957,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await showProperties(context, item);
       case 'navbar':
         appSettings.alwaysHideNavBar = !appSettings.alwaysHideNavBar;
+        SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
         await appSettings.save();
-        _applySystemUi();
+        if (SystemBars.popupCount <= 0 && mounted) {
+          _applySystemUi();
+        }
         _flash(appSettings.alwaysHideNavBar ? 'Navigation bar hidden' : 'Navigation bar follows controls');
       default:
         break;
@@ -2209,6 +2208,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         );
       },
     ));
+    if (mounted) {
+      _applySystemUi();
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      if (mounted) _applySystemUi();
+    }
   }
 
   IconData _actionIcon(String id) => switch (id) {
@@ -2778,8 +2782,8 @@ class _HudChip extends StatelessWidget {
 class PlayerSlideRoute<T> extends PageRouteBuilder<T> {
   PlayerSlideRoute({required Widget page})
       : super(
-          opaque: false,
-          barrierColor: Colors.transparent,
+          opaque: true,
+          barrierColor: Colors.black,
           transitionDuration: const Duration(milliseconds: 380),
           reverseTransitionDuration: const Duration(milliseconds: 320),
           pageBuilder: (context, animation, secondaryAnimation) => page,
@@ -2789,18 +2793,9 @@ class PlayerSlideRoute<T> extends PageRouteBuilder<T> {
               curve: Curves.easeOutCubic,
               reverseCurve: Curves.easeInCubic,
             );
-            return AnimatedBuilder(
-              animation: curved,
-              builder: (context, child) {
-                return ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.55 * curved.value),
-                  child: child,
-                );
-              },
-              child: SlideTransition(
-                position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
-                child: FadeTransition(opacity: curved, child: child),
-              ),
+            return SlideTransition(
+              position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
+              child: FadeTransition(opacity: curved, child: child),
             );
           },
         );

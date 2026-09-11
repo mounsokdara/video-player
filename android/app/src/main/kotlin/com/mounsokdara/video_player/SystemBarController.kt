@@ -20,6 +20,7 @@ class SystemBarController(private val activity: Activity) {
     private var lastLightIcons = true
     private var lastContrast = true
     private var lastHide = false
+    private var uiListenerAttached = false
 
     fun enableEdgeToEdge() {
         val window = activity.window
@@ -37,6 +38,7 @@ class SystemBarController(private val activity: Activity) {
                 window.isNavigationBarContrastEnforced = true
                 window.isStatusBarContrastEnforced = false
             }
+            attachUiListener(window)
         } catch (_: Exception) {
         }
     }
@@ -48,10 +50,13 @@ class SystemBarController(private val activity: Activity) {
         activity.runOnUiThread {
             try {
                 val window = activity.window
+                attachUiListener(window)
                 if (hide) {
                     hideBars(window)
                     window.decorView.post { if (lastHide) hideBars(window) }
                     window.decorView.postDelayed({ if (lastHide) hideBars(window) }, NativeConstants.HIDE_RETRY_MS)
+                    window.decorView.postDelayed({ if (lastHide) hideBars(window) }, 400)
+                    window.decorView.postDelayed({ if (lastHide) hideBars(window) }, 800)
                 } else {
                     showBars(window, lightIcons, contrast)
                 }
@@ -65,12 +70,37 @@ class SystemBarController(private val activity: Activity) {
     }
 
     @Suppress("DEPRECATION")
+    private fun attachUiListener(window: Window) {
+        if (uiListenerAttached) return
+        uiListenerAttached = true
+        window.decorView.setOnSystemUiVisibilityChangeListener { vis ->
+            if (lastHide && vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION == 0) {
+                window.decorView.post { if (lastHide) hideBars(window) }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.decorView.setOnApplyWindowInsetsListener { v, insets ->
+                val bars = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+                if (lastHide && insets.isVisible(bars)) {
+                    v.post { if (lastHide) hideBars(window) }
+                }
+                v.onApplyWindowInsets(insets)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
     private fun hideBars(window: Window) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             val controller = window.insetsController ?: window.decorView.windowInsetsController
             controller?.let {
-                it.hide(WindowInsets.Type.systemBars())
+                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars() or WindowInsets.Type.systemBars())
                 it.systemBarsBehavior =
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
@@ -89,10 +119,11 @@ class SystemBarController(private val activity: Activity) {
 
     @Suppress("DEPRECATION")
     private fun showBars(window: Window, lightIcons: Boolean, contrast: Boolean) {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             val controller = window.insetsController ?: window.decorView.windowInsetsController
-            controller?.show(WindowInsets.Type.systemBars())
+            controller?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars() or WindowInsets.Type.systemBars())
             val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             controller?.setSystemBarsAppearance(if (lightIcons) 0 else light, light)

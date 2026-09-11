@@ -18,12 +18,15 @@ import java.security.MessageDigest
 object VideoDecompressor {
     fun decompress(context: Context, path: String, lowMem: Boolean): String {
         if (path.isBlank()) return path
-        val maxW = if (lowMem) 1280 else 1920
-        val maxH = if (lowMem) 720 else 1080
+        val maxW = if (lowMem) 1920 else 3840
+        val maxH = if (lowMem) 1080 else 2160
         val probe = probe(context, path) ?: return path
         val (w, h) = probe
         if (w <= 0 || h <= 0) return path
-        val oversize = w > maxW || h > maxH || w.toLong() * h > maxW.toLong() * maxH
+        val longSide = maxOf(w, h)
+        val pixels = w.toLong() * h
+        // Phone recordings (1080×2340) are not 8K. Only true 4K+ giants.
+        val oversize = longSide >= 3840 || pixels > 3840L * 2160L
         if (!oversize) return path
         val stamp = try {
             if (path.startsWith("content:")) 0L else File(path).lastModified()
@@ -32,7 +35,13 @@ object VideoDecompressor {
         }
         val key = hash("$path|$w|$h|$lowMem|$stamp")
         val out = File(context.cacheDir, "decomp_$key.mp4")
-        if (out.exists() && out.length() > 8192) return out.absolutePath
+        if (out.exists() && out.length() > 8192) {
+            // Previous sessions wrote green artifacts. Never reuse them.
+            try {
+                out.delete()
+            } catch (_: Exception) {
+            }
+        }
         return try {
             if (transcode(context, path, out, maxW, maxH)) out.absolutePath else path
         } catch (_: Throwable) {
@@ -41,6 +50,20 @@ object VideoDecompressor {
             } catch (_: Exception) {
             }
             path
+        }
+    }
+
+    fun wipeCache(context: Context) {
+        try {
+            context.cacheDir.listFiles()?.forEach { f ->
+                if (f.name.startsWith("decomp_") && f.name.endsWith(".mp4")) {
+                    try {
+                        f.delete()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        } catch (_: Exception) {
         }
     }
 

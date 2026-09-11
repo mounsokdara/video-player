@@ -42,8 +42,9 @@ class SystemBars {
   static void apply({required Brightness icons, bool contrast = true, bool forceShow = false, bool? hide}) {
     iconBrightness = icons;
     final shouldHide = hide ?? (alwaysHide && popupCount <= 0 && !forceShow);
+    _ensureUiCallback();
     if (shouldHide) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: const []);
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setSystemUIOverlayStyle(overlay(icons: icons, contrast: contrast));
@@ -53,6 +54,23 @@ class SystemBars {
       contrast: contrast,
       hide: shouldHide,
     ));
+  }
+
+  static bool _cbBound = false;
+
+  static void _ensureUiCallback() {
+    if (_cbBound) return;
+    _cbBound = true;
+    SystemChrome.setSystemUIChangeCallback((visible) async {
+      if (visible && alwaysHide && popupCount <= 0) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: const []);
+        unawaited(AndroidBridge.applySystemBars(
+          lightIcons: iconBrightness == Brightness.light,
+          contrast: true,
+          hide: true,
+        ));
+      }
+    });
   }
 
   static Future<T?> modal<T>(Future<T?> Function() run) async {

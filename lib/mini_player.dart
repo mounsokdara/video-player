@@ -5,30 +5,196 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
+import 'main.dart';
 import 'player.dart';
 
-/// Geometry for the floating mini player. Keep numbers here — not scattered.
-class MiniPlayerGeom {
-  MiniPlayerGeom._();
+/// Layout numbers from the HTML mini-player demo. Keep them here.
+class MiniGeom {
+  MiniGeom._();
 
-  /// Visible edge tab when the window is parked off-screen (YouTube-style).
-  static const handle = 12.0;
-  static const snapMs = 220;
-  static const appearMs = 240;
-  static const closeMs = 220;
-  static const minScale = 0.55;
-  static const maxScale = 2.4;
-  static const restMin = 0.62;
-  static const restMax = 2.05;
-  static const margin = 10.0;
-  static const grabberH = 96.0;
-  static const flingHide = 900.0;
-  static const flingClose = 1100.0;
+  static const minW = 15.0;
+  static const maxW = 60.0;
+  static const defW = 30.0;
+  static const marginX = 1.5;
+  static const marginY = 2.0;
+  static const offscreen = 0.6;
+  static const tapSlop = 8.0;
+  static const arrowW = 26.0;
+  static const arrowH = 82.0;
+  static const barH = 44.0;
+  static const snapMs = 500;
+  static const ease = Cubic(0.22, 1.0, 0.36, 1.0);
 }
 
-/// Floating mini player: 1:1 drag, pinch-scale, short ease-out snap,
-/// YouTube hide (off-screen + 12px grabber, pause while hidden),
-/// drag-down to close. Size follows the video aspect.
+/// Off-screen, settle, and hide/close math from the HTML demo.
+class MiniPhysics {
+  MiniPhysics._();
+
+  static Size videoSize() {
+    try {
+      final s = PlaybackSession.controller?.value.size;
+      if (s != null && s.width > 1 && s.height > 1) return s;
+    } catch (_) {}
+    final item = PlaybackSession.item;
+    if (item != null && item.width > 1 && item.height > 1) {
+      return Size(item.width.toDouble(), item.height.toDouble());
+    }
+    return const Size(16, 9);
+  }
+
+  static Size box(Size screen, Size video, double widthVw) {
+    final ar = (video.width <= 0 || video.height <= 0) ? 16 / 9 : video.width / video.height;
+    var w = (widthVw / 100) * screen.width;
+    var vidH = w / ar;
+    final maxVid = screen.height * 0.40;
+    if (vidH > maxVid) {
+      vidH = maxVid;
+      w = vidH * ar;
+    }
+    final minW = screen.width * MiniGeom.minW / 100;
+    if (w < minW) {
+      w = minW;
+      vidH = math.min(w / ar, maxVid);
+    }
+    return Size(w, vidH + MiniGeom.barH);
+  }
+
+  static double offscreenFrac(Rect r, Size screen) {
+    final ow = math.max(0.0, math.min(r.right, screen.width) - math.max(r.left, 0.0));
+    final oh = math.max(0.0, math.min(r.bottom, screen.height) - math.max(r.top, 0.0));
+    final total = r.width * r.height;
+    if (total <= 0) return 1;
+    return 1 - (ow * oh) / total;
+  }
+
+  static double offBottom(Rect r, Size screen) {
+    if (r.height <= 0) return 0;
+    return ((r.bottom - screen.height) / r.height).clamp(0.0, 1.0).toDouble();
+  }
+
+  static Offset settlePos(Rect r, Size screen, Size box, {required double navH, required EdgeInsets pad}) {
+    final mx = screen.width * MiniGeom.marginX / 100;
+    final my = screen.height * MiniGeom.marginY / 100;
+    final minX = math.max(mx, pad.left);
+    final maxX = math.max(minX, screen.width - box.width - math.max(mx, pad.right));
+    final minY = math.max(my, pad.top + 8);
+    final maxY = math.max(minY, screen.height - box.height - navH - my);
+    final left = (r.left + r.width / 2) < screen.width / 2 ? minX : maxX;
+    final top = r.top.clamp(minY, maxY).toDouble();
+    return Offset(left, top);
+  }
+}
+
+/// 26×82 edge tab. Sibling of the player so a clipping Stack cannot eat it.
+class MiniStickyArrow extends StatelessWidget {
+  const MiniStickyArrow({
+    super.key,
+    required this.side,
+    required this.dragging,
+    required this.onTap,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+  });
+
+  final String side;
+  final bool dragging;
+  final VoidCallback onTap;
+  final GestureDragStartCallback onDragStart;
+  final GestureDragUpdateCallback onDragUpdate;
+  final GestureDragEndCallback onDragEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final left = side == 'left';
+    return GestureDetector(
+      onTap: onTap,
+      onPanStart: onDragStart,
+      onPanUpdate: onDragUpdate,
+      onPanEnd: onDragEnd,
+      onPanCancel: () => onDragEnd(DragEndDetails()),
+      child: Material(
+        color: const Color(0xFF14161C),
+        elevation: 10,
+        borderRadius: BorderRadius.horizontal(
+          left: left ? Radius.zero : const Radius.circular(8),
+          right: left ? const Radius.circular(8) : Radius.zero,
+        ),
+        child: SizedBox(
+          width: MiniGeom.arrowW,
+          height: MiniGeom.arrowH,
+          child: Icon(
+            left ? Icons.chevron_right : Icons.chevron_left,
+            size: 14,
+            color: const Color(0xFFCFD5E4),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MiniTransportBar extends StatelessWidget {
+  const MiniTransportBar({
+    super.key,
+    required this.title,
+    required this.playing,
+    required this.onPrev,
+    required this.onPlay,
+    required this.onNext,
+  });
+
+  final String title;
+  final bool playing;
+  final VoidCallback onPrev;
+  final VoidCallback onPlay;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget ctrl({required String label, required IconData icon, required VoidCallback onTap, bool play = false}) {
+      final child = Icon(icon, size: play ? 18 : 17, color: const Color(0xFFCFD5E4));
+      return Tooltip(
+        message: label,
+        child: Material(
+          color: play ? Colors.white.withValues(alpha: 0.13) : Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(width: play ? 34 : 30, height: play ? 34 : 30, child: Center(child: child)),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: MiniGeom.barH,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFFF1F3F8), fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.2),
+              ),
+            ),
+            ctrl(label: 'Previous', icon: Icons.skip_previous, onTap: onPrev),
+            const SizedBox(width: 2),
+            ctrl(label: playing ? 'Pause' : 'Play', icon: playing ? Icons.pause : Icons.play_arrow, onTap: onPlay, play: true),
+            const SizedBox(width: 2),
+            ctrl(label: 'Next', icon: Icons.skip_next, onTap: onNext),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Floating mini player. One [VideoPlayer] texture. Physics match the HTML demo.
 class MiniPlayerOverlay extends StatefulWidget {
   const MiniPlayerOverlay({
     super.key,
@@ -51,130 +217,96 @@ class MiniPlayerOverlay extends StatefulWidget {
   State<MiniPlayerOverlay> createState() => _MiniPlayerOverlayState();
 }
 
-class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProviderStateMixin {
-  Offset _pos = Offset.zero;
-  double _nx = 1;
-  double _ny = 1;
-  double _scale = 1;
-  bool _live = false;
+class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTickerProviderStateMixin {
+  double _left = 0;
+  double _top = 0;
+  double _widthVw = MiniGeom.defW;
   bool _ready = false;
-  bool _hiding = false;
-  int _hideDir = 0;
+  bool _dragging = false;
+  bool _resizing = false;
   bool _closing = false;
   bool _moved = false;
+  String? _hiddenSide;
   bool _pausedForHide = false;
-
-  late final AnimationController _move;
-  late final AnimationController _appear;
-
-  double _fromNx = 1;
-  double _fromNy = 1;
-  double _toNx = 1;
-  double _toNy = 1;
-  double _fromScale = 1;
-  double _toScale = 1;
-
   Offset _startFocal = Offset.zero;
   Offset _startPos = Offset.zero;
-  double _startScale = 1;
-  Offset _lastFocal = Offset.zero;
-  DateTime _lastT = DateTime.now();
-  Offset _vel = Offset.zero;
+  double _startBoxW = 0;
+  double _pinchFx = 0.5;
+  double _pinchFy = 0.5;
+  VideoPlayerController? _ctrl;
 
-  Size _videoSize() {
-    try {
-      final s = PlaybackSession.controller?.value.size;
-      if (s != null && s.width > 1 && s.height > 1) return s;
-    } catch (_) {}
-    final item = PlaybackSession.item;
-    if (item != null && item.width > 1 && item.height > 1) {
-      return Size(item.width.toDouble(), item.height.toDouble());
-    }
-    return const Size(16, 9);
-  }
-
-  Size _boxFor(Size screen, Size video) {
-    final ar = (video.width <= 0 || video.height <= 0) ? 16 / 9 : video.width / video.height;
-    final short = math.min(screen.width, screen.height);
-    var w = (short * 0.42).clamp(148.0, 280.0).toDouble();
-    var h = w / ar;
-    final maxH = screen.height * 0.34;
-    if (h > maxH) {
-      h = maxH;
-      w = h * ar;
-    }
-    if (h < 72) {
-      h = 72;
-      w = h * ar;
-    }
-    return Size(w, h + 40);
-  }
-
-  ({double minX, double maxX, double minY, double maxY}) _range(Size screen, double w, double h) {
-    final minX = MiniPlayerGeom.margin;
-    final maxX = math.max(minX, screen.width - w - MiniPlayerGeom.margin);
-    final minY = widget.pad.top + 8.0;
-    final maxY = math.max(minY, screen.height - h - widget.navH - 8.0);
-    return (minX: minX, maxX: maxX, minY: minY, maxY: maxY);
-  }
-
-  Offset _pixel(Size screen, {double? scale, double? nx, double? ny, bool hiding = false, int hideDir = 0}) {
-    final s = scale ?? _scale;
-    final box = _boxFor(screen, _videoSize());
-    final w = box.width * s;
-    final h = box.height * s;
-    final r = _range(screen, w, h);
-    final nnx = nx ?? _nx;
-    final nny = ny ?? _ny;
-    final y = (r.minY + nny * (r.maxY - r.minY)).toDouble();
-    if (hiding) {
-      final x = hideDir < 0 ? MiniPlayerGeom.handle - w : screen.width - MiniPlayerGeom.handle;
-      return Offset(x, y);
-    }
-    return Offset((r.minX + nnx * (r.maxX - r.minX)).toDouble(), y);
-  }
-
-  void _captureNorm(Size screen, Offset p, {double? scale}) {
-    final s = scale ?? _scale;
-    final box = _boxFor(screen, _videoSize());
-    final w = box.width * s;
-    final h = box.height * s;
-    final r = _range(screen, w, h);
-    final spanX = math.max(1.0, r.maxX - r.minX);
-    final spanY = math.max(1.0, r.maxY - r.minY);
-    _nx = ((p.dx - r.minX) / spanX).clamp(0.0, 1.0).toDouble();
-    _ny = ((p.dy - r.minY) / spanY).clamp(0.0, 1.0).toDouble();
-  }
-
-  Offset _dockPos(Size screen, {required bool right}) {
-    return _pixel(screen, nx: right ? 1.0 : 0.0, ny: 1.0, hiding: false);
-  }
+  late final AnimationController _move;
+  double _fromLeft = 0;
+  double _fromTop = 0;
+  double _fromW = MiniGeom.defW;
+  double _toLeft = 0;
+  double _toTop = 0;
+  double _toW = MiniGeom.defW;
 
   @override
   void initState() {
     super.initState();
-    _move = AnimationController(vsync: this, duration: const Duration(milliseconds: MiniPlayerGeom.snapMs));
+    _move = AnimationController(vsync: this, duration: const Duration(milliseconds: MiniGeom.snapMs));
     _move.addListener(_onMove);
-    _appear = AnimationController(vsync: this, duration: const Duration(milliseconds: MiniPlayerGeom.appearMs));
+    _bind();
   }
 
-  void _onMove() {
-    final t = Curves.easeOutCubic.transform(_move.value.clamp(0.0, 1.0).toDouble());
-    setState(() {
-      _nx = _fromNx + (_toNx - _fromNx) * t;
-      _ny = _fromNy + (_toNy - _fromNy) * t;
-      _scale = _fromScale + (_toScale - _fromScale) * t;
-      final screen = MediaQuery.sizeOf(context);
-      _pos = _pixel(screen, hiding: _hiding, hideDir: _hideDir);
-    });
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bind();
   }
 
   @override
   void dispose() {
     _move.removeListener(_onMove);
     _move.dispose();
-    _appear.dispose();
+    try {
+      _ctrl?.removeListener(_onTick);
+    } catch (_) {}
     super.dispose();
+  }
+
+  void _bind() {
+    final next = PlaybackSession.controller;
+    if (identical(next, _ctrl)) return;
+    try {
+      _ctrl?.removeListener(_onTick);
+    } catch (_) {}
+    _ctrl = next;
+    _ctrl?.addListener(_onTick);
+  }
+
+  void _onTick() {
+    if (mounted) setState(() {});
+  }
+
+  void _onMove() {
+    final t = MiniGeom.ease.transform(_move.value.clamp(0.0, 1.0).toDouble());
+    setState(() {
+      _left = _fromLeft + (_toLeft - _fromLeft) * t;
+      _top = _fromTop + (_toTop - _fromTop) * t;
+      _widthVw = _fromW + (_toW - _fromW) * t;
+    });
+  }
+
+  void _animateTo(double left, double top, double widthVw, {VoidCallback? onDone}) {
+    _fromLeft = _left;
+    _fromTop = _top;
+    _fromW = _widthVw;
+    _toLeft = left;
+    _toTop = top;
+    _toW = widthVw;
+    _move.stop();
+    _move.duration = const Duration(milliseconds: MiniGeom.snapMs);
+    _move.forward(from: 0).whenComplete(() {
+      if (!mounted) return;
+      _left = _toLeft;
+      _top = _toTop;
+      _widthVw = _toW;
+      onDone?.call();
+      if (mounted) setState(() {});
+    });
   }
 
   void _pauseForHide() {
@@ -202,357 +334,295 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     }());
   }
 
-  void _animateTo(Offset target, double scale, {bool hiding = false, int hideDir = 0, int ms = MiniPlayerGeom.snapMs}) {
-    final screen = MediaQuery.sizeOf(context);
-    _fromNx = _nx;
-    _fromNy = _ny;
-    _fromScale = _scale;
-    if (hiding) {
-      _toNx = hideDir < 0 ? 0 : 1;
-      _captureNorm(screen, target, scale: scale);
-      _toNy = _ny;
-      _nx = _fromNx;
-      _ny = _fromNy;
-    } else {
-      _captureNorm(screen, target, scale: scale);
-      _toNx = _nx;
-      _toNy = _ny;
-      _nx = _fromNx;
-      _ny = _fromNy;
-    }
-    _hiding = hiding;
-    _hideDir = hideDir;
-    _toScale = scale;
-    _live = true;
-    _move.stop();
-    _move.duration = Duration(milliseconds: ms);
-    _move.forward(from: 0).whenComplete(() {
-      if (!mounted) return;
-      _live = false;
-      if (!hiding) {
-        _nx = _toNx;
-        _ny = _toNy;
-        _resumeIfNeeded();
-      } else {
-        _pauseForHide();
-      }
-      if (mounted) setState(() {});
-    });
+  Rect _rect(Size box) => Rect.fromLTWH(_left, _top, box.width, box.height);
+
+  void _park(String side, Size screen, Size box) {
+    _hiddenSide = side;
+    final left = side == 'left' ? -box.width : screen.width;
+    _animateTo(left, _top, _widthVw, onDone: _pauseForHide);
   }
 
-  Future<void> _close() async {
+  void _reveal(Size screen, Size box, {bool animate = true}) {
+    final side = _hiddenSide ?? ((_left + box.width / 2) < screen.width / 2 ? 'left' : 'right');
+    _hiddenSide = null;
+    final target = MiniPhysics.settlePos(
+      Rect.fromLTWH(side == 'left' ? 0 : screen.width - box.width, _top, box.width, box.height),
+      screen,
+      box,
+      navH: widget.navH,
+      pad: widget.pad,
+    );
+    if (animate) {
+      _animateTo(target.dx, target.dy, _widthVw, onDone: _resumeIfNeeded);
+    } else {
+      _move.stop();
+      setState(() {
+        _left = target.dx;
+        _top = target.dy;
+      });
+      _resumeIfNeeded();
+    }
+  }
+
+  void _settle(Size screen, Size box) {
+    final w = _widthVw.clamp(MiniGeom.minW, MiniGeom.maxW).toDouble();
+    final next = MiniPhysics.box(screen, MiniPhysics.videoSize(), w);
+    final target = MiniPhysics.settlePos(_rect(box), screen, next, navH: widget.navH, pad: widget.pad);
+    _hiddenSide = null;
+    _animateTo(target.dx, target.dy, w, onDone: _resumeIfNeeded);
+  }
+
+  void _finishDrag(Size screen, Size box) {
+    final r = _rect(box);
+    if (MiniPhysics.offBottom(r, screen) >= MiniGeom.offscreen) {
+      unawaited(_close(screen, box));
+      return;
+    }
+    if (MiniPhysics.offscreenFrac(r, screen) >= MiniGeom.offscreen) {
+      final side = (r.left + r.width / 2) < screen.width / 2 ? 'left' : 'right';
+      _park(side, screen, box);
+      return;
+    }
+    if (_hiddenSide != null) {
+      _reveal(screen, box);
+      return;
+    }
+    _settle(screen, box);
+  }
+
+  Future<void> _close(Size screen, Size box) async {
     if (_closing) return;
     _closing = true;
     _pausedForHide = false;
-    _fromNx = _nx;
-    _fromNy = _ny;
-    _fromScale = _scale;
-    _toNx = _nx;
-    _toNy = 1.45;
-    _toScale = math.max(MiniPlayerGeom.restMin, _scale * 0.78);
-    _live = true;
-    _hiding = false;
-    _move.stop();
-    _move.duration = const Duration(milliseconds: MiniPlayerGeom.closeMs);
-    _move.forward(from: 0);
-    _appear.reverse();
-    await Future<void>.delayed(const Duration(milliseconds: MiniPlayerGeom.closeMs));
+    _hiddenSide = null;
+    _animateTo(_left, screen.height + 8, _widthVw);
+    await Future<void>.delayed(const Duration(milliseconds: MiniGeom.snapMs));
     await widget.onClose();
   }
 
-  void _onScaleStart(ScaleStartDetails d) {
+  void _onScaleStart(ScaleStartDetails d, Size box) {
     if (_closing) return;
     _move.stop();
-    _live = true;
     _moved = false;
-    final screen = MediaQuery.sizeOf(context);
-    _pos = _pixel(screen, hiding: _hiding, hideDir: _hideDir);
     _startFocal = d.focalPoint;
-    _startPos = _pos;
-    _startScale = _scale;
-    _lastFocal = d.focalPoint;
-    _lastT = DateTime.now();
-    _vel = Offset.zero;
+    _startPos = Offset(_left, _top);
+    _startBoxW = box.width;
+    _pinchFx = box.width <= 0 ? 0.5 : ((d.focalPoint.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
+    _pinchFy = box.height <= 0 ? 0.5 : ((d.focalPoint.dy - _top) / box.height).clamp(0.0, 1.0).toDouble();
   }
 
-  void _onScaleUpdate(ScaleUpdateDetails d, Size screen, Size box) {
+  void _onScaleUpdate(ScaleUpdateDetails d, Size screen) {
     if (_closing) return;
-    final now = DateTime.now();
-    final dt = math.max(8, now.difference(_lastT).inMilliseconds).toDouble();
-    _vel = (d.focalPoint - _lastFocal) * (1000 / dt);
-    _lastFocal = d.focalPoint;
-    _lastT = now;
-    if ((d.focalPoint - _startFocal).distance > 5 || (d.scale - 1).abs() > 0.02) _moved = true;
-
-    var nextScale = _startScale * d.scale;
-    if (nextScale < MiniPlayerGeom.minScale) {
-      nextScale = MiniPlayerGeom.minScale - (MiniPlayerGeom.minScale - nextScale) * 0.32;
-    } else if (nextScale > MiniPlayerGeom.maxScale) {
-      nextScale = MiniPlayerGeom.maxScale + (nextScale - MiniPlayerGeom.maxScale) * 0.32;
-    }
-
-    final pinching = (d.scale - 1).abs() > 0.02;
-    Offset next;
+    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
+    if ((_startFocal - d.focalPoint).distance > MiniGeom.tapSlop || pinching) _moved = true;
     if (pinching) {
-      _scale = nextScale;
-      _captureNorm(screen, _startPos, scale: _startScale);
-      final base = _pixel(screen);
-      next = base + (d.focalPoint - _startFocal);
-      _captureNorm(screen, next);
-      next = _pixel(screen);
-    } else {
-      next = _startPos + (d.focalPoint - _startFocal);
+      _resizing = true;
+      _dragging = false;
+      if (_hiddenSide != null) {
+        _hiddenSide = null;
+        _resumeIfNeeded();
+      }
+      final newWpx = math.max(_startBoxW * d.scale, 40.0);
+      var vw = (newWpx / screen.width * 100).clamp(MiniGeom.minW, MiniGeom.maxW).toDouble();
+      final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), vw);
+      setState(() {
+        _widthVw = vw;
+        _left = d.focalPoint.dx - _pinchFx * box.width;
+        _top = d.focalPoint.dy - _pinchFy * box.height;
+      });
+      return;
     }
-
+    if (!_moved) return;
+    _dragging = true;
+    _resizing = false;
+    if (_hiddenSide != null) {
+      _hiddenSide = null;
+      _resumeIfNeeded();
+    }
     setState(() {
-      _pos = next;
-      _scale = nextScale;
-      _hiding = false;
-      _live = true;
+      _left = _startPos.dx + (d.focalPoint.dx - _startFocal.dx);
+      _top = _startPos.dy + (d.focalPoint.dy - _startFocal.dy);
     });
   }
 
   void _onScaleEnd(ScaleEndDetails d, Size screen, Size box) {
     if (_closing) return;
-    _vel = d.velocity.pixelsPerSecond;
-    var scale = _scale;
-    if (scale < MiniPlayerGeom.restMin || scale > MiniPlayerGeom.restMax) {
-      scale = scale.clamp(MiniPlayerGeom.restMin, MiniPlayerGeom.restMax).toDouble();
-    }
-    final w = box.width * scale;
-    final h = box.height * scale;
-    final cx = _pos.dx + w / 2;
-    final bottom = _pos.dy + h;
-
-    final flungDown = _vel.dy > MiniPlayerGeom.flingClose ||
-        (bottom > screen.height - 40 && _vel.dy > 240) ||
-        _pos.dy > screen.height * 0.78;
-    if (flungDown) {
-      unawaited(_close());
-      return;
-    }
-
-    final r = _range(screen, w, h);
-    final y = _pos.dy.clamp(r.minY, r.maxY).toDouble();
-    final flungSide = _vel.dx.abs() > MiniPlayerGeom.flingHide && _vel.dx.abs() > _vel.dy.abs() * 0.8;
-    final offLeft = _pos.dx <= MiniPlayerGeom.handle - w + 1 || _pos.dx + w * 0.45 < 0;
-    final offRight = _pos.dx >= screen.width - MiniPlayerGeom.handle - 1 || _pos.dx > screen.width - w * 0.45;
-
-    if ((flungSide && _vel.dx < 0) || offLeft) {
-      _animateTo(Offset(MiniPlayerGeom.handle - w, y), scale, hiding: true, hideDir: -1);
-      return;
-    }
-    if ((flungSide && _vel.dx > 0) || offRight) {
-      _animateTo(Offset(screen.width - MiniPlayerGeom.handle, y), scale, hiding: true, hideDir: 1);
-      return;
-    }
-
-    _hiding = false;
-    _hideDir = 0;
-    final x = cx < screen.width / 2 ? r.minX : r.maxX;
-    _animateTo(Offset(x, y), scale);
+    final was = _moved;
+    _dragging = false;
+    _resizing = false;
+    if (!was) return;
+    _finishDrag(screen, box);
   }
 
-  void _reveal(Size screen, Size box) {
-    _hiding = false;
-    _hideDir = 0;
-    final r = _range(screen, box.width * _scale, box.height * _scale);
-    final x = _nx < 0.5 ? r.minX : r.maxX;
-    _animateTo(Offset(x, _pixel(screen).dy), _scale);
+  Future<void> _togglePlay() async {
+    final c = PlaybackSession.controller;
+    if (c == null) return;
+    try {
+      if (c.value.isPlaying) {
+        _pausedForHide = false;
+        await c.pause();
+      } else {
+        await AndroidBridge.requestAudioFocus();
+        await c.play();
+      }
+      if (appSettings.backgroundPlay) {
+        await AndroidBridge.updateBackground(
+          playing: c.value.isPlaying,
+          positionMs: c.value.position.inMilliseconds,
+          durationMs: c.value.duration.inMilliseconds,
+        );
+      } else {
+        await AndroidBridge.stopBackground();
+      }
+    } catch (_) {}
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    _bind();
     final screen = MediaQuery.sizeOf(context);
-    final video = _videoSize();
-    final box = _boxFor(screen, video);
+    final video = MiniPhysics.videoSize();
+    final box = MiniPhysics.box(screen, video, _widthVw);
     if (!_ready) {
       _ready = true;
-      _nx = 1;
-      _ny = 1.18;
-      _scale = 0.82;
-      _pos = _pixel(screen);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _appear.forward();
-        _animateTo(_dockPos(screen, right: true), 1);
-      });
+      final mx = math.max(screen.width * MiniGeom.marginX / 100, widget.pad.right);
+      final my = math.max(screen.height * MiniGeom.marginY / 100, 8.0);
+      _widthVw = MiniGeom.defW;
+      final start = MiniPhysics.box(screen, video, _widthVw);
+      _left = screen.width - start.width - mx;
+      _top = (screen.height * 0.55 - start.height / 2).clamp(my, math.max(my, screen.height - widget.navH - start.height - my)).toDouble();
     }
-
-    final draw = _live ? _pos : _pixel(screen, hiding: _hiding, hideDir: _hideDir);
 
     final c = PlaybackSession.controller;
     final item = PlaybackSession.item;
     var playing = false;
+    var progress = 0.0;
     try {
       playing = c?.value.isPlaying ?? false;
+      final dur = c?.value.duration.inMilliseconds ?? 0;
+      if (dur > 0) progress = (c!.value.position.inMilliseconds / dur).clamp(0.0, 1.0).toDouble();
     } catch (_) {}
 
     Widget frame;
     try {
       if (c != null && c.value.isInitialized) {
-        frame = FittedBox(
-          fit: BoxFit.contain,
-          child: SizedBox(
-            width: video.width.clamp(1, 8000).toDouble(),
-            height: video.height.clamp(1, 8000).toDouble(),
-            child: VideoPlayer(key: ValueKey(item?.path), c),
-          ),
-        );
+        frame = VideoPlayer(c);
       } else {
-        frame = const ColoredBox(
-          color: Colors.black26,
-          child: Center(child: Icon(Icons.play_circle, color: Colors.white70)),
-        );
+        frame = const ColoredBox(color: Color(0xFF05060A), child: Center(child: Icon(Icons.play_circle, color: Colors.white70)));
       }
     } catch (_) {
-      frame = const ColoredBox(color: Colors.black26);
+      frame = const ColoredBox(color: Color(0xFF05060A));
     }
 
-    final scheme = Theme.of(context).colorScheme;
-    final visW = box.width * _scale;
-    final visH = box.height * _scale;
-    final barH = (40.0 * _scale.clamp(0.78, 1.25));
-    final parked = _hiding && !_live && !_closing;
+    final hidden = _hiddenSide != null && !_dragging && !_resizing;
+    final animating = _move.isAnimating;
+    final arrowTop = (_top + box.height / 2 - MiniGeom.arrowH / 2).clamp(8.0, math.max(8.0, screen.height - MiniGeom.arrowH - 8)).toDouble();
 
-    Widget btn(String t, IconData i, VoidCallback on) {
-      return IconButton(
-        visualDensity: VisualDensity.compact,
-        padding: EdgeInsets.zero,
-        constraints: BoxConstraints.tightFor(width: 36 * _scale.clamp(0.8, 1.2), height: 36 * _scale.clamp(0.8, 1.2)),
-        tooltip: t,
-        color: scheme.onSurface,
-        onPressed: on,
-        icon: Icon(i, size: 22 * _scale.clamp(0.8, 1.15)),
-      );
-    }
-
-    final grabber = Align(
-      alignment: _hideDir < 0 ? Alignment.centerRight : Alignment.centerLeft,
-      child: Material(
-        color: scheme.surfaceContainerHighest,
-        elevation: 8,
-        borderRadius: BorderRadius.horizontal(
-          left: _hideDir < 0 ? Radius.zero : const Radius.circular(10),
-          right: _hideDir < 0 ? const Radius.circular(10) : Radius.zero,
-        ),
-        child: SizedBox(
-          width: MiniPlayerGeom.handle,
-          height: math.min(visH, MiniPlayerGeom.grabberH),
-          child: Icon(
-            _hideDir < 0 ? Icons.chevron_right : Icons.chevron_left,
-            size: 14,
-            color: scheme.onSurface,
-          ),
-        ),
-      ),
-    );
-
-    return Positioned(
-      left: draw.dx,
-      top: draw.dy,
-      width: visW,
-      height: visH,
-      child: AnimatedBuilder(
-        animation: _appear,
-        builder: (_, child) {
-          final t = Curves.easeOutCubic.transform(_appear.value.clamp(0.0, 1.0).toDouble());
-          return Opacity(
-            opacity: _appear.value.clamp(0.0, 1.0).toDouble(),
-            child: Transform.scale(scale: 0.92 + 0.08 * t, alignment: Alignment.bottomCenter, child: child),
-          );
-        },
-        child: GestureDetector(
-          onScaleStart: _onScaleStart,
-          onScaleUpdate: (d) => _onScaleUpdate(d, screen, box),
-          onScaleEnd: (d) => _onScaleEnd(d, screen, box),
-          child: parked
-              ? grabber
-              : Material(
-                  elevation: 14,
-                  color: scheme.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Column(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                if (_hiding) {
-                                  _reveal(screen, box);
-                                  return;
-                                }
-                                if (_moved) return;
-                                widget.onExpand();
-                              },
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  frame,
-                                  if (!playing)
-                                    const IgnorePointer(
-                                      child: ColoredBox(
-                                        color: Color(0x33000000),
-                                        child: Center(child: Icon(Icons.play_arrow, color: Colors.white, size: 36)),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            height: barH,
-                            child: Row(
-                              children: [
-                                btn('Previous', Icons.skip_previous, () => unawaited(widget.onPrev())),
-                                btn(
-                                  playing ? 'Pause' : 'Play',
-                                  playing ? Icons.pause : Icons.play_arrow,
-                                  () async {
-                                    final live = PlaybackSession.controller;
-                                    if (live == null) return;
-                                    if (live.value.isPlaying) {
-                                      _pausedForHide = false;
-                                      await live.pause();
-                                    } else {
-                                      await AndroidBridge.requestAudioFocus();
-                                      await live.play();
-                                    }
-                                    await AndroidBridge.updateBackground(
-                                      playing: live.value.isPlaying,
-                                      positionMs: live.value.position.inMilliseconds,
-                                      durationMs: live.value.duration.inMilliseconds,
-                                    );
-                                    if (mounted) setState(() {});
-                                  },
-                                ),
-                                btn('Next', Icons.skip_next, () => unawaited(widget.onNext())),
-                                Expanded(
-                                  child: Text(
-                                    item?.title ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: scheme.onSurface,
-                                      fontSize: 11 * _scale.clamp(0.8, 1.2),
-                                      fontWeight: FontWeight.w600,
-                                    ),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        if (!_closing)
+          Positioned(
+            left: _left,
+            top: _top,
+            width: box.width,
+            height: box.height,
+            child: IgnorePointer(
+              ignoring: hidden,
+              child: Opacity(
+                opacity: hidden && !animating ? 0 : 1,
+                child: GestureDetector(
+                  onScaleStart: (d) => _onScaleStart(d, box),
+                  onScaleUpdate: (d) => _onScaleUpdate(d, screen),
+                  onScaleEnd: (d) => _onScaleEnd(d, screen, box),
+                  onTap: () {
+                    if (_moved || _dragging) return;
+                    if (_hiddenSide != null) {
+                      _reveal(screen, box);
+                      return;
+                    }
+                    widget.onExpand();
+                  },
+                  child: Material(
+                    color: const Color(0xFF14161C),
+                    elevation: 14,
+                    borderRadius: BorderRadius.circular(math.max(8, box.width * 0.035)),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              ColoredBox(color: const Color(0xFF05060A), child: frame),
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: SizedBox(
+                                  height: 2,
+                                  child: LinearProgressIndicator(
+                                    value: progress,
+                                    backgroundColor: Colors.white24,
+                                    color: const Color(0xFF7AA2FF),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      if (_hiding) grabber,
-                    ],
+                        ),
+                        MiniTransportBar(
+                          title: item?.title ?? '',
+                          playing: playing,
+                          onPrev: () => unawaited(widget.onPrev()),
+                          onPlay: () => unawaited(_togglePlay()),
+                          onNext: () => unawaited(widget.onNext()),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-        ),
-      ),
+              ),
+            ),
+          ),
+        if (_hiddenSide != null && !_closing)
+          Positioned(
+            left: _hiddenSide == 'left' ? 0 : screen.width - MiniGeom.arrowW,
+            top: arrowTop,
+            width: MiniGeom.arrowW,
+            height: MiniGeom.arrowH,
+            child: MiniStickyArrow(
+              side: _hiddenSide!,
+              dragging: _dragging,
+              onTap: () => _reveal(screen, box),
+              onDragStart: (d) {
+                _moved = false;
+                _startFocal = d.globalPosition;
+                _startPos = Offset(_left, _top);
+              },
+              onDragUpdate: (d) {
+                if ((d.globalPosition - _startFocal).distance < MiniGeom.tapSlop && !_moved) return;
+                if (!_moved) {
+                  _moved = true;
+                  _hiddenSide = null;
+                  _resumeIfNeeded();
+                }
+                setState(() {
+                  _dragging = true;
+                  _left += d.delta.dx;
+                  _top += d.delta.dy;
+                });
+              },
+              onDragEnd: (_) {
+                _dragging = false;
+                if (!_moved) {
+                  _reveal(screen, box);
+                } else {
+                  _finishDrag(screen, MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw));
+                }
+              },
+            ),
+          ),
+      ],
     );
   }
 }

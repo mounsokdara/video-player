@@ -48,7 +48,7 @@ class SettingsHub extends StatelessWidget {
           sliver: SliverList.list(children: [
             tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
             tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
-            tile(Icons.speed, 'Performance', 'Decompress video, low-memory size', PerformanceSettings(onChanged: onChanged)),
+            tile(Icons.speed, 'Performance', '4K decompress, low-memory size', PerformanceSettings(onChanged: onChanged)),
             tile(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', AccessSettings(onChanged: onChanged)),
             tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
@@ -797,6 +797,7 @@ class _PerformanceSettingsState extends State<PerformanceSettings> {
           ),
           SwitchListTile(
             title: const Text('Decompress video'),
+            subtitle: const Text('Only 4K and larger. Playback always starts on the original file.'),
             value: s.decompressVideo,
             onChanged: (v) => set(() {
               s.decompressVideo = v;

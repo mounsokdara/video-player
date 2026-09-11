@@ -26,7 +26,7 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int tab = 0;
   bool loading = true;
   String? error;
@@ -49,6 +49,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _boot();
     events = AndroidBridge.events().listen(_onEvent);
     refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -60,6 +61,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     refreshTimer?.cancel();
     events?.cancel();
     PlaybackSession.onMutated = null;
@@ -189,6 +191,19 @@ class _HomeShellState extends State<HomeShell> {
       setState(() {});
     };
     _miniPlaying = PlaybackSession.controller?.value.isPlaying ?? false;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      if (!appSettings.backgroundPlay) {
+        PlaybackSession.pauseForBackground();
+        final c = PlaybackSession.controller;
+        try {
+          if (c != null && c.value.isPlaying) unawaited(c.pause());
+        } catch (_) {}
+      }
+    }
   }
 
   void _onSessionTick() {
@@ -529,6 +544,7 @@ class _HomeShellState extends State<HomeShell> {
 
     Widget shell(Widget child) {
       return Stack(
+        clipBehavior: Clip.none,
         children: [
           child,
           if (PlaybackSession.active && appSettings.inAppMiniplayer && onTop)
@@ -537,7 +553,15 @@ class _HomeShellState extends State<HomeShell> {
               navH: wide || tabs.length <= 1 ? 16.0 : 88.0,
               onExpand: () {
                 final item = PlaybackSession.item;
-                if (item != null) unawaited(_open(item, playlist: PlaybackSession.playlist));
+                final list = PlaybackSession.playlist;
+                if (item == null) return;
+                PlaybackSession.transferring = true;
+                PlaybackSession.keepAlive = false;
+                setState(() {});
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  unawaited(_open(item, playlist: list));
+                });
               },
               onClose: () async {
                 await PlaybackSession.stop();
