@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'android_bridge.dart';
 import 'crash.dart';
+import 'hud.dart';
+import 'insets.dart';
 import 'main.dart';
 import 'models.dart';
 import 'settings.dart';
@@ -17,7 +19,7 @@ class SettingsHub extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     Widget tile(IconData icon, String title, String sub, Widget page) {
       return ListTile(
         leading: CircleAvatar(
@@ -46,6 +48,7 @@ class SettingsHub extends StatelessWidget {
           sliver: SliverList.list(children: [
             tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
             tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
+            tile(Icons.speed, 'Performance', 'Anti-buffer crash, quality caps', PerformanceSettings(onChanged: onChanged)),
             tile(Icons.accessibility_new, 'Accessibility', 'Captions, color filters, motion, text', AccessSettings(onChanged: onChanged)),
             tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
@@ -142,7 +145,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
   Widget build(BuildContext context) {
     final s = appSettings;
     final insets = MediaQuery.viewInsetsOf(context);
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     void set(VoidCallback fn) {
       setState(fn);
       s.save();
@@ -183,6 +186,18 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             trailing: const Icon(Icons.tune),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: widget.onChanged))),
           ),
+          ListTile(
+            title: const Text('Title bar buttons'),
+            subtitle: const Text('Show and reorder search, select, layout, sort, and the 3-dot menu'),
+            trailing: const Icon(Icons.tune),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TitleBarEditor(onChanged: widget.onChanged))),
+          ),
+          ListTile(
+            title: const Text('Floating action buttons'),
+            subtitle: const Text('Drag, resize, and add actions from More like a HUD'),
+            trailing: const Icon(Icons.tune),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => HudEditorPage(onChanged: widget.onChanged))),
+          ),
           SwitchListTile(title: const Text('Remember playback progress'), value: s.rememberPlayback, onChanged: (v) => set(() => s.rememberPlayback = v)),
           ListTile(
             title: const Text('Clear resume history'),
@@ -216,7 +231,7 @@ class _VideoSettingsState extends State<VideoSettings> {
   Widget build(BuildContext context) {
     final s = appSettings;
     final insets = MediaQuery.viewInsetsOf(context);
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     void set(VoidCallback fn) {
       setState(fn);
       s.save();
@@ -283,7 +298,13 @@ class _VideoSettingsState extends State<VideoSettings> {
               ),
             ),
           ),
-          SwitchListTile(title: const Text('Auto Miniplayer / Pop-up'), subtitle: const Text('Off by default. Only while a video is playing.'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
+          SwitchListTile(title: const Text('Auto Miniplayer / Pop-up'), subtitle: const Text('System picture-in-picture. Off by default. Only while a video is playing.'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
+          SwitchListTile(
+            title: const Text('Mini player'),
+            subtitle: const Text('Keep a YouTube-style in-app window when you leave the player. On by default.'),
+            value: s.inAppMiniplayer,
+            onChanged: (v) => set(() => s.inAppMiniplayer = v),
+          ),
           SwitchListTile(
             title: const Text('Always hide navigation bar'),
             subtitle: const Text('Keep system bars hidden even when player controls are visible. Otherwise bars follow the controller.'),
@@ -353,7 +374,7 @@ class _AccessSettingsState extends State<AccessSettings> {
   Widget build(BuildContext context) {
     final s = appSettings;
     final insets = MediaQuery.viewInsetsOf(context);
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     void set(VoidCallback fn) {
       setState(fn);
       s.save();
@@ -366,8 +387,18 @@ class _AccessSettingsState extends State<AccessSettings> {
         padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom + 24),
         children: [
           _h('Captions'),
-          SwitchListTile(title: const Text('Captions'), value: s.captions, onChanged: (v) => set(() => s.captions = v)),
-          SwitchListTile(title: const Text('Live captions'), value: s.liveCaptions, onChanged: (v) => set(() => s.liveCaptions = v)),
+          SwitchListTile(
+            title: const Text('Captions'),
+            subtitle: const Text('Sidecar SRT/VTT, embedded text tracks, and speech-to-text from the video audio. No microphone.'),
+            value: s.captions,
+            onChanged: (v) => set(() => s.captions = v),
+          ),
+          SwitchListTile(
+            title: const Text('Live captions'),
+            subtitle: const Text('Transcribe how people speak in the video. Uses the soundtrack, not the mic.'),
+            value: s.liveCaptions,
+            onChanged: (v) => set(() => s.liveCaptions = v),
+          ),
           ListTile(
             title: const Text('Caption size'),
             subtitle: Slider(min: 0.8, max: 2, value: s.captionSize, onChanged: (v) => set(() => s.captionSize = v)),
@@ -431,7 +462,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
   @override
   Widget build(BuildContext context) {
     final s = appSettings;
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     void set(VoidCallback fn) {
       setState(fn);
       s.save();
@@ -570,7 +601,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   @override
   Widget build(BuildContext context) {
     final s = appSettings;
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
@@ -729,11 +760,11 @@ class _QuickActionsEditorState extends State<QuickActionsEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final insets = MediaQuery.viewInsetsOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Quick actions')),
       body: ReorderableListView.builder(
-        padding: EdgeInsets.only(bottom: insets.bottom + 24),
+        padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 24),
         itemCount: order.length,
         onReorder: (oldIndex, newIndex) async {
           setState(() {
@@ -762,6 +793,51 @@ class _QuickActionsEditorState extends State<QuickActionsEditor> {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+class PerformanceSettings extends StatefulWidget {
+  const PerformanceSettings({super.key, required this.onChanged});
+  final VoidCallback onChanged;
+  @override
+  State<PerformanceSettings> createState() => _PerformanceSettingsState();
+}
+
+class _PerformanceSettingsState extends State<PerformanceSettings> {
+  @override
+  Widget build(BuildContext context) {
+    final s = appSettings;
+    final pad = SystemBars.of(context);
+    void set(VoidCallback fn) {
+      setState(fn);
+      s.save();
+      widget.onChanged();
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Performance')),
+      body: ListView(
+        padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 24),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+            child: Text('Buffer', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
+          ),
+          SwitchListTile(
+            title: const Text('Anti-buffer crash'),
+            subtitle: const Text('Cap video size and bitrate so a jump from low quality to 8K does not fill RAM and kill the app. On by default.'),
+            value: s.antiBufferCrash,
+            onChanged: (v) => set(() => s.antiBufferCrash = v),
+          ),
+          SwitchListTile(
+            title: const Text('Low-memory buffer'),
+            subtitle: const Text('On phones with little RAM, cap at 720p / 8 Mbps. On by default.'),
+            value: s.lowMemoryBuffer,
+            onChanged: (v) => set(() => s.lowMemoryBuffer = v),
+          ),
+        ],
       ),
     );
   }

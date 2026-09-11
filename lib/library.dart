@@ -443,6 +443,12 @@ const textExtensions = {
 };
 
 bool looksLikeVideo(String path, {String? mime}) {
+  if (path.startsWith('content:')) {
+    final m = (mime ?? '').toLowerCase();
+    if (m.isEmpty) return true;
+    if (m.startsWith('video/')) return true;
+    return false;
+  }
   final name = p.basename(path).toLowerCase();
   if (name.endsWith('.d.ts')) return false;
   final ext = p.extension(name).toLowerCase();

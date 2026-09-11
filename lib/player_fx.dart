@@ -386,21 +386,17 @@ class _PlayPauseBurst extends StatefulWidget {
 
 class _PlayPauseBurstState extends State<_PlayPauseBurst> with SingleTickerProviderStateMixin {
   late final AnimationController _c;
-  bool _out = false;
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 480))..forward();
-    Future<void>.delayed(const Duration(milliseconds: 700), () {
-      if (!mounted) return;
-      setState(() => _out = true);
-      _c.duration = const Duration(milliseconds: 200);
-      _c.reverse();
-      Future<void>.delayed(const Duration(milliseconds: 240), () {
-        if (mounted) widget.onDone();
-      });
+    // HTML: spring-in 480ms Cubic(0.34,1.75,0.64,1), hold until 700ms,
+    // then hide transform 200ms Cubic(0.4,0,1,0.6) + opacity 90ms linear.
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _c.addStatusListener((s) {
+      if (s == AnimationStatus.completed) widget.onDone();
     });
+    _c.forward();
   }
 
   @override
@@ -421,13 +417,23 @@ class _PlayPauseBurstState extends State<_PlayPauseBurst> with SingleTickerProvi
         child: AnimatedBuilder(
           animation: _c,
           builder: (_, _) {
-            final t = _c.value;
-            final scale = _out
-                ? const Cubic(0.4, 0, 1, 0.6).transform(t)
-                : const Cubic(0.34, 1.75, 0.64, 1).transform(t);
-            final opacity = _out ? Curves.linear.transform(t).clamp(0.0, 1.0) : Curves.ease.transform(t.clamp(0.0, 1.0));
+            final ms = _c.value * 900;
+            late final double scale;
+            late final double opacity;
+            if (ms <= 480) {
+              final u = (ms / 480).clamp(0.0, 1.0);
+              scale = const Cubic(0.34, 1.75, 0.64, 1).transform(u);
+              opacity = Curves.ease.transform(u);
+            } else if (ms <= 700) {
+              scale = 1;
+              opacity = 1;
+            } else {
+              final hide = ((ms - 700) / 200).clamp(0.0, 1.0);
+              scale = 1 - const Cubic(0.4, 0, 1, 0.6).transform(hide);
+              opacity = 1 - ((ms - 700) / 90).clamp(0.0, 1.0);
+            }
             return Opacity(
-              opacity: opacity,
+              opacity: opacity.clamp(0.0, 1.0),
               child: Transform.scale(
                 scale: scale.clamp(0.0, 1.35),
                 child: Container(

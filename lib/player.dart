@@ -15,7 +15,9 @@ import 'package:volume_controller/volume_controller.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'android_bridge.dart';
+import 'captions.dart';
 import 'crash.dart';
+import 'insets.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
@@ -186,6 +188,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   double? _previewWant;
   bool _tapBurst = false;
   bool _ateTap = false;
+  bool _handedOff = false;
+  CaptionBook _captions = CaptionBook([]);
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -322,25 +326,29 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       s = vc?.value.size;
     } catch (_) {}
-    if (s == null || s.width <= 0 || s.height <= 0) return 'sensor';
-    if (s.width > s.height) return 'landscape';
-    if (s.width < s.height) return 'portrait';
-    return 'sensor';
+    if (s == null || s.width <= 0 || s.height <= 0) {
+      if (item.width > 0 && item.height > 0) {
+        s = Size(item.width.toDouble(), item.height.toDouble());
+      }
+    }
+    if (s == null || s.width <= 0 || s.height <= 0) return 'locked';
+    if (s.width > s.height) return 'landscape_normal';
+    if (s.width < s.height) return 'portrait_normal';
+    return 'locked';
   }
 
   void _applySystemUi() {
-    final hide = appSettings.alwaysHideNavBar || !showUi || locked;
-    if (hide) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarContrastEnforced: false,
-        systemStatusBarContrastEnforced: false,
-      ));
+    SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
+    var covered = false;
+    if (mounted) {
+      covered = ModalRoute.of(context)?.isCurrent == false || SystemBars.popupCount > 0;
     }
+    SystemBars.apply(icons: Brightness.light, contrast: true, forceShow: covered);
+    unawaited(AndroidBridge.applySystemBars(
+      lightIcons: true,
+      contrast: true,
+      hide: appSettings.alwaysHideNavBar && !covered,
+    ));
   }
 
   void _syncPip() {
@@ -463,6 +471,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_applySpeed());
       unawaited(AndroidBridge.preparePreview(item.path));
       unawaited(_applyEq());
+      unawaited(_loadCaptions());
+      unawaited(AndroidBridge.applyPlaybackGuard(
+        antiCrash: appSettings.antiBufferCrash,
+        lowMem: appSettings.lowMemoryBuffer,
+      ));
       _applyRotation();
       if (mounted && gen == _playerGen) setState(() => ready = true);
       _armHide();
@@ -643,9 +656,63 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     vc?.removeListener(_tick);
     _persistProgress();
     unawaited(_unhookBrightness());
+    if (_handedOff) {
+      if (!PlaybackSession.keepAlive) {
+        final dying = vc;
+        vc = null;
+        try {
+          dying?.dispose();
+        } catch (_) {}
+        unawaited(AndroidBridge.stopBackground());
+        unawaited(AndroidBridge.abandonAudioFocus());
+      }
+    } else {
+      var keep = false;
+      try {
+        keep = (appSettings.inAppMiniplayer || appSettings.backgroundPlay) &&
+            vc != null &&
+            ready &&
+            (vc?.value.isInitialized ?? false);
+      } catch (_) {
+        keep = false;
+      }
+      if (keep && vc != null) {
+        PlaybackSession.keepAlive = true;
+        PlaybackSession.controller = vc;
+        PlaybackSession.item = item;
+        PlaybackSession.playlist = List<VideoItem>.from(list);
+        PlaybackSession.index = index;
+        PlaybackSession.speed = speed;
+        PlaybackSession.aspect = aspect;
+        unawaited(_syncBackground());
+      } else {
+        PlaybackSession.keepAlive = false;
+        final dying = vc;
+        vc = null;
+        try {
+          dying?.dispose();
+        } catch (_) {}
+        unawaited(AndroidBridge.stopBackground());
+        unawaited(AndroidBridge.abandonAudioFocus());
+        unawaited(AndroidBridge.preparePreview(''));
+      }
+    }
+    WakelockPlus.disable();
+    AndroidBridge.setKeepScreenOn(false);
+    AndroidBridge.setPlaying(false);
+    AndroidBridge.setPipEnabled(false);
+    AndroidBridge.setOrientation('sensor');
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  void _armMiniThenPop() {
+    if (_handedOff) return;
+    _handedOff = true;
+    final want = appSettings.inAppMiniplayer || appSettings.backgroundPlay;
     var keep = false;
     try {
-      keep = vc != null && ready && (vc?.value.isInitialized ?? false);
+      keep = want && vc != null && ready && (vc?.value.isInitialized ?? false);
     } catch (_) {
       keep = false;
     }
@@ -660,30 +727,29 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_syncBackground());
     } else {
       PlaybackSession.keepAlive = false;
-      final dying = vc;
-      vc = null;
-      try {
-        dying?.dispose();
-      } catch (_) {}
-      unawaited(AndroidBridge.stopBackground());
-      unawaited(AndroidBridge.abandonAudioFocus());
-      unawaited(AndroidBridge.preparePreview(''));
     }
-    WakelockPlus.disable();
-    AndroidBridge.setKeepScreenOn(false);
-    AndroidBridge.setPlaying(false);
-    AndroidBridge.setPipEnabled(false);
-    AndroidBridge.setOrientation('sensor');
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    super.dispose();
+    if (mounted) Navigator.pop(context);
   }
 
-  double _safeBottom(BuildContext context) {
-    // View padding is the real nav / cutout. Gesture insets are not layout
-    // padding — treating them as such built a full-screen hit sink that ate
-    // every control tap.
-    final pad = MediaQuery.viewPaddingOf(context);
-    return pad.bottom.clamp(0.0, 56.0);
+  Future<void> _loadCaptions() async {
+    CaptionBook book = CaptionBook([]);
+    try {
+      if (!item.path.startsWith('content:')) {
+        book = CaptionBook.parseSidecar(item.path);
+      }
+    } catch (_) {}
+    try {
+      final embedded = await AndroidBridge.extractCaptions(item.path);
+      book.merge(CaptionBook.fromMaps(embedded));
+    } catch (_) {}
+    if (appSettings.captions || appSettings.liveCaptions) {
+      try {
+        final spoken = await AndroidBridge.transcribeVideo(item.path);
+        book.merge(CaptionBook.fromMaps(spoken));
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _captions = book);
   }
 
   @override
@@ -691,8 +757,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final c = vc;
     final size = MediaQuery.sizeOf(context);
     final pad = MediaQuery.viewPaddingOf(context);
-    final safeBottom = _safeBottom(context);
-    return Scaffold(
+    final captionText = (appSettings.captions || appSettings.liveCaptions)
+        ? _captions.at(c?.value.position ?? Duration.zero)
+        : '';
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _armMiniThenPop();
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemBars.overlay(icons: Brightness.light),
+        child: Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
       body: Listener(
@@ -880,7 +956,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             if (locked)
               Positioned(
                 right: 16 + pad.right,
-                bottom: 24 + safeBottom,
+                bottom: 24 + pad.bottom,
                 child: IconButton.filledTonal(
                   onPressed: () {
                     setState(() {
@@ -893,11 +969,41 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   icon: const Icon(Icons.lock_open),
                 ),
               ),
+            if (captionText.isNotEmpty)
+              Positioned(
+                left: 24 + pad.left,
+                right: 24 + pad.right,
+                bottom: (showUi && !locked ? 128 : 28) + pad.bottom,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: appSettings.subtitleBgOpacity.clamp(0.0, 0.85)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: Text(
+                        captionText,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16 * appSettings.captionSize,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          shadows: const [Shadow(color: Color(0x99000000), blurRadius: 8)],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (showUi && !locked) ..._chrome(c, size),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
           ],
         ),
       ),
+    ),
+    ),
     );
   }
 
@@ -1277,15 +1383,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final playing = c?.value.isPlaying ?? false;
     final remain = dur - pos;
     final pad = MediaQuery.viewPaddingOf(context);
-    final safeBottom = _safeBottom(context);
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
     final wide = size.width >= 600;
     return [
       Positioned(
         top: 0,
-        left: 0,
-        right: 0,
+        left: pad.left,
+        right: pad.right,
         child: Listener(
           onPointerDown: (_) => _holdChrome(true),
           onPointerUp: (_) => _holdChrome(false),
@@ -1299,7 +1404,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             children: [
               Row(
                 children: [
-                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white)),
+                  IconButton(onPressed: _armMiniThenPop, icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white)),
                   Expanded(
                     child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                   ),
@@ -1349,15 +1454,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         ),
       ),
       Positioned(
-        left: 0,
-        right: 0,
+        left: pad.left,
+        right: pad.right,
         bottom: 0,
         child: Listener(
           onPointerDown: (_) => _holdChrome(true),
           onPointerUp: (_) => _holdChrome(false),
           onPointerCancel: (_) => _holdChrome(false),
           child: Container(
-          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + safeBottom),
+          padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
           ),
@@ -1722,7 +1827,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        final pad = MediaQuery.paddingOf(ctx);
+        final pad = MediaQuery.viewPaddingOf(ctx);
         final insets = MediaQuery.viewInsetsOf(ctx);
         return DraggableScrollableSheet(
           expand: false,
@@ -1794,18 +1899,37 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _more() async {
-    await showModalBottomSheet<void>(
+    const sections = <String, List<String>>{
+      'Playback': ['speed', 'lock', 'ab', 'skipBack', 'skipForward', 'playopt', 'decoder', 'timer', 'repeat'],
+      'Audio': ['background', 'eq'],
+      'Picture': ['screenshot', 'aspect', 'brightness', 'rotate', 'night', 'zoom', 'color', 'mirror', 'invert', 'subtitle'],
+      'System': ['popup', 'navbar', 'cast'],
+      'File': ['bookmark', 'share', 'properties', 'delete'],
+    };
+    const toggles = {'background', 'popup', 'subtitle', 'night', 'mirror', 'invert', 'navbar', 'bookmark'};
+    bool onFor(String id) => switch (id) {
+          'background' => appSettings.backgroundPlay,
+          'popup' => appSettings.autoMiniplayer,
+          'subtitle' => appSettings.captions,
+          'night' => night,
+          'mirror' => mirror,
+          'invert' => invert,
+          'navbar' => appSettings.alwaysHideNavBar,
+          'bookmark' => item.bookmarked || appSettings.bookmarks.contains(item.path),
+          _ => false,
+        };
+    final seen = <String>{};
+    await SystemBars.modal(() => showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
         final pad = MediaQuery.viewPaddingOf(ctx);
-        final insets = MediaQuery.viewInsetsOf(ctx);
         return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.86,
           builder: (_, sc) => ListView(
             controller: sc,
-            padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom + 16),
+            padding: EdgeInsets.fromLTRB(pad.left, 0, pad.right, pad.bottom + 16),
             children: [
               const ListTile(title: Text('More', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
               ListTile(
@@ -1821,21 +1945,50 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   );
                 },
               ),
-              for (final e in AppSettings.allQuickActions.entries)
-                ListTile(
-                  leading: Icon(_actionIcon(e.key)),
-                  title: Text(e.value),
-                  subtitle: _actionSub(e.key) == null ? null : Text(_actionSub(e.key)!),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await _runAction(e.key);
-                  },
+              for (final section in sections.entries) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  child: Text(section.key, style: TextStyle(color: Theme.of(ctx).colorScheme.primary, fontWeight: FontWeight.w700)),
                 ),
+                for (final id in section.value)
+                  if (AppSettings.allQuickActions.containsKey(id) && seen.add(id))
+                    toggles.contains(id)
+                        ? SwitchListTile(
+                            secondary: Icon(_actionIcon(id)),
+                            title: Text(AppSettings.allQuickActions[id]!),
+                            subtitle: _actionSub(id) == null ? null : Text(_actionSub(id)!),
+                            value: onFor(id),
+                            onChanged: (_) async {
+                              Navigator.pop(ctx);
+                              await _runAction(id);
+                            },
+                          )
+                        : ListTile(
+                            leading: Icon(_actionIcon(id)),
+                            title: Text(AppSettings.allQuickActions[id]!),
+                            subtitle: _actionSub(id) == null ? null : Text(_actionSub(id)!),
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await _runAction(id);
+                            },
+                          ),
+              ],
+              for (final e in AppSettings.allQuickActions.entries)
+                if (seen.add(e.key))
+                  ListTile(
+                    leading: Icon(_actionIcon(e.key)),
+                    title: Text(e.value),
+                    subtitle: _actionSub(e.key) == null ? null : Text(_actionSub(e.key)!),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await _runAction(e.key);
+                    },
+                  ),
             ],
           ),
         );
       },
-    );
+    ));
   }
 
   IconData _actionIcon(String id) => switch (id) {
@@ -1883,10 +2036,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   Future<void> _simple(String t, String b) async {
     if (!mounted) return;
-    await showDialog<void>(
+    await SystemBars.modal(() => showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(title: Text(t), content: Text(b), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))]),
-    );
+    ));
   }
 
   Future<void> _speedSheet() async {
@@ -1898,7 +2051,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = MediaQuery.paddingOf(ctx);
+        final pad = MediaQuery.viewPaddingOf(ctx);
         return StatefulBuilder(builder: (ctx, ss) {
           return Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
@@ -2401,4 +2554,35 @@ class _HudChip extends StatelessWidget {
       child: child,
     );
   }
+}
+
+class PlayerSlideRoute<T> extends PageRouteBuilder<T> {
+  PlayerSlideRoute({required Widget page})
+      : super(
+          opaque: false,
+          barrierColor: Colors.transparent,
+          transitionDuration: const Duration(milliseconds: 380),
+          reverseTransitionDuration: const Duration(milliseconds: 320),
+          pageBuilder: (context, animation, secondaryAnimation) => page,
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            final curved = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+              reverseCurve: Curves.easeInCubic,
+            );
+            return AnimatedBuilder(
+              animation: curved,
+              builder: (context, child) {
+                return ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.55 * curved.value),
+                  child: child,
+                );
+              },
+              child: SlideTransition(
+                position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
+                child: FadeTransition(opacity: curved, child: child),
+              ),
+            );
+          },
+        );
 }

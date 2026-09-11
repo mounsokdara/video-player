@@ -8,6 +8,8 @@ import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
 import 'crash.dart';
+import 'hud.dart';
+import 'insets.dart';
 import 'library.dart';
 import 'main.dart';
 import 'mini_player.dart';
@@ -161,8 +163,8 @@ class _HomeShellState extends State<HomeShell> {
     await CrashLog.breadcrumb('Play ${item.path}');
     final list = playlist ?? visible;
     final i = list.indexWhere((v) => v.id == item.id);
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PlayerPage(
+    await Navigator.of(context).push(PlayerSlideRoute(
+      page: PlayerPage(
         playlist: list,
         index: i < 0 ? 0 : i,
         onChanged: () => setState(() {}),
@@ -199,12 +201,13 @@ class _HomeShellState extends State<HomeShell> {
     for (final v in library.videos) {
       if (v.path == path) item = v;
     }
+    final content = path.startsWith('content:');
     item ??= VideoItem(
       id: path,
       path: path,
-      title: p.basename(path),
-      folder: p.dirname(path),
-      size: File(path).existsSync() ? File(path).lengthSync() : 0,
+      title: content ? 'Imported video' : p.basename(path),
+      folder: content ? 'Imported' : p.dirname(path),
+      size: content ? 0 : (File(path).existsSync() ? File(path).lengthSync() : 0),
       modified: DateTime.now(),
     );
     if (library.videos.every((v) => v.path != path)) {
@@ -241,13 +244,65 @@ class _HomeShellState extends State<HomeShell> {
     _toggleMaster(visible.map((v) => v.id));
   }
 
+  void _toggleFolder(String folderPath) {
+    final ids = library.videos
+        .where((v) => v.folder == folderPath || v.path.startsWith('$folderPath/'))
+        .map((v) => v.id)
+        .toList();
+    setState(() {
+      selecting = true;
+      if (ids.isEmpty) return;
+      final allOn = ids.every(selected.contains);
+      if (allOn) {
+        selected.removeAll(ids);
+      } else {
+        selected.addAll(ids);
+      }
+    });
+  }
+
+  Future<void> _pickVideo() async {
+    final uri = await AndroidBridge.pickVideo();
+    if (uri == null || uri.isEmpty || !mounted) return;
+    await _openPath(uri);
+  }
+
+  void _onHud(String id) {
+    switch (id) {
+      case 'pick':
+        unawaited(_pickVideo());
+      case 'search':
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SearchPage(onOpen: _open, onToggleSelect: _toggleSelect),
+        ));
+      case 'eq':
+        unawaited(_onOverflow('eq'));
+      case 'refresh':
+        unawaited(_refresh());
+      case 'select':
+        setState(() => selecting = true);
+      case 'sort':
+        unawaited(_sortSheet());
+      case 'layout':
+        setState(() => layout = layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list);
+      default:
+        unawaited(_onOverflow(id));
+    }
+  }
+
   void _toggleMasterFolder() {
     final path = folderPath;
     if (path == null) {
       _toggleMaster(library.videos.map((v) => v.id));
       return;
     }
-    _toggleMaster(library.listDir(path).whereType<File>().map((e) => e.path));
+    final ids = library.listDir(path).whereType<File>().map((e) {
+      for (final v in library.videos) {
+        if (v.path == e.path) return v.id;
+      }
+      return e.path;
+    });
+    _toggleMaster(ids);
   }
 
   void _toggleMaster(Iterable<String> ids) {
@@ -331,6 +386,7 @@ class _HomeShellState extends State<HomeShell> {
           selected: selected,
           onSelectMode: () => setState(() => selecting = true),
           onToggleMaster: _toggleMasterFolder,
+          onToggleFolder: _toggleFolder,
           onClearSelect: () => setState(() {
             selecting = false;
             selected.clear();
@@ -349,6 +405,7 @@ class _HomeShellState extends State<HomeShell> {
     final hidden = appSettings.hiddenTabs;
     return [
       const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
+      const PopupMenuItem(value: 'pick', child: Text('Import video')),
       const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
       if (includeSelect) const PopupMenuItem(value: 'select', child: Text('Select')),
       const PopupMenuItem(value: 'crash', child: Text('Crash report')),
@@ -368,6 +425,8 @@ class _HomeShellState extends State<HomeShell> {
       }
     } else if (v == 'refresh') {
       await _refresh();
+    } else if (v == 'pick') {
+      await _pickVideo();
     } else if (v == 'select') {
       setState(() => selecting = true);
     } else if (v == 'crash') {
@@ -422,6 +481,7 @@ class _HomeShellState extends State<HomeShell> {
               selected: selected,
               onSelectMode: () => setState(() => selecting = true),
               onToggleMaster: _toggleMasterFolder,
+              onToggleFolder: _toggleFolder,
               onClearSelect: () => setState(() {
                 selecting = false;
                 selected.clear();
@@ -489,13 +549,17 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     final body = pageFor(current);
-    final pad = MediaQuery.viewPaddingOf(context);
+    final pad = SystemBars.of(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    SystemBars.alwaysHide = false;
+    SystemBars.apply(icons: dark ? Brightness.light : Brightness.dark, contrast: true);
+    final fabs = decodeHud(appSettings.hudFabsJson);
 
     Widget shell(Widget child) {
       return Stack(
         children: [
           child,
-          if (PlaybackSession.active)
+          if (PlaybackSession.active && appSettings.inAppMiniplayer)
             MiniPlayerOverlay(
               pad: pad,
               navH: wide || tabs.length <= 1 ? 16.0 : 88.0,
@@ -510,13 +574,17 @@ class _HomeShellState extends State<HomeShell> {
               onPrev: () => _sessionSkip(-1),
               onNext: () => _sessionSkip(1),
             ),
+          if (fabs.isNotEmpty)
+            HudLayer(fabs: fabs, pad: pad, onTap: _onHud),
         ],
       );
     }
 
     if (wide) {
       return Scaffold(
-        body: shell(
+        body: Padding(
+          padding: EdgeInsets.only(left: pad.left, right: pad.right),
+          child: shell(
           Row(
             children: [
               NavigationRail(
@@ -534,12 +602,16 @@ class _HomeShellState extends State<HomeShell> {
               Expanded(child: body),
             ],
           ),
+          ),
         ),
       );
     }
 
     return Scaffold(
-      body: shell(body),
+      body: Padding(
+        padding: EdgeInsets.only(left: pad.left, right: pad.right),
+        child: shell(body),
+      ),
       bottomNavigationBar: tabs.length <= 1
           ? null
           : NavigationBar(
@@ -666,7 +738,7 @@ class VideosHub extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     return RefreshIndicator(
       displacement: 40,
       edgeOffset: pad.top + kToolbarHeight,
@@ -685,14 +757,30 @@ class VideosHub extends StatelessWidget {
                 IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
                 IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
               ] else ...[
-                IconButton(
-                  onPressed: () => onSearch(true),
-                  icon: const Icon(Icons.search),
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (v) => onOverflow?.call(v),
-                  itemBuilder: (_) => overflow,
-                ),
+                for (final id in appSettings.titleActions)
+                  if (id == 'search')
+                    IconButton(onPressed: () => onSearch(true), icon: const Icon(Icons.search), tooltip: 'Search')
+                  else if (id == 'select')
+                    IconButton(onPressed: onSelectMode, icon: const Icon(Icons.checklist), tooltip: 'Select')
+                  else if (id == 'layout')
+                    IconButton(
+                      tooltip: layout == LayoutMode.list ? 'Grid' : 'List',
+                      onPressed: () => onLayout(layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list),
+                      icon: Icon(layout == LayoutMode.list ? Icons.grid_view : Icons.view_list),
+                    )
+                  else if (id == 'sort')
+                    IconButton(tooltip: 'Sort', onPressed: onSort, icon: const Icon(Icons.sort))
+                  else if (id == 'eq')
+                    IconButton(tooltip: 'Equalizer', onPressed: () => onOverflow?.call('eq'), icon: const Icon(Icons.equalizer))
+                  else if (id == 'refresh')
+                    IconButton(tooltip: 'Refresh', onPressed: onRefresh, icon: const Icon(Icons.refresh))
+                  else if (id == 'pick')
+                    IconButton(tooltip: 'Import video', onPressed: () => onOverflow?.call('pick'), icon: const Icon(Icons.video_file_outlined))
+                  else if (id == 'overflow' && overflow.isNotEmpty)
+                    PopupMenuButton<String>(
+                      onSelected: (v) => onOverflow?.call(v),
+                      itemBuilder: (_) => overflow,
+                    ),
               ],
             ],
           ),
@@ -870,6 +958,7 @@ class FoldersHub extends StatelessWidget {
     this.selected = const {},
     this.onSelectMode,
     this.onToggleMaster,
+    this.onToggleFolder,
     this.onClearSelect,
     this.overflow = const [],
     this.onOverflow,
@@ -886,6 +975,7 @@ class FoldersHub extends StatelessWidget {
   final Set<String> selected;
   final VoidCallback? onSelectMode;
   final VoidCallback? onToggleMaster;
+  final void Function(String folderPath)? onToggleFolder;
   final VoidCallback? onClearSelect;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
@@ -894,7 +984,7 @@ class FoldersHub extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final pad = MediaQuery.paddingOf(context);
+    final pad = MediaQuery.viewPaddingOf(context);
     final roots = library.volumes;
     final path = folderPath;
     if (path == null) {
@@ -963,14 +1053,19 @@ class FoldersHub extends StatelessWidget {
                     leading: const Icon(Icons.folder_outlined),
                     title: Text(f.name),
                     subtitle: Text('${f.videoCount} videos · ${formatBytes(f.size)}'),
-                    onTap: () => onPath(f.path, [f.path]),
-                    onLongPress: () => showFolderEntryMenu(
-                      context,
-                      path: f.path,
-                      isDir: true,
-                      onChanged: () => onRefresh(),
-                      onOpen: () => onPath(f.path, [f.path]),
-                    ),
+                    selected: selecting && library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).every((v) => selected.contains(v.id)) && library.videos.any((v) => v.folder == f.path || v.path.startsWith('${f.path}/')),
+                    trailing: selecting
+                        ? Checkbox(
+                            value: library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).isNotEmpty &&
+                                library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).every((v) => selected.contains(v.id)),
+                            onChanged: (_) => onToggleFolder?.call(f.path),
+                          )
+                        : null,
+                    onTap: () => selecting ? onToggleFolder?.call(f.path) : onPath(f.path, [f.path]),
+                    onLongPress: () {
+                      onSelectMode?.call();
+                      onToggleFolder?.call(f.path);
+                    },
                   ),
               ]),
             ),
@@ -981,7 +1076,13 @@ class FoldersHub extends StatelessWidget {
 
     final ents = library.listDir(path);
     final files = ents.whereType<File>().toList();
-    final allOn = files.isNotEmpty && files.every((f) => selected.contains(f.path));
+    final fileIds = files.map((e) {
+      for (final v in library.videos) {
+        if (v.path == e.path) return v.id;
+      }
+      return e.path;
+    }).toList();
+    final allOn = fileIds.isNotEmpty && fileIds.every(selected.contains);
     return Column(
       children: [
         AppBar(
@@ -1102,12 +1203,21 @@ class FoldersHub extends StatelessWidget {
                     },
                   ),
                 ),
-                onLongPress: () => showFolderEntryMenu(
-                  context,
-                  path: e.path,
-                  isDir: isDir,
-                  onChanged: () => onRefresh(),
-                ),
+                onLongPress: () {
+                  if (isDir) {
+                    showFolderEntryMenu(
+                      context,
+                      path: e.path,
+                      isDir: true,
+                      onChanged: () => onRefresh(),
+                      onOpen: () => onPath(e.path, [...folderTrail, e.path]),
+                    );
+                    return;
+                  }
+                  if (video == null) return;
+                  onSelectMode?.call();
+                  onToggleSelect(video);
+                },
                 onTap: () {
                   if (isDir) {
                     onPath(e.path, [...folderTrail, e.path]);
@@ -1180,7 +1290,7 @@ class _SearchPageState extends State<SearchPage> {
           ? const Center(child: Text('No matches'))
           : ListView.builder(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 24),
+              padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom + 24),
               itemCount: items.length,
               itemBuilder: (_, i) {
                 final item = items[i];

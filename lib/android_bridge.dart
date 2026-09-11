@@ -385,6 +385,51 @@ class AndroidBridge {
     }
   }
 
+  static Future<String?> pickVideo() async {
+    try {
+      return await _ch.invokeMethod<String>('pickVideo');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> applyPlaybackGuard({required bool antiCrash, required bool lowMem}) async {
+    try {
+      await _ch.invokeMethod('applyPlaybackGuard', {
+        'antiCrash': antiCrash,
+        'lowMem': lowMem,
+      });
+    } catch (_) {}
+  }
+
+  static Future<List<Map<String, dynamic>>> extractCaptions(String path) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('extractCaptions', {'path': path}) ?? [];
+      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> transcribeVideo(String path) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('transcribeVideo', {'path': path}) ?? [];
+      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> applySystemBars({required bool lightIcons, required bool contrast, required bool hide}) async {
+    try {
+      await _ch.invokeMethod('applySystemBars', {
+        'lightIcons': lightIcons,
+        'contrast': contrast,
+        'hide': hide,
+      });
+    } catch (_) {}
+  }
+
   static Future<void> breadcrumb(String action) async {
     try {
       await _ch.invokeMethod('breadcrumb', {'action': action});

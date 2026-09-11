@@ -223,16 +223,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
 
     var x = _pos.dx;
     var y = _pos.dy.clamp(widget.pad.top + 6, math.max(widget.pad.top + 6, screen.height - h - widget.navH - 8));
-    final flungLeft = _vel.dx < -880;
-    final flungRight = _vel.dx > 880;
-    final pastLeft = _pos.dx < -_peek || cx < screen.width * 0.18;
-    final pastRight = _pos.dx + w > screen.width + _peek || cx > screen.width * 0.82;
 
-    if (flungLeft || (pastLeft && !flungRight) || (_hideDir == -1 && cx < screen.width * 0.32)) {
+    // YouTube: hide only when the window is already at/past the peek.
+    // A fling while still on-screen snaps fully visible to the nearest side.
+    if (_pos.dx <= _peek - w + 1) {
       x = _peek - w;
       _hiding = true;
       _hideDir = -1;
-    } else if (flungRight || (pastRight && !flungLeft) || (_hideDir == 1 && cx > screen.width * 0.68)) {
+    } else if (_pos.dx >= screen.width - _peek - 1) {
       x = screen.width - _peek;
       _hiding = true;
       _hideDir = 1;

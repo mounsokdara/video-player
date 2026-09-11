@@ -109,5 +109,15 @@
         <intent>
             <action android:name="android.settings.REQUEST_MANAGE_MEDIA" />
         </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.provider.action.PICK_IMAGES" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="video/*" />
+        </intent>
     </queries>
 </manifest>

@@ -268,7 +268,7 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
     context: context,
     showDragHandle: true,
     builder: (ctx) {
-      final pad = MediaQuery.paddingOf(ctx);
+      final pad = MediaQuery.viewPaddingOf(ctx);
       final insets = MediaQuery.viewInsetsOf(ctx);
       return Padding(
         padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
@@ -421,7 +421,7 @@ Future<void> showProperties(BuildContext context, VideoItem item) async {
     context: context,
     isScrollControlled: true,
     builder: (ctx) {
-      final pad = MediaQuery.paddingOf(ctx);
+      final pad = MediaQuery.viewPaddingOf(ctx);
       final insets = MediaQuery.viewInsetsOf(ctx);
       return DraggableScrollableSheet(
         expand: false,
@@ -566,7 +566,7 @@ Future<void> showFolderEntryMenu(
     context: context,
     showDragHandle: true,
     builder: (ctx) {
-      final pad = MediaQuery.paddingOf(ctx);
+      final pad = MediaQuery.viewPaddingOf(ctx);
       final insets = MediaQuery.viewInsetsOf(ctx);
       return Padding(
         padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),

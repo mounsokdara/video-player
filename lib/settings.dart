@@ -35,6 +35,9 @@ class AppSettings {
   bool hwPriority = true;
   int seekStepSeconds = 10;
   bool autoMiniplayer = false;
+  bool inAppMiniplayer = true;
+  bool antiBufferCrash = true;
+  bool lowMemoryBuffer = true;
   bool rememberBackgroundPlay = false;
   bool backgroundPlay = false;
   bool rememberAspect = true;
@@ -138,6 +141,10 @@ class AppSettings {
 
   List<String> quickActions = List<String>.from(defaultQuickActions);
 
+  static const defaultTitleActions = <String>['search', 'overflow'];
+  List<String> titleActions = List<String>.from(defaultTitleActions);
+  String hudFabsJson = '[]';
+
   static const eqBandHz = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
   static const eqPresets = <String, List<int>>{
@@ -209,6 +216,9 @@ class AppSettings {
     hwPriority = p.getBool('hwPriority') ?? true;
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
     autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
+    inAppMiniplayer = p.getBool('inAppMiniplayer') ?? true;
+    antiBufferCrash = p.getBool('antiBufferCrash') ?? true;
+    lowMemoryBuffer = p.getBool('lowMemoryBuffer') ?? true;
     if (p.getBool('pipDefaultOffV2') != true) {
       autoMiniplayer = false;
       await p.setBool('autoMiniplayer', false);
@@ -273,6 +283,10 @@ class AppSettings {
     quickActions.removeWhere((id) => !allQuickActions.containsKey(id));
     if (quickActions.isEmpty) quickActions = List<String>.from(defaultQuickActions);
 
+    titleActions = List<String>.from(p.getStringList('titleActions') ?? defaultTitleActions);
+    if (titleActions.isEmpty) titleActions = List<String>.from(defaultTitleActions);
+    hudFabsJson = p.getString('hudFabsJson') ?? '[]';
+
     eqEnabled = p.getBool('eqEnabled') ?? false;
     eqPreset = p.getString('eqPreset') ?? 'Flat';
     bassBoostOn = p.getBool('bassBoostOn') ?? false;
@@ -329,6 +343,9 @@ class AppSettings {
     await p.setBool('hwPriority', hwPriority);
     await p.setInt('seekStepSeconds', seekStepSeconds);
     await p.setBool('autoMiniplayer', autoMiniplayer);
+    await p.setBool('inAppMiniplayer', inAppMiniplayer);
+    await p.setBool('antiBufferCrash', antiBufferCrash);
+    await p.setBool('lowMemoryBuffer', lowMemoryBuffer);
     await p.setBool('rememberBackgroundPlay', rememberBackgroundPlay);
     await p.setBool('backgroundPlay', backgroundPlay);
     await p.setBool('rememberAspect', rememberAspect);
@@ -380,6 +397,8 @@ class AppSettings {
     await p.setBool('alwaysHideNavBar', alwaysHideNavBar);
     await p.setStringList('hiddenTabs', hiddenTabs);
     await p.setStringList('quickActions', quickActions);
+    await p.setStringList('titleActions', titleActions);
+    await p.setString('hudFabsJson', hudFabsJson);
     await p.setBool('eqEnabled', eqEnabled);
     await p.setString('eqPreset', eqPreset);
     await p.setString('eqBands', jsonEncode(eqBands));
