@@ -8,7 +8,6 @@ import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
 import 'crash.dart';
-import 'hud.dart';
 import 'insets.dart';
 import 'library.dart';
 import 'main.dart';
@@ -261,35 +260,6 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  Future<void> _pickVideo() async {
-    final uri = await AndroidBridge.pickVideo();
-    if (uri == null || uri.isEmpty || !mounted) return;
-    await _openPath(uri);
-  }
-
-  void _onHud(String id) {
-    switch (id) {
-      case 'pick':
-        unawaited(_pickVideo());
-      case 'search':
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => SearchPage(onOpen: _open, onToggleSelect: _toggleSelect),
-        ));
-      case 'eq':
-        unawaited(_onOverflow('eq'));
-      case 'refresh':
-        unawaited(_refresh());
-      case 'select':
-        setState(() => selecting = true);
-      case 'sort':
-        unawaited(_sortSheet());
-      case 'layout':
-        setState(() => layout = layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list);
-      default:
-        unawaited(_onOverflow(id));
-    }
-  }
-
   void _toggleMasterFolder() {
     final path = folderPath;
     if (path == null) {
@@ -391,6 +361,8 @@ class _HomeShellState extends State<HomeShell> {
             selecting = false;
             selected.clear();
           }),
+          onShareSelected: _shareSelected,
+          onDeleteSelected: _deleteSelected,
           overflow: _overflowItems(includeSelect: false),
           onOverflow: _onOverflow,
           onRefresh: _refresh,
@@ -405,7 +377,6 @@ class _HomeShellState extends State<HomeShell> {
     final hidden = appSettings.hiddenTabs;
     return [
       const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
-      const PopupMenuItem(value: 'pick', child: Text('Import video')),
       const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
       if (includeSelect) const PopupMenuItem(value: 'select', child: Text('Select')),
       const PopupMenuItem(value: 'crash', child: Text('Crash report')),
@@ -425,8 +396,6 @@ class _HomeShellState extends State<HomeShell> {
       }
     } else if (v == 'refresh') {
       await _refresh();
-    } else if (v == 'pick') {
-      await _pickVideo();
     } else if (v == 'select') {
       setState(() => selecting = true);
     } else if (v == 'crash') {
@@ -486,6 +455,8 @@ class _HomeShellState extends State<HomeShell> {
                 selecting = false;
                 selected.clear();
               }),
+              onShareSelected: _shareSelected,
+              onDeleteSelected: _deleteSelected,
               overflow: _overflowItems(includeSelect: false),
               onOverflow: _onOverflow,
               onRefresh: _refresh,
@@ -553,7 +524,6 @@ class _HomeShellState extends State<HomeShell> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     SystemBars.alwaysHide = false;
     SystemBars.apply(icons: dark ? Brightness.light : Brightness.dark, contrast: true);
-    final fabs = decodeHud(appSettings.hudFabsJson);
 
     Widget shell(Widget child) {
       return Stack(
@@ -574,8 +544,6 @@ class _HomeShellState extends State<HomeShell> {
               onPrev: () => _sessionSkip(-1),
               onNext: () => _sessionSkip(1),
             ),
-          if (fabs.isNotEmpty)
-            HudLayer(fabs: fabs, pad: pad, onTap: _onHud),
         ],
       );
     }
@@ -757,30 +725,12 @@ class VideosHub extends StatelessWidget {
                 IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
                 IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
               ] else ...[
-                for (final id in appSettings.titleActions)
-                  if (id == 'search')
-                    IconButton(onPressed: () => onSearch(true), icon: const Icon(Icons.search), tooltip: 'Search')
-                  else if (id == 'select')
-                    IconButton(onPressed: onSelectMode, icon: const Icon(Icons.checklist), tooltip: 'Select')
-                  else if (id == 'layout')
-                    IconButton(
-                      tooltip: layout == LayoutMode.list ? 'Grid' : 'List',
-                      onPressed: () => onLayout(layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list),
-                      icon: Icon(layout == LayoutMode.list ? Icons.grid_view : Icons.view_list),
-                    )
-                  else if (id == 'sort')
-                    IconButton(tooltip: 'Sort', onPressed: onSort, icon: const Icon(Icons.sort))
-                  else if (id == 'eq')
-                    IconButton(tooltip: 'Equalizer', onPressed: () => onOverflow?.call('eq'), icon: const Icon(Icons.equalizer))
-                  else if (id == 'refresh')
-                    IconButton(tooltip: 'Refresh', onPressed: onRefresh, icon: const Icon(Icons.refresh))
-                  else if (id == 'pick')
-                    IconButton(tooltip: 'Import video', onPressed: () => onOverflow?.call('pick'), icon: const Icon(Icons.video_file_outlined))
-                  else if (id == 'overflow' && overflow.isNotEmpty)
-                    PopupMenuButton<String>(
-                      onSelected: (v) => onOverflow?.call(v),
-                      itemBuilder: (_) => overflow,
-                    ),
+                IconButton(onPressed: () => onSearch(true), icon: const Icon(Icons.search), tooltip: 'Search'),
+                if (overflow.isNotEmpty)
+                  PopupMenuButton<String>(
+                    onSelected: (v) => onOverflow?.call(v),
+                    itemBuilder: (_) => overflow,
+                  ),
               ],
             ],
           ),
@@ -960,6 +910,8 @@ class FoldersHub extends StatelessWidget {
     this.onToggleMaster,
     this.onToggleFolder,
     this.onClearSelect,
+    this.onShareSelected,
+    this.onDeleteSelected,
     this.overflow = const [],
     this.onOverflow,
     required this.onRefresh,
@@ -977,9 +929,16 @@ class FoldersHub extends StatelessWidget {
   final VoidCallback? onToggleMaster;
   final void Function(String folderPath)? onToggleFolder;
   final VoidCallback? onClearSelect;
+  final Future<void> Function()? onShareSelected;
+  final Future<void> Function()? onDeleteSelected;
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
   final Future<void> Function() onRefresh;
+
+  bool _folderOn(String folderPath) {
+    final ids = library.videos.where((v) => v.folder == folderPath || v.path.startsWith('$folderPath/')).map((v) => v.id);
+    return ids.isNotEmpty && ids.every(selected.contains);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1001,6 +960,8 @@ class FoldersHub extends StatelessWidget {
             title: Text(selecting ? '${selected.length} selected' : 'Folders'),
             actions: [
               if (selecting) ...[
+                if (onShareSelected != null) IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
+                if (onDeleteSelected != null) IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
                 IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
               ] else ...[
                 IconButton(
@@ -1050,22 +1011,24 @@ class FoldersHub extends StatelessWidget {
                 const SizedBox(height: 8),
                 for (final f in library.folders)
                   ListTile(
-                    leading: const Icon(Icons.folder_outlined),
+                    leading: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        onSelectMode?.call();
+                        onToggleFolder?.call(f.path);
+                      },
+                      child: const SizedBox(width: 40, height: 40, child: Icon(Icons.folder_outlined)),
+                    ),
                     title: Text(f.name),
                     subtitle: Text('${f.videoCount} videos · ${formatBytes(f.size)}'),
-                    selected: selecting && library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).every((v) => selected.contains(v.id)) && library.videos.any((v) => v.folder == f.path || v.path.startsWith('${f.path}/')),
+                    selected: selecting && _folderOn(f.path),
                     trailing: selecting
                         ? Checkbox(
-                            value: library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).isNotEmpty &&
-                                library.videos.where((v) => v.folder == f.path || v.path.startsWith('${f.path}/')).every((v) => selected.contains(v.id)),
+                            value: _folderOn(f.path),
                             onChanged: (_) => onToggleFolder?.call(f.path),
                           )
                         : null,
                     onTap: () => selecting ? onToggleFolder?.call(f.path) : onPath(f.path, [f.path]),
-                    onLongPress: () {
-                      onSelectMode?.call();
-                      onToggleFolder?.call(f.path);
-                    },
                   ),
               ]),
             ),
@@ -1090,6 +1053,8 @@ class FoldersHub extends StatelessWidget {
           title: Text(selecting ? '${selected.length} selected' : (p.basename(path).isEmpty ? path : p.basename(path))),
           actions: [
             if (selecting) ...[
+              if (onShareSelected != null) IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
+              if (onDeleteSelected != null) IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
               IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
             ] else ...[
               if (library.clipPath != null)
@@ -1176,16 +1141,33 @@ class FoldersHub extends StatelessWidget {
                 );
               }
               return ListTile(
-                leading: isDir
-                    ? const Icon(Icons.folder)
-                    : SizedBox(width: 56, height: 36, child: video != null ? VideoThumb(item: video, radius: 6) : const Icon(Icons.movie_outlined)),
+                leading: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    onSelectMode?.call();
+                    if (isDir) {
+                      onToggleFolder?.call(e.path);
+                    } else if (video != null) {
+                      onToggleSelect(video);
+                    }
+                  },
+                  child: isDir
+                      ? const SizedBox(width: 40, height: 40, child: Icon(Icons.folder))
+                      : SizedBox(width: 56, height: 36, child: video != null ? VideoThumb(item: video, radius: 6) : const Icon(Icons.movie_outlined)),
+                ),
                 title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: isDir ? const Text('Folder') : Text(formatBytes(video?.size ?? 0)),
-                selected: !isDir && video != null && selected.contains(video.id),
-                trailing: selecting && !isDir
+                selected: isDir ? selecting && _folderOn(e.path) : video != null && selected.contains(video.id),
+                trailing: selecting
                     ? Checkbox(
-                        value: video != null && selected.contains(video.id),
-                        onChanged: video == null ? null : (_) => onToggleSelect(video!),
+                        value: isDir ? _folderOn(e.path) : video != null && selected.contains(video.id),
+                        onChanged: (_) {
+                          if (isDir) {
+                            onToggleFolder?.call(e.path);
+                          } else if (video != null) {
+                            onToggleSelect(video);
+                          }
+                        },
                       )
                     : IconButton(
                   icon: const Icon(Icons.more_vert),
@@ -1203,45 +1185,34 @@ class FoldersHub extends StatelessWidget {
                     },
                   ),
                 ),
-                onLongPress: () {
-                  if (isDir) {
-                    showFolderEntryMenu(
-                      context,
-                      path: e.path,
-                      isDir: true,
-                      onChanged: () => onRefresh(),
-                      onOpen: () => onPath(e.path, [...folderTrail, e.path]),
-                    );
+                onTap: () {
+                  if (selecting) {
+                    if (isDir) {
+                      onToggleFolder?.call(e.path);
+                    } else if (video != null) {
+                      onToggleSelect(video);
+                    }
                     return;
                   }
-                  if (video == null) return;
-                  onSelectMode?.call();
-                  onToggleSelect(video);
-                },
-                onTap: () {
                   if (isDir) {
                     onPath(e.path, [...folderTrail, e.path]);
                   } else if (video != null) {
-                    if (selecting) {
-                      onToggleSelect(video);
-                    } else {
-                      final vids = ents.whereType<File>().map((f) {
-                        VideoItem? found;
-                        for (final v in library.videos) {
-                          if (v.path == f.path) found = v;
-                        }
-                        return found ??
-                            VideoItem(
-                              id: f.path,
-                              path: f.path,
-                              title: p.basename(f.path),
-                              folder: path,
-                              size: f.lengthSync(),
-                              modified: f.statSync().modified,
-                            );
-                      }).toList();
-                      onOpen(video, playlist: vids);
-                    }
+                    final vids = ents.whereType<File>().map((f) {
+                      VideoItem? found;
+                      for (final v in library.videos) {
+                        if (v.path == f.path) found = v;
+                      }
+                      return found ??
+                          VideoItem(
+                            id: f.path,
+                            path: f.path,
+                            title: p.basename(f.path),
+                            folder: path,
+                            size: f.lengthSync(),
+                            modified: f.statSync().modified,
+                          );
+                    }).toList();
+                    onOpen(video, playlist: vids);
                   }
                 },
               );

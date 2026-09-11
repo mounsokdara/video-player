@@ -223,7 +223,8 @@ class MainActivity : FlutterActivity() {
                                 "locked" -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
                                 "user" -> ActivityInfo.SCREEN_ORIENTATION_USER
                                 "sensor", "auto" -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                                else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                                "none", "unspecified" -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                             }
                             result.success(true)
                         }
@@ -465,8 +466,27 @@ class MainActivity : FlutterActivity() {
                         "applyPlaybackGuard" -> {
                             val anti = call.argument<Boolean>("antiCrash") ?: true
                             val low = call.argument<Boolean>("lowMem") ?: true
-                            mainHandler.post { applyPlaybackGuard(anti, low) }
-                            result.success(true)
+                            val path = call.argument<String>("path") ?: ""
+                            io.execute {
+                                val out = try {
+                                    if (anti) VideoDecompressor.decompress(this, path, low) else path
+                                } catch (_: Throwable) {
+                                    path
+                                }
+                                mainHandler.post { result.success(out) }
+                            }
+                        }
+                        "decompressVideo" -> {
+                            val path = call.argument<String>("path") ?: ""
+                            val low = call.argument<Boolean>("lowMem") ?: true
+                            io.execute {
+                                val out = try {
+                                    VideoDecompressor.decompress(this, path, low)
+                                } catch (_: Throwable) {
+                                    path
+                                }
+                                mainHandler.post { result.success(out) }
+                            }
                         }
                         "extractCaptions" -> {
                             val path = call.argument<String>("path") ?: ""
@@ -1632,50 +1652,6 @@ class MainActivity : FlutterActivity() {
         }
         pickResult?.success(null)
         pickResult = null
-    }
-
-    private fun applyPlaybackGuard(antiCrash: Boolean, lowMemPref: Boolean) {
-        if (!antiCrash) return
-        val exo = findExoPlayer() ?: return
-        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
-        val mem = ActivityManager.MemoryInfo()
-        am.getMemoryInfo(mem)
-        val low = lowMemPref && (mem.lowMemory || mem.totalMem < 3L * 1024 * 1024 * 1024)
-        val dm = resources.displayMetrics
-        var maxW = if (low) 1280 else 1920
-        var maxH = if (low) 720 else 1080
-        val screenW = maxOf(dm.widthPixels, dm.heightPixels)
-        val screenH = minOf(dm.widthPixels, dm.heightPixels)
-        if (!low) {
-            maxW = maxOf(maxW, screenW)
-            maxH = maxOf(maxH, screenH)
-        }
-        val maxBr = if (low) 8_000_000 else 20_000_000
-        try {
-            val getParams = exo.javaClass.methods.firstOrNull {
-                it.name == "getTrackSelectionParameters" && it.parameterCount == 0
-            } ?: return
-            val params = getParams.invoke(exo) ?: return
-            val builder = params.javaClass.methods.firstOrNull {
-                it.name == "buildUpon" && it.parameterCount == 0
-            }?.invoke(params) ?: return
-            val bCls = builder.javaClass
-            bCls.methods.firstOrNull { it.name == "setMaxVideoSize" && it.parameterCount == 2 }
-                ?.invoke(builder, maxW, maxH)
-            bCls.methods.firstOrNull { it.name == "setMaxVideoBitrate" && it.parameterCount == 1 }
-                ?.invoke(builder, maxBr)
-            bCls.methods.firstOrNull { it.name == "setExceedVideoConstraintsIfNecessary" && it.parameterCount == 1 }
-                ?.invoke(builder, true)
-            if (low) {
-                bCls.methods.firstOrNull { it.name == "setMaxVideoSizeSd" && it.parameterCount == 0 }?.invoke(builder)
-            }
-            val built = bCls.methods.firstOrNull { it.name == "build" && it.parameterCount == 0 }?.invoke(builder)
-            exo.javaClass.methods.firstOrNull { it.name == "setTrackSelectionParameters" && it.parameterCount == 1 }
-                ?.invoke(exo, built)
-            breadcrumb("playbackGuard low=$low ${maxW}x$maxH br=$maxBr")
-        } catch (t: Throwable) {
-            breadcrumb("playbackGuard fail ${t.message}")
-        }
     }
 
     private fun extractCaptions(path: String): List<Map<String, Any?>> {

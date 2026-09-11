@@ -28,7 +28,21 @@ enum RotationLock {
   landscapeReverse,
   portraitNormal,
   portraitReverse,
-  locked,
+  none,
+}
+
+extension RotationLockLabel on RotationLock {
+  String get label => switch (this) {
+        RotationLock.none => 'None',
+        RotationLock.auto => 'Auto rotate sensor',
+        RotationLock.autoVideo => 'Auto rotate to video resolution',
+        RotationLock.landscape => 'Lock landscape',
+        RotationLock.portrait => 'Lock portrait',
+        RotationLock.landscapeNormal => 'Lock normal landscape',
+        RotationLock.landscapeReverse => 'Lock upside-down landscape',
+        RotationLock.portraitNormal => 'Lock portrait normal',
+        RotationLock.portraitReverse => 'Lock portrait upside-down',
+      };
 }
 
 enum DecoderMode { auto, hw, sw }

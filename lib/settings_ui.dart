@@ -48,8 +48,8 @@ class SettingsHub extends StatelessWidget {
           sliver: SliverList.list(children: [
             tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
             tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
-            tile(Icons.speed, 'Performance', 'Anti-buffer crash, quality caps', PerformanceSettings(onChanged: onChanged)),
-            tile(Icons.accessibility_new, 'Accessibility', 'Captions, color filters, motion, text', AccessSettings(onChanged: onChanged)),
+            tile(Icons.speed, 'Performance', 'Decompress video, low-memory size', PerformanceSettings(onChanged: onChanged)),
+            tile(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', AccessSettings(onChanged: onChanged)),
             tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
             ListTile(
@@ -182,19 +182,16 @@ class _GeneralSettingsState extends State<GeneralSettings> {
           ),
           ListTile(
             title: const Text('Quick actions'),
-            subtitle: const Text('Drag to reorder. Check to show on the player bar.'),
             trailing: const Icon(Icons.tune),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: widget.onChanged))),
           ),
           ListTile(
             title: const Text('Title bar buttons'),
-            subtitle: const Text('Show and reorder search, select, layout, sort, and the 3-dot menu'),
             trailing: const Icon(Icons.tune),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TitleBarEditor(onChanged: widget.onChanged))),
           ),
           ListTile(
             title: const Text('Floating action buttons'),
-            subtitle: const Text('Drag, resize, and add actions from More like a HUD'),
             trailing: const Icon(Icons.tune),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => HudEditorPage(onChanged: widget.onChanged))),
           ),
@@ -250,19 +247,34 @@ class _VideoSettingsState extends State<VideoSettings> {
           _h('Screen orientation'),
           ListTile(
             title: const Text('Default rotation'),
-            subtitle: Text(s.rotation.name),
+            subtitle: Text(s.rotation.label),
             onTap: () async {
+              final modes = <RotationLock>[
+                RotationLock.none,
+                RotationLock.auto,
+                RotationLock.autoVideo,
+                RotationLock.landscape,
+                RotationLock.portrait,
+                RotationLock.landscapeNormal,
+                RotationLock.landscapeReverse,
+                RotationLock.portraitNormal,
+                RotationLock.portraitReverse,
+              ];
               final v = await showModalBottomSheet<RotationLock>(
                 context: context,
-                builder: (ctx) => SafeArea(
-                  child: ListView(
+                isScrollControlled: true,
+                showDragHandle: true,
+                builder: (ctx) {
+                  final pad = MediaQuery.viewPaddingOf(context);
+                  return ListView(
                     shrinkWrap: true,
+                    padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 16),
                     children: [
-                      for (final e in RotationLock.values)
-                        ListTile(title: Text(e.name), onTap: () => Navigator.pop(ctx, e)),
+                      for (final e in modes)
+                        ListTile(title: Text(e.label), onTap: () => Navigator.pop(ctx, e)),
                     ],
-                  ),
-                ),
+                  );
+                },
               );
               if (v != null) set(() => s.rotation = v);
             },
@@ -298,10 +310,9 @@ class _VideoSettingsState extends State<VideoSettings> {
               ),
             ),
           ),
-          SwitchListTile(title: const Text('Auto Miniplayer / Pop-up'), subtitle: const Text('System picture-in-picture. Off by default. Only while a video is playing.'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
+          SwitchListTile(title: const Text('PIP'), value: s.autoMiniplayer, onChanged: (v) => set(() => s.autoMiniplayer = v)),
           SwitchListTile(
             title: const Text('Mini player'),
-            subtitle: const Text('Keep a YouTube-style in-app window when you leave the player. On by default.'),
             value: s.inAppMiniplayer,
             onChanged: (v) => set(() => s.inAppMiniplayer = v),
           ),
@@ -333,22 +344,6 @@ class _VideoSettingsState extends State<VideoSettings> {
             subtitle: const Text('Pinch to zoom the picture. On by default.'),
             value: s.allowZoom,
             onChanged: (v) => set(() => s.allowZoom = v),
-          ),
-          ListTile(
-            title: const Text('Preferred audio language'),
-            subtitle: Text(s.preferredAudio),
-            onTap: () async {
-              final v = await showModalBottomSheet<String>(
-                context: context,
-                builder: (ctx) => SafeArea(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    for (final l in ['auto', 'en', 'km', 'zh', 'ja', 'ko', 'hi', 'es', 'fr'])
-                      ListTile(title: Text(l), onTap: () => Navigator.pop(ctx, l)),
-                  ]),
-                ),
-              );
-              if (v != null) set(() => s.preferredAudio = v);
-            },
           ),
           SwitchListTile(title: const Text('Remember HDR mode'), value: s.rememberHdr, onChanged: (v) => set(() => s.rememberHdr = v)),
         ],
@@ -386,23 +381,6 @@ class _AccessSettingsState extends State<AccessSettings> {
       body: ListView(
         padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom + 24),
         children: [
-          _h('Captions'),
-          SwitchListTile(
-            title: const Text('Captions'),
-            subtitle: const Text('Sidecar SRT/VTT, embedded text tracks, and speech-to-text from the video audio. No microphone.'),
-            value: s.captions,
-            onChanged: (v) => set(() => s.captions = v),
-          ),
-          SwitchListTile(
-            title: const Text('Live captions'),
-            subtitle: const Text('Transcribe how people speak in the video. Uses the soundtrack, not the mic.'),
-            value: s.liveCaptions,
-            onChanged: (v) => set(() => s.liveCaptions = v),
-          ),
-          ListTile(
-            title: const Text('Caption size'),
-            subtitle: Slider(min: 0.8, max: 2, value: s.captionSize, onChanged: (v) => set(() => s.captionSize = v)),
-          ),
           _h('Display filters'),
           SwitchListTile(title: const Text('High contrast'), value: s.highContrast, onChanged: (v) => set(() => s.highContrast = v)),
           SwitchListTile(title: const Text('Grayscale'), value: s.grayscale, onChanged: (v) => set(() => s.grayscale = v)),
@@ -823,17 +801,18 @@ class _PerformanceSettingsState extends State<PerformanceSettings> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-            child: Text('Buffer', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
+            child: Text('Video', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
           ),
           SwitchListTile(
-            title: const Text('Anti-buffer crash'),
-            subtitle: const Text('Cap video size and bitrate so a jump from low quality to 8K does not fill RAM and kill the app. On by default.'),
-            value: s.antiBufferCrash,
-            onChanged: (v) => set(() => s.antiBufferCrash = v),
+            title: const Text('Decompress video'),
+            value: s.decompressVideo,
+            onChanged: (v) => set(() {
+              s.decompressVideo = v;
+              s.antiBufferCrash = v;
+            }),
           ),
           SwitchListTile(
-            title: const Text('Low-memory buffer'),
-            subtitle: const Text('On phones with little RAM, cap at 720p / 8 Mbps. On by default.'),
+            title: const Text('Low-memory size'),
             value: s.lowMemoryBuffer,
             onChanged: (v) => set(() => s.lowMemoryBuffer = v),
           ),

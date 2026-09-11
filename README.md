@@ -18,7 +18,7 @@ This app under development it's may have alot bugs
 - Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
 - Quick actions: screenshot, background play, speed (reorder and check from player More)
 - Background play uses a music-style notification with play / pause / next / previous and a seek bar
-- Open a video from another file manager
+- Open a video from another file manager; the app also appears in the system picker Open from sidebar
 - Screenshot the current frame to `DCIM/Screenshots`
 - Ten-band equalizer with presets, on/off on the player top bar, bass boost, and surround
 - Pitch shift (or time-stretch when off)
@@ -29,7 +29,8 @@ This app under development it's may have alot bugs
 - Settings persist (equalizer, tabs, resume, zoom, playback)
 - Deletes use `MANAGE_MEDIA` so Android does not show a confirmation sheet
 - Skips plain text and TypeScript files (`.ts` only if it is MPEG-TS)
-- Pop-up / PiP off by default and only while a video is actually playing
+- PIP (system picture-in-picture) off by default and only while a video is actually playing
+- Mini player keeps a 0–1 dock scale so pinch-resize stays on screen
 - Wide / large-DPI layout (navigation rail on tablets)
 
 ## Build

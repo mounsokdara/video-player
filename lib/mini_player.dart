@@ -33,7 +33,10 @@ class MiniPlayerOverlay extends StatefulWidget {
 
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProviderStateMixin {
   Offset _pos = Offset.zero;
+  double _nx = 1;
+  double _ny = 1;
   double _scale = 1;
+  bool _live = false;
   bool _ready = false;
   bool _hiding = false;
   int _hideDir = 0;
@@ -43,8 +46,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
   late final AnimationController _spring;
   late final AnimationController _appear;
 
-  Offset _from = Offset.zero;
-  Offset _to = Offset.zero;
+  double _fromNx = 1;
+  double _fromNy = 1;
+  double _toNx = 1;
+  double _toNy = 1;
   double _fromScale = 1;
   double _toScale = 1;
   double _bounce = 1;
@@ -91,15 +96,44 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     return Size(w, h + 40);
   }
 
+  ({double minX, double maxX, double minY, double maxY}) _range(Size screen, double w, double h) {
+    final minX = 10.0;
+    final maxX = math.max(minX, screen.width - w - 10.0);
+    final minY = widget.pad.top + 8.0;
+    final maxY = math.max(minY, screen.height - h - widget.navH - 8.0);
+    return (minX: minX, maxX: maxX, minY: minY, maxY: maxY);
+  }
+
+  Offset _pixel(Size screen, {double? scale, double? nx, double? ny, bool hiding = false, int hideDir = 0}) {
+    final s = scale ?? _scale;
+    final box = _boxFor(screen, _videoSize());
+    final w = box.width * s;
+    final h = box.height * s;
+    final r = _range(screen, w, h);
+    final nnx = nx ?? _nx;
+    final nny = ny ?? _ny;
+    final y = (r.minY + nny * (r.maxY - r.minY)).toDouble();
+    if (hiding) {
+      final x = hideDir < 0 ? _peek - w : screen.width - _peek;
+      return Offset(x, y);
+    }
+    return Offset((r.minX + nnx * (r.maxX - r.minX)).toDouble(), y);
+  }
+
+  void _captureNorm(Size screen, Offset p, {double? scale}) {
+    final s = scale ?? _scale;
+    final box = _boxFor(screen, _videoSize());
+    final w = box.width * s;
+    final h = box.height * s;
+    final r = _range(screen, w, h);
+    final spanX = math.max(1.0, r.maxX - r.minX);
+    final spanY = math.max(1.0, r.maxY - r.minY);
+    _nx = ((p.dx - r.minX) / spanX).clamp(0.0, 1.0);
+    _ny = ((p.dy - r.minY) / spanY).clamp(0.0, 1.0);
+  }
+
   Offset _dockPos(Size screen, Size box, {required bool right}) {
-    final w = box.width * _scale;
-    final h = box.height * _scale;
-    final x = right ? screen.width - w - 10 : 10.0;
-    final y = (screen.height - h - 12 - widget.navH - widget.pad.bottom).clamp(
-      widget.pad.top + 8,
-      math.max(widget.pad.top + 8, screen.height - 80),
-    );
-    return Offset(x, y.toDouble());
+    return _pixel(screen, nx: right ? 1.0 : 0.0, ny: 1.0, hiding: false);
   }
 
   @override
@@ -115,8 +149,11 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     final t = Curves.elasticOut.transform(raw.clamp(0.0, 1.0));
     final extra = (_bounce - 1) * math.sin(t * math.pi) * (1 - t);
     setState(() {
-      _pos = Offset.lerp(_from, _to, t)! + Offset(0, extra * 18 * _bounce.sign);
+      _nx = _fromNx + (_toNx - _fromNx) * t;
+      _ny = _fromNy + (_toNy - _fromNy) * t;
       _scale = _fromScale + (_toScale - _fromScale) * t;
+      final screen = MediaQuery.sizeOf(context);
+      _pos = _pixel(screen, hiding: _hiding, hideDir: _hideDir) + Offset(0, extra * 18 * _bounce.sign);
     });
   }
 
@@ -128,26 +165,60 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     super.dispose();
   }
 
-  void _animateTo(Offset target, double scale, {double energy = 1}) {
-    _from = _pos;
-    _to = target;
+  void _animateTo(Offset target, double scale, {double energy = 1, bool hiding = false, int hideDir = 0}) {
+    final screen = MediaQuery.sizeOf(context);
+    _fromNx = _nx;
+    _fromNy = _ny;
     _fromScale = _scale;
+    if (hiding) {
+      _toNx = hideDir < 0 ? 0 : 1;
+      _captureNorm(screen, target, scale: scale);
+      _toNy = _ny;
+      _nx = _fromNx;
+      _ny = _fromNy;
+    } else {
+      _captureNorm(screen, target, scale: scale);
+      _toNx = _nx;
+      _toNy = _ny;
+      _nx = _fromNx;
+      _ny = _fromNy;
+    }
+    _hiding = hiding;
+    _hideDir = hideDir;
     _toScale = scale;
     final travel = (_pos - target).distance + (_scale - scale).abs() * 90;
     final fling = _vel.distance;
     _bounce = (0.7 + (fling / 2800).clamp(0.0, 1.1) + (travel / 420).clamp(0.0, 0.8) + ((_scale - 1).abs() * 0.35)).clamp(0.7, 2.2);
     final dur = (440 + travel * 0.4 + fling * 0.06 + energy * 80).clamp(380, 980).round();
+    _live = true;
     _spring.stop();
     _spring.value = 0;
-    _spring.animateTo(1, duration: Duration(milliseconds: dur), curve: Curves.linear);
+    _spring.animateTo(1, duration: Duration(milliseconds: dur), curve: Curves.linear).whenComplete(() {
+      if (!mounted) return;
+      _live = false;
+      if (!hiding) {
+        _nx = _toNx;
+        _ny = _toNy;
+      }
+    });
   }
 
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
-    final screen = MediaQuery.sizeOf(context);
     _vel = Offset(_vel.dx, math.max(_vel.dy, 1400));
-    _animateTo(Offset(_pos.dx, screen.height + 64), math.max(0.62, _scale * 0.78), energy: 1.3);
+    _fromNx = _nx;
+    _fromNy = _ny;
+    _fromScale = _scale;
+    _toNx = _nx;
+    _toNy = 1.45;
+    _toScale = math.max(0.62, _scale * 0.78);
+    _live = true;
+    _hiding = false;
+    _bounce = 1.1;
+    _spring.stop();
+    _spring.value = 0;
+    _spring.animateTo(1, duration: const Duration(milliseconds: 280), curve: Curves.linear);
     _appear.reverse();
     await Future<void>.delayed(const Duration(milliseconds: 280));
     await widget.onClose();
@@ -156,7 +227,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
   void _onScaleStart(ScaleStartDetails d) {
     if (_closing) return;
     _spring.stop();
+    _live = true;
     _moved = false;
+    final screen = MediaQuery.sizeOf(context);
+    _pos = _pixel(screen, hiding: _hiding, hideDir: _hideDir);
     _startFocal = d.focalPoint;
     _startPos = _pos;
     _startScale = _scale;
@@ -181,25 +255,24 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
       nextScale = _maxScale + (nextScale - _maxScale) * 0.32;
     }
 
-    final local = Offset(
-      (_startFocal.dx - _startPos.dx) / _startScale,
-      (_startFocal.dy - _startPos.dy) / _startScale,
-    );
-    var next = d.focalPoint - Offset(local.dx * nextScale, local.dy * nextScale);
-
-    final h = box.height * nextScale;
-    final minY = widget.pad.top - 28;
-    final maxY = screen.height + 28 - h;
-    if (next.dy < minY) {
-      next = Offset(next.dx, minY + (next.dy - minY) * 0.28);
-    } else if (next.dy > maxY) {
-      next = Offset(next.dx, maxY + (next.dy - maxY) * 0.28);
+    final pinching = (d.scale - 1).abs() > 0.02;
+    Offset next;
+    if (pinching) {
+      _scale = nextScale;
+      _captureNorm(screen, _startPos, scale: _startScale);
+      final base = _pixel(screen);
+      next = base + (d.focalPoint - _startFocal);
+      _captureNorm(screen, next);
+      next = _pixel(screen);
+    } else {
+      next = _startPos + (d.focalPoint - _startFocal);
     }
 
     setState(() {
       _pos = next;
       _scale = nextScale;
       _hiding = false;
+      _live = true;
     });
   }
 
@@ -222,33 +295,32 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     }
 
     var x = _pos.dx;
-    var y = _pos.dy.clamp(widget.pad.top + 6, math.max(widget.pad.top + 6, screen.height - h - widget.navH - 8));
+    final r = _range(screen, w, h);
+    var y = _pos.dy.clamp(r.minY, r.maxY).toDouble();
 
-    // YouTube: hide only when the window is already at/past the peek.
-    // A fling while still on-screen snaps fully visible to the nearest side.
     if (_pos.dx <= _peek - w + 1) {
       x = _peek - w;
-      _hiding = true;
-      _hideDir = -1;
-    } else if (_pos.dx >= screen.width - _peek - 1) {
+      _animateTo(Offset(x, y), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0), hiding: true, hideDir: -1);
+      return;
+    }
+    if (_pos.dx >= screen.width - _peek - 1) {
       x = screen.width - _peek;
-      _hiding = true;
-      _hideDir = 1;
-    } else {
-      _hiding = false;
-      _hideDir = 0;
-      x = cx < screen.width / 2 ? 10.0 : screen.width - w - 10;
+      _animateTo(Offset(x, y), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0), hiding: true, hideDir: 1);
+      return;
     }
 
-    _animateTo(Offset(x, y.toDouble()), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0));
+    _hiding = false;
+    _hideDir = 0;
+    x = cx < screen.width / 2 ? r.minX : r.maxX;
+    _animateTo(Offset(x, y), scale, energy: 1 + (_vel.distance / 2400).clamp(0.0, 1.0));
   }
 
   void _reveal(Size screen, Size box) {
-    final w = box.width * _scale;
-    final x = _hideDir < 0 ? 10.0 : screen.width - w - 10;
     _hiding = false;
     _hideDir = 0;
-    _animateTo(Offset(x, _pos.dy), _scale);
+    final r = _range(screen, box.width * _scale, box.height * _scale);
+    final x = _nx < 0.5 ? r.minX : r.maxX;
+    _animateTo(Offset(x, _pixel(screen).dy), _scale);
   }
 
   @override
@@ -258,14 +330,18 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     final box = _boxFor(screen, video);
     if (!_ready) {
       _ready = true;
-      _pos = Offset(screen.width - box.width - 10, screen.height + 48);
+      _nx = 1;
+      _ny = 1.18;
       _scale = 0.82;
+      _pos = _pixel(screen);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _appear.forward();
         _animateTo(_dockPos(screen, box, right: true), 1, energy: 1.15);
       });
     }
+
+    final draw = _live ? _pos : _pixel(screen, hiding: _hiding, hideDir: _hideDir);
 
     final c = PlaybackSession.controller;
     final item = PlaybackSession.item;
@@ -313,8 +389,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with TickerProvid
     }
 
     return Positioned(
-      left: _pos.dx,
-      top: _pos.dy,
+      left: draw.dx,
+      top: draw.dy,
       width: visW,
       height: visH,
       child: AnimatedBuilder(

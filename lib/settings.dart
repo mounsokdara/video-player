@@ -28,7 +28,7 @@ class AppSettings {
   bool showVolumeOverlay = true;
 
   // Orientation
-  RotationLock rotation = RotationLock.autoVideo;
+  RotationLock rotation = RotationLock.none;
 
   // Playback
   DecoderMode decoder = DecoderMode.hw;
@@ -37,6 +37,7 @@ class AppSettings {
   bool autoMiniplayer = false;
   bool inAppMiniplayer = true;
   bool antiBufferCrash = true;
+  bool decompressVideo = true;
   bool lowMemoryBuffer = true;
   bool rememberBackgroundPlay = false;
   bool backgroundPlay = false;
@@ -124,7 +125,7 @@ class AppSettings {
     'zoom': 'Zoom',
     'skipBack': 'Seek back',
     'skipForward': 'Seek forward',
-    'popup': 'Pop-up',
+    'popup': 'PIP',
     'color': 'Color',
     'timer': 'Timer',
     'properties': 'Properties',
@@ -141,7 +142,7 @@ class AppSettings {
 
   List<String> quickActions = List<String>.from(defaultQuickActions);
 
-  static const defaultTitleActions = <String>['search', 'overflow'];
+  static const defaultTitleActions = <String>['hdr', 'eq', 'playlist', 'more'];
   List<String> titleActions = List<String>.from(defaultTitleActions);
   String hudFabsJson = '[]';
 
@@ -211,13 +212,20 @@ class AppSettings {
     showSeekPreview = p.getBool('showSeekPreview') ?? true;
     showBrightnessOverlay = p.getBool('showBrightnessOverlay') ?? true;
     showVolumeOverlay = p.getBool('showVolumeOverlay') ?? true;
-    rotation = RotationLock.values[(p.getInt('rotation') ?? 1).clamp(0, RotationLock.values.length - 1)];
+    if (p.getBool('rotationNoneV3') != true) {
+      rotation = RotationLock.none;
+      await p.setInt('rotation', RotationLock.none.index);
+      await p.setBool('rotationNoneV3', true);
+    } else {
+      rotation = RotationLock.values[(p.getInt('rotation') ?? RotationLock.none.index).clamp(0, RotationLock.values.length - 1)];
+    }
     decoder = DecoderMode.values[(p.getInt('decoder') ?? 1).clamp(0, DecoderMode.values.length - 1)];
     hwPriority = p.getBool('hwPriority') ?? true;
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
     autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
     inAppMiniplayer = p.getBool('inAppMiniplayer') ?? true;
     antiBufferCrash = p.getBool('antiBufferCrash') ?? true;
+    decompressVideo = p.getBool('decompressVideo') ?? antiBufferCrash;
     lowMemoryBuffer = p.getBool('lowMemoryBuffer') ?? true;
     if (p.getBool('pipDefaultOffV2') != true) {
       autoMiniplayer = false;
@@ -283,8 +291,14 @@ class AppSettings {
     quickActions.removeWhere((id) => !allQuickActions.containsKey(id));
     if (quickActions.isEmpty) quickActions = List<String>.from(defaultQuickActions);
 
-    titleActions = List<String>.from(p.getStringList('titleActions') ?? defaultTitleActions);
-    if (titleActions.isEmpty) titleActions = List<String>.from(defaultTitleActions);
+    if (p.getBool('playerTitleV3') != true) {
+      titleActions = List<String>.from(defaultTitleActions);
+      await p.setStringList('titleActions', titleActions);
+      await p.setBool('playerTitleV3', true);
+    } else {
+      titleActions = List<String>.from(p.getStringList('titleActions') ?? defaultTitleActions);
+      if (titleActions.isEmpty) titleActions = List<String>.from(defaultTitleActions);
+    }
     hudFabsJson = p.getString('hudFabsJson') ?? '[]';
 
     eqEnabled = p.getBool('eqEnabled') ?? false;
@@ -345,6 +359,7 @@ class AppSettings {
     await p.setBool('autoMiniplayer', autoMiniplayer);
     await p.setBool('inAppMiniplayer', inAppMiniplayer);
     await p.setBool('antiBufferCrash', antiBufferCrash);
+    await p.setBool('decompressVideo', decompressVideo);
     await p.setBool('lowMemoryBuffer', lowMemoryBuffer);
     await p.setBool('rememberBackgroundPlay', rememberBackgroundPlay);
     await p.setBool('backgroundPlay', backgroundPlay);

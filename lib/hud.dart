@@ -15,7 +15,7 @@ class HudFab {
   Map<String, dynamic> toJson() => {'id': id, 'x': x, 'y': y, 'size': size};
 
   factory HudFab.fromJson(Map<String, dynamic> j) => HudFab(
-        id: '${j['id'] ?? 'pick'}',
+        id: '${j['id'] ?? 'eq'}',
         x: (j['x'] as num?)?.toDouble() ?? 0.82,
         y: (j['y'] as num?)?.toDouble() ?? 0.78,
         size: (j['size'] as num?)?.toDouble() ?? 56,
@@ -23,10 +23,11 @@ class HudFab {
 }
 
 class HudLayer extends StatelessWidget {
-  const HudLayer({super.key, required this.fabs, required this.onTap, this.pad = EdgeInsets.zero});
+  const HudLayer({super.key, required this.fabs, required this.onTap, this.pad = EdgeInsets.zero, this.bottomReserve = 88});
   final List<HudFab> fabs;
   final void Function(String id) onTap;
   final EdgeInsets pad;
+  final double bottomReserve;
 
   @override
   Widget build(BuildContext context) {
@@ -39,13 +40,13 @@ class HudLayer extends StatelessWidget {
           for (final f in fabs)
             Positioned(
               left: pad.left + f.x * (size.width - pad.left - pad.right - f.size).clamp(0.0, size.width),
-              top: pad.top + f.y * (size.height - pad.top - pad.bottom - f.size - 88).clamp(0.0, size.height),
+              top: pad.top + f.y * (size.height - pad.top - pad.bottom - f.size - bottomReserve).clamp(0.0, size.height),
               width: f.size,
               height: f.size,
               child: FloatingActionButton(
                 heroTag: 'hud-${f.id}-${f.x}-${f.y}',
                 onPressed: () => onTap(f.id),
-                child: Icon(_icon(f.id), size: (f.size * 0.42).clamp(18.0, 36.0)),
+                child: Icon(iconFor(f.id), size: (f.size * 0.42).clamp(18.0, 36.0)),
               ),
             ),
         ],
@@ -53,13 +54,40 @@ class HudLayer extends StatelessWidget {
     );
   }
 
-  static IconData _icon(String id) => switch (id) {
-        'pick' => Icons.video_file_outlined,
-        'search' => Icons.search,
+  static IconData iconFor(String id) => switch (id) {
+        'hdr' => Icons.hdr_on,
         'eq' => Icons.equalizer,
+        'playlist' => Icons.queue_music,
+        'more' => Icons.more_vert,
+        'search' => Icons.search,
         'refresh' => Icons.refresh,
         'select' => Icons.checklist,
         'sort' => Icons.sort,
+        'speed' => Icons.speed,
+        'background' => Icons.headphones_outlined,
+        'screenshot' => Icons.camera_alt_outlined,
+        'lock' => Icons.lock_outline,
+        'aspect' => Icons.aspect_ratio,
+        'ab' => Icons.repeat,
+        'bookmark' => Icons.bookmark_outline,
+        'brightness' => Icons.brightness_6_outlined,
+        'rotate' => Icons.screen_rotation,
+        'share' => Icons.share_outlined,
+        'night' => Icons.nights_stay_outlined,
+        'zoom' => Icons.zoom_in,
+        'popup' => Icons.picture_in_picture_alt,
+        'timer' => Icons.timer_outlined,
+        'properties' => Icons.info_outline,
+        'playopt' => Icons.tune,
+        'decoder' => Icons.memory,
+        'mirror' => Icons.flip,
+        'invert' => Icons.invert_colors,
+        'subtitle' => Icons.subtitles_outlined,
+        'repeat' => Icons.queue_music,
+        'delete' => Icons.delete_outline,
+        'cast' => Icons.cast,
+        'navbar' => Icons.navigation_outlined,
+        'color' => Icons.color_lens_outlined,
         _ => Icons.play_arrow,
       };
 }
@@ -129,11 +157,11 @@ class _HudEditorPageState extends State<HudEditorPage> {
           padding: EdgeInsets.only(bottom: pad.bottom + 16),
           children: [
             const ListTile(title: Text('Add from More', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
-            ListTile(title: const Text('Import video'), leading: const Icon(Icons.video_file_outlined), onTap: () => Navigator.pop(ctx, 'pick')),
+            ListTile(title: const Text('HDR'), leading: const Icon(Icons.hdr_on), onTap: () => Navigator.pop(ctx, 'hdr')),
+            ListTile(title: const Text('Playlist'), leading: const Icon(Icons.queue_music), onTap: () => Navigator.pop(ctx, 'playlist')),
+            ListTile(title: const Text('More'), leading: const Icon(Icons.more_vert), onTap: () => Navigator.pop(ctx, 'more')),
             for (final e in AppSettings.allQuickActions.entries)
-              ListTile(title: Text(e.value), onTap: () => Navigator.pop(ctx, e.key)),
-            ListTile(title: const Text('Search'), onTap: () => Navigator.pop(ctx, 'search')),
-            ListTile(title: const Text('Refresh'), onTap: () => Navigator.pop(ctx, 'refresh')),
+              ListTile(title: Text(e.value), leading: Icon(HudLayer.iconFor(e.key)), onTap: () => Navigator.pop(ctx, e.key)),
           ],
         );
       },
@@ -170,15 +198,6 @@ class _HudEditorPageState extends State<HudEditorPage> {
             Positioned.fill(
               child: CustomPaint(
                 painter: _GridPainter(),
-              ),
-            ),
-            const Positioned(
-              left: 16,
-              right: 16,
-              top: 12,
-              child: Text(
-                'Drag to move. Use the handles to resize. Add actions from More.',
-                style: TextStyle(color: Colors.white70),
               ),
             ),
             for (var i = 0; i < _fabs.length; i++)
@@ -253,7 +272,7 @@ class _HudHandle extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: selected ? Border.all(color: Colors.white, width: 3) : null,
               ),
-              child: Icon(HudLayer._icon(fab.id), color: Theme.of(context).colorScheme.onPrimary),
+              child: Icon(HudLayer.iconFor(fab.id), color: Theme.of(context).colorScheme.onPrimary),
             ),
             if (selected)
               Row(
@@ -309,14 +328,11 @@ class _TitleBarEditorState extends State<TitleBarEditor> {
   late Set<String> enabled;
 
   static const catalog = <String, String>{
-    'search': 'Search',
-    'select': 'Select',
-    'layout': 'Layout',
-    'sort': 'Sort',
+    'hdr': 'HDR',
     'eq': 'Equalizer',
-    'refresh': 'Refresh',
-    'pick': 'Import video',
-    'overflow': '3-dot menu',
+    'playlist': 'Playlist',
+    'more': 'More',
+    ...AppSettings.allQuickActions,
   };
 
   @override
@@ -331,7 +347,7 @@ class _TitleBarEditorState extends State<TitleBarEditor> {
 
   Future<void> _persist() async {
     var next = order.where(enabled.contains).toList();
-    if (next.isEmpty) next = ['search', 'overflow'];
+    if (next.isEmpty) next = ['more'];
     appSettings.titleActions = next;
     await appSettings.save();
     widget.onChanged();
@@ -359,7 +375,6 @@ class _TitleBarEditorState extends State<TitleBarEditor> {
             key: ValueKey(id),
             value: enabled.contains(id),
             title: Text(catalog[id] ?? id),
-            subtitle: id == 'overflow' ? const Text('The 3-dot menu') : null,
             secondary: const Icon(Icons.drag_handle),
             onChanged: (v) async {
               setState(() {
@@ -384,7 +399,7 @@ List<HudFab> decodeHud(String? raw) {
   if (raw == null || raw.isEmpty) return [];
   try {
     final list = jsonDecode(raw) as List;
-    return list.map((e) => HudFab.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    return list.map((e) => HudFab.fromJson(Map<String, dynamic>.from(e as Map))).where((e) => e.id != 'pick').toList();
   } catch (_) {
     return [];
   }

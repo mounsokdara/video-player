@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'android_bridge.dart';
+import 'insets.dart';
 import 'library.dart';
 import 'main.dart';
 import 'models.dart';
@@ -262,103 +263,126 @@ class VideoGridCard extends StatelessWidget {
   }
 }
 
+Future<T?> showAppSheet<T>({
+  required BuildContext context,
+  required Widget Function(BuildContext ctx, ScrollController sc) builder,
+  double initial = 0.56,
+}) {
+  final pad = MediaQuery.viewPaddingOf(context);
+  return SystemBars.modal(
+    () => showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      enableDrag: true,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: initial.clamp(0.34, 0.92),
+          minChildSize: 0.32,
+          maxChildSize: 0.95,
+          builder: (_, sc) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(pad.left, 0, pad.right, pad.bottom),
+              child: builder(ctx, sc),
+            );
+          },
+        );
+      },
+    ),
+  );
+}
+
 Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidCallback onChanged, required VoidCallback onPlay}) async {
   final scheme = Theme.of(context).colorScheme;
-  await showModalBottomSheet<void>(
+  await showAppSheet<void>(
     context: context,
-    showDragHandle: true,
-    builder: (ctx) {
-      final pad = MediaQuery.viewPaddingOf(ctx);
-      final insets = MediaQuery.viewInsetsOf(ctx);
-      return Padding(
-        padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
-        child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: item, radius: 8)),
-              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(formatBytes(item.size)),
-            ),
-            const Divider(height: 1),
-            ListTile(leading: const Icon(Icons.play_arrow), title: const Text('Play'), onTap: () { Navigator.pop(ctx); onPlay(); }),
-            ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline),
-              title: const Text('Rename'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await Future<void>.delayed(const Duration(milliseconds: 160));
-                if (!context.mounted) return;
-                final name = await promptText(context, 'Rename', item.title);
-                if (name != null && name.trim().isNotEmpty) {
-                  await library.rename(item, name.trim());
-                  onChanged();
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined),
-              title: const Text('Share'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
-              },
-            ),
-            ListTile(
-              leading: Icon(item.bookmarked ? Icons.bookmark : Icons.bookmark_border),
-              title: Text(item.bookmarked ? 'Remove bookmark' : 'Bookmark'),
-              onTap: () {
-                Navigator.pop(ctx);
-                if (appSettings.bookmarks.contains(item.path)) {
-                  appSettings.bookmarks.remove(item.path);
-                  item.bookmarked = false;
-                } else {
-                  appSettings.bookmarks.add(item.path);
-                  item.bookmarked = true;
-                }
-                appSettings.save();
+    initial: 0.62,
+    builder: (ctx, sc) {
+      return ListView(
+        controller: sc,
+        children: [
+          ListTile(
+            leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: item, radius: 8)),
+            title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(formatBytes(item.size)),
+          ),
+          const Divider(height: 1),
+          ListTile(leading: const Icon(Icons.play_arrow), title: const Text('Play'), onTap: () { Navigator.pop(ctx); onPlay(); }),
+          ListTile(
+            leading: const Icon(Icons.drive_file_rename_outline),
+            title: const Text('Rename'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              await Future<void>.delayed(const Duration(milliseconds: 160));
+              if (!context.mounted) return;
+              final name = await promptText(context, 'Rename', item.title);
+              if (name != null && name.trim().isNotEmpty) {
+                await library.rename(item, name.trim());
                 onChanged();
-              },
-            ),
-            ListTile(
-              leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
-              title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
-              onTap: () {
-                Navigator.pop(ctx);
-                if (appSettings.pinned.contains(item.path)) {
-                  appSettings.pinned.remove(item.path);
-                } else {
-                  appSettings.pinned.add(item.path);
-                }
-                appSettings.save();
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.share_outlined),
+            title: const Text('Share'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
+            },
+          ),
+          ListTile(
+            leading: Icon(item.bookmarked ? Icons.bookmark : Icons.bookmark_border),
+            title: Text(item.bookmarked ? 'Remove bookmark' : 'Bookmark'),
+            onTap: () {
+              Navigator.pop(ctx);
+              if (appSettings.bookmarks.contains(item.path)) {
+                appSettings.bookmarks.remove(item.path);
+                item.bookmarked = false;
+              } else {
+                appSettings.bookmarks.add(item.path);
+                item.bookmarked = true;
+              }
+              appSettings.save();
+              onChanged();
+            },
+          ),
+          ListTile(
+            leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
+            title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
+            onTap: () {
+              Navigator.pop(ctx);
+              if (appSettings.pinned.contains(item.path)) {
+                appSettings.pinned.remove(item.path);
+              } else {
+                appSettings.pinned.add(item.path);
+              }
+              appSettings.save();
+              onChanged();
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.delete_outline, color: scheme.error),
+            title: Text('Delete', style: TextStyle(color: scheme.error)),
+            onTap: () async {
+              Navigator.pop(ctx);
+              final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
+              if (ok == true) {
+                await library.deleteVideos([item]);
                 onChanged();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.delete_outline, color: scheme.error),
-              title: Text('Delete', style: TextStyle(color: scheme.error)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
-                if (ok == true) {
-                  await library.deleteVideos([item]);
-                  onChanged();
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('Properties'),
-              onTap: () {
-                Navigator.pop(ctx);
-                showProperties(context, item);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-        ),
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Properties'),
+            onTap: () {
+              Navigator.pop(ctx);
+              showProperties(context, item);
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
       );
     },
   );
@@ -562,74 +586,69 @@ Future<void> showFolderEntryMenu(
 }) async {
   final scheme = Theme.of(context).colorScheme;
   final name = path.split(RegExp(r'[/\\]')).last;
-  await showModalBottomSheet<void>(
+  await showAppSheet<void>(
     context: context,
-    showDragHandle: true,
-    builder: (ctx) {
-      final pad = MediaQuery.viewPaddingOf(ctx);
-      final insets = MediaQuery.viewInsetsOf(ctx);
-      return Padding(
-        padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
-            if (onOpen != null)
-              ListTile(
-                leading: const Icon(Icons.open_in_new),
-                title: Text(isDir ? 'Open' : 'Play'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  onOpen();
-                },
-              ),
+    initial: 0.5,
+    builder: (ctx, sc) {
+      return ListView(
+        controller: sc,
+        children: [
+          ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
+          if (onOpen != null)
             ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline),
-              title: const Text('Rename'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await Future<void>.delayed(const Duration(milliseconds: 160));
-                if (!context.mounted) return;
-                final next = await promptText(context, 'Rename', name);
-                if (next != null && next.trim().isNotEmpty) {
-                  await AndroidBridge.renamePath(path, next.trim());
-                  onChanged();
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('Copy'),
+              leading: const Icon(Icons.open_in_new),
+              title: Text(isDir ? 'Open' : 'Play'),
               onTap: () {
                 Navigator.pop(ctx);
-                library.copyEntry(path);
+                onOpen();
+              },
+            ),
+          ListTile(
+            leading: const Icon(Icons.drive_file_rename_outline),
+            title: const Text('Rename'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              await Future<void>.delayed(const Duration(milliseconds: 160));
+              if (!context.mounted) return;
+              final next = await promptText(context, 'Rename', name);
+              if (next != null && next.trim().isNotEmpty) {
+                await AndroidBridge.renamePath(path, next.trim());
                 onChanged();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.content_cut),
-              title: const Text('Cut'),
-              onTap: () {
-                Navigator.pop(ctx);
-                library.cutEntry(path);
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy),
+            title: const Text('Copy'),
+            onTap: () {
+              Navigator.pop(ctx);
+              library.copyEntry(path);
+              onChanged();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.content_cut),
+            title: const Text('Cut'),
+            onTap: () {
+              Navigator.pop(ctx);
+              library.cutEntry(path);
+              onChanged();
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.delete_outline, color: scheme.error),
+            title: Text('Delete', style: TextStyle(color: scheme.error)),
+            onTap: () async {
+              Navigator.pop(ctx);
+              final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
+              if (ok == true) {
+                await library.deletePath(path);
                 onChanged();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.delete_outline, color: scheme.error),
-              title: Text('Delete', style: TextStyle(color: scheme.error)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
-                if (ok == true) {
-                  await library.deletePath(path);
-                  onChanged();
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+              }
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
       );
     },
   );
