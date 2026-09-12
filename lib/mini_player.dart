@@ -57,9 +57,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
 
-  double _dragArrowW = 0;
-  int _dragArrowSide = 0;
-
   VideoPlayerController? _ctrl;
 
   @override
@@ -118,8 +115,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   Offset get _rawPos =>
       _pos ?? MiniPhysics.defaultPos(_screen, _w, _h, _safe);
-
-  bool get _arrowDragging => _dragArrowSide != 0;
 
   double _overhang(Offset pos) {
     if (_parked) return 0;
@@ -291,9 +286,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _onArrowPanStart(DragStartDetails _) {
     if (_dismissed) return;
     _anim.stop();
-    final pos = _rawPos;
-    _dragArrowW = _arrowWidthFor(pos);
-    _dragArrowSide = _sideFor(pos);
     setState(() {
       _parked = false;
       _parkSide = 0;
@@ -308,13 +300,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _onArrowPanEnd(DragEndDetails _) {
-    _dragArrowSide = 0;
-    _live = false;
-    _settle();
-  }
-
-  void _onArrowPanCancel() {
-    _dragArrowSide = 0;
     _live = false;
     _settle();
   }
@@ -419,20 +404,23 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Widget build(BuildContext context) {
     _bind();
     final pos = _rawPos;
+    final side = _sideFor(pos);
+    final arrowW = _arrowWidthFor(pos);
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
     final stroke = scheme.outline.withValues(alpha: 0.55);
     final arrowStroke = scheme.outline.withValues(alpha: 0.85);
+    final arrowVisible = arrowW >= 6;
+    final arrowFullyShown = _parked && arrowW >= MiniGeom.arrowMaxW - 0.5;
 
-    final dragging = _arrowDragging;
-    final side = dragging ? _dragArrowSide : _sideFor(pos);
-    final arrowW = dragging ? _dragArrowW : _arrowWidthFor(pos);
-    final arrowOpacity = dragging
-        ? 1.0
-        : (arrowW / MiniGeom.arrowMaxW).clamp(0.0, 1.0).toDouble();
-
-    final arrowLeft =
-        side < 0 ? pos.dx + _w : side > 0 ? pos.dx - arrowW : 0.0;
+    final double arrowLeft;
+    if (side < 0) {
+      arrowLeft = pos.dx + _w;
+    } else if (side > 0) {
+      arrowLeft = pos.dx - arrowW;
+    } else {
+      arrowLeft = 0;
+    }
     final arrowTop = pos.dy + h / 2 - MiniGeom.arrowH / 2;
 
     var dismissProgress = 1.0;
@@ -558,27 +546,25 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             ),
           ),
         ),
-        if (!_dismissed && arrowW > 0)
+        if (!_dismissed && arrowVisible)
           Positioned(
             left: arrowLeft,
             top: arrowTop,
             width: arrowW,
             height: MiniGeom.arrowH,
-            child: Opacity(
-              opacity: arrowOpacity,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _unpark,
-                onPanStart: _onArrowPanStart,
-                onPanUpdate: _onArrowPanUpdate,
-                onPanEnd: _onArrowPanEnd,
-                onPanCancel: _onArrowPanCancel,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: side == 0 ? 1 : side,
-                      width: arrowW,
-                    ),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _unpark,
+              onPanStart: _onArrowPanStart,
+              onPanUpdate: _onArrowPanUpdate,
+              onPanEnd: _onArrowPanEnd,
+              child: Stack(
+                children: [
+                  MiniStickyArrow(
+                    side: side == 0 ? 1 : side,
+                    width: arrowW,
+                  ),
+                  if (arrowFullyShown)
                     Positioned.fill(
                       child: IgnorePointer(
                         child: DecoratedBox(
@@ -602,8 +588,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                         ),
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
