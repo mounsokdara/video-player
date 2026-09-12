@@ -522,15 +522,36 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanStart: _onArrowPanStart,
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
-                child: Container(
-                  foregroundDecoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(MiniGeom.arrowH / 2),
-                    border: Border.all(color: arrowStroke, width: 1.2),
-                  ),
-                  child: MiniStickyArrow(
-                    side: side == 0 ? 1 : side,
-                    width: arrowW,
-                  ),
+                child: Stack(
+                  children: [
+                    MiniStickyArrow(
+                      side: side == 0 ? 1 : side,
+                      width: arrowW,
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.only(
+                              topLeft: side > 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              bottomLeft: side > 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              topRight: side < 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              bottomRight: side < 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                            ),
+                            border: Border.all(color: arrowStroke, width: 1.2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
