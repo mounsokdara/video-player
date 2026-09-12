@@ -268,9 +268,6 @@ Future<T?> showAppSheet<T>({
   required List<Widget> Function(BuildContext ctx) children,
   double initial = 0.56,
 }) {
-  // Raw view padding — Scaffold + NavigationBar consume MediaQuery.viewPadding
-  // so a sheet opened from the library would otherwise sit under 3-button nav.
-  // Flutter useSafeArea on modal sheets pads top/left/right, never bottom.
   final pad = SystemBars.rawOf(context);
   return SystemBars.modal(
     () => showModalBottomSheet<T>(

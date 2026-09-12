@@ -60,7 +60,6 @@ class PlaybackSession {
   }
 
   static Future<String> resolvePlayPath(String path) async {
-    // Never block the first frame on a transcode. Play the original file.
     return path;
   }
 

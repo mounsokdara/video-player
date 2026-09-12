@@ -25,7 +25,6 @@ object VideoDecompressor {
         if (w <= 0 || h <= 0) return path
         val longSide = maxOf(w, h)
         val pixels = w.toLong() * h
-        // Phone recordings (1080×2340) are not 8K. Only true 4K+ giants.
         val oversize = longSide >= 3840 || pixels > 3840L * 2160L
         if (!oversize) return path
         val stamp = try {
@@ -36,7 +35,6 @@ object VideoDecompressor {
         val key = hash("$path|$w|$h|$lowMem|$stamp")
         val out = File(context.cacheDir, "decomp_$key.mp4")
         if (out.exists() && out.length() > 8192) {
-            // Previous sessions wrote green artifacts. Never reuse them.
             try {
                 out.delete()
             } catch (_: Exception) {

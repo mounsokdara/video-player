@@ -48,7 +48,6 @@ class SettingsHub extends StatelessWidget {
           sliver: SliverList.list(children: [
             tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
             tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
-            tile(Icons.speed, 'Performance', '4K decompress, low-memory size', PerformanceSettings(onChanged: onChanged)),
             tile(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', AccessSettings(onChanged: onChanged)),
             tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
@@ -470,7 +469,10 @@ class _ThemeSettingsState extends State<ThemeSettings> {
             children: [
               for (final e in seeds)
                 GestureDetector(
-                  onTap: () => set(() => s.seedColor = e.$2),
+                  onTap: () => set(() {
+                    s.seedColor = e.$2;
+                    s.dynamicColor = false;
+                  }),
                   child: Container(
                     width: 44,
                     height: 44,
@@ -484,7 +486,47 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                     ),
                   ),
                 ),
+              GestureDetector(
+                onTap: () async {
+                  final picked = await showColorPicker(context, Color(s.seedColor));
+                  if (picked != null) {
+                    set(() {
+                      s.seedColor = picked.toARGB32();
+                      s.dynamicColor = false;
+                    });
+                  }
+                },
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const SweepGradient(colors: [Color(0xFFFF3B30), Color(0xFFFFCC00), Color(0xFF34C759), Color(0xFF007AFF), Color(0xFFAF52DE), Color(0xFFFF3B30)]),
+                    border: Border.all(
+                      color: seeds.every((e) => e.$2 != s.seedColor) ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
+                      width: 3,
+                    ),
+                  ),
+                  child: const Icon(Icons.colorize, size: 18, color: Colors.white),
+                ),
+              ),
             ],
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: CircleAvatar(backgroundColor: Color(s.seedColor)),
+            title: const Text('Custom color'),
+            subtitle: Text('#${s.seedColor.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final picked = await showColorPicker(context, Color(s.seedColor));
+              if (picked != null) {
+                set(() {
+                  s.seedColor = picked.toARGB32();
+                  s.dynamicColor = false;
+                });
+              }
+            },
           ),
           const SizedBox(height: 24),
           Text('Material 3 roles', style: Theme.of(context).textTheme.titleMedium),
@@ -768,49 +810,129 @@ class _QuickActionsEditorState extends State<QuickActionsEditor> {
   }
 }
 
-class PerformanceSettings extends StatefulWidget {
-  const PerformanceSettings({super.key, required this.onChanged});
-  final VoidCallback onChanged;
-  @override
-  State<PerformanceSettings> createState() => _PerformanceSettingsState();
+Future<Color?> showColorPicker(BuildContext context, Color initial) {
+  return SystemBars.modal(
+    () => showModalBottomSheet<Color>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final pad = SystemBars.rawOf(context);
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        return Padding(
+          padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom),
+          child: _ColorPickerSheet(initial: initial),
+        );
+      },
+    ),
+  );
 }
 
-class _PerformanceSettingsState extends State<PerformanceSettings> {
+class _ColorPickerSheet extends StatefulWidget {
+  const _ColorPickerSheet({required this.initial});
+  final Color initial;
+
+  @override
+  State<_ColorPickerSheet> createState() => _ColorPickerSheetState();
+}
+
+class _ColorPickerSheetState extends State<_ColorPickerSheet> {
+  late HSVColor hsv;
+  late final TextEditingController hex;
+
+  @override
+  void initState() {
+    super.initState();
+    hsv = HSVColor.fromColor(widget.initial.withValues(alpha: 1));
+    hex = TextEditingController(text: _hexOf(hsv.toColor()));
+  }
+
+  @override
+  void dispose() {
+    hex.dispose();
+    super.dispose();
+  }
+
+  String _hexOf(Color c) => c.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase();
+
+  void _set(HSVColor next, {bool syncHex = true}) {
+    setState(() => hsv = next);
+    if (syncHex) {
+      hex.value = TextEditingValue(
+        text: _hexOf(next.toColor()),
+        selection: const TextSelection.collapsed(offset: 6),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final s = appSettings;
-    final pad = SystemBars.of(context);
-    void set(VoidCallback fn) {
-      setState(fn);
-      s.save();
-      widget.onChanged();
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Performance')),
-      body: ListView(
-        padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 24),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-            child: Text('Video', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
-          ),
-          SwitchListTile(
-            title: const Text('Decompress video'),
-            subtitle: const Text('Only 4K and larger. Playback always starts on the original file.'),
-            value: s.decompressVideo,
-            onChanged: (v) => set(() {
-              s.decompressVideo = v;
-              s.antiBufferCrash = v;
-            }),
-          ),
-          SwitchListTile(
-            title: const Text('Low-memory size'),
-            value: s.lowMemoryBuffer,
-            onChanged: (v) => set(() => s.lowMemoryBuffer = v),
-          ),
-        ],
+    final color = hsv.toColor();
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Custom color', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: hex,
+                    maxLength: 6,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      prefixText: '#',
+                      counterText: '',
+                      labelText: 'Hex',
+                    ),
+                    onChanged: (v) {
+                      final raw = v.replaceAll('#', '').trim();
+                      if (raw.length != 6) return;
+                      final n = int.tryParse(raw, radix: 16);
+                      if (n == null) return;
+                      _set(HSVColor.fromColor(Color(0xFF000000 | n)), syncHex: false);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _labeled('Hue', hsv.hue, 0, 360, (v) => _set(hsv.withHue(v))),
+            _labeled('Saturation', hsv.saturation, 0, 1, (v) => _set(hsv.withSaturation(v))),
+            _labeled('Brightness', hsv.value, 0, 1, (v) => _set(hsv.withValue(v))),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                const Spacer(),
+                FilledButton(onPressed: () => Navigator.pop(context, color), child: const Text('Apply')),
+              ],
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _labeled(String label, double value, double min, double max, ValueChanged<double> on) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        Slider(min: min, max: max, value: value.clamp(min, max).toDouble(), onChanged: on),
+      ],
     );
   }
 }

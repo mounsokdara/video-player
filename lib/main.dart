@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'crash.dart';
 import 'home.dart';
+import 'insets.dart';
 import 'library.dart';
 import 'models.dart';
 import 'settings.dart';
@@ -51,6 +52,7 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> {
         final mode = appSettings.themeMode;
         return MaterialApp(
           navigatorKey: appNavigator,
+          navigatorObservers: [SystemBarObserver()],
           title: 'Video Player',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(

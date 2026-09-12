@@ -5,10 +5,6 @@ import 'package:flutter/services.dart';
 
 import 'android_bridge.dart';
 
-/// System bars (status + navigation + cutout) as layout padding.
-/// Uses [MediaQuery.viewPadding] only — never gesture insets or IME viewInsets
-/// for chrome. Matches Android edge-to-edge: draw behind bars, pad interactive UI.
-/// https://developer.android.com/design/ui/mobile/guides/foundations/system-bars
 class SystemBars {
   static int popupCount = 0;
   static bool alwaysHide = false;
@@ -16,10 +12,6 @@ class SystemBars {
 
   static EdgeInsets of(BuildContext context) => MediaQuery.viewPaddingOf(context);
 
-  /// Unconsumed window insets. Scaffold / NavigationBar / SafeArea call
-  /// [MediaQuery.removePadding], which also zeroes [MediaQuery.viewPadding]
-  /// for descendants — so a modal opened from the library would otherwise
-  /// sit under the 3-button nav. [MediaQueryData.fromView] reads the view.
   static EdgeInsets rawOf(BuildContext context) {
     return MediaQueryData.fromView(View.of(context)).viewPadding;
   }
@@ -44,7 +36,7 @@ class SystemBars {
     final shouldHide = hide ?? (alwaysHide && popupCount <= 0 && !forceShow);
     _ensureUiCallback();
     if (shouldHide) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: const []);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setSystemUIOverlayStyle(overlay(icons: icons, contrast: contrast));
@@ -63,7 +55,7 @@ class SystemBars {
     _cbBound = true;
     SystemChrome.setSystemUIChangeCallback((visible) async {
       if (visible && alwaysHide && popupCount <= 0) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: const []);
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         unawaited(AndroidBridge.applySystemBars(
           lightIcons: iconBrightness == Brightness.light,
           contrast: true,
@@ -73,14 +65,45 @@ class SystemBars {
     });
   }
 
+  static void onPopup(bool open) {
+    if (open) {
+      popupCount++;
+      apply(icons: iconBrightness, forceShow: true);
+    } else {
+      if (popupCount > 0) popupCount--;
+      apply(icons: iconBrightness);
+    }
+  }
+
   static Future<T?> modal<T>(Future<T?> Function() run) async {
-    popupCount++;
-    apply(icons: iconBrightness, forceShow: true);
+    onPopup(true);
     try {
       return await run();
     } finally {
-      popupCount--;
-      apply(icons: iconBrightness);
+      onPopup(false);
     }
+  }
+}
+
+class SystemBarObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) SystemBars.onPopup(true);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) SystemBars.onPopup(false);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) SystemBars.onPopup(false);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (oldRoute is PopupRoute) SystemBars.onPopup(false);
+    if (newRoute is PopupRoute) SystemBars.onPopup(true);
   }
 }

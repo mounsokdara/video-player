@@ -9,17 +9,11 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 
-/**
- * Owns status + navigation bar appearance. Honor / Huawei 3-button nav
- * ignores deprecated systemUiVisibility on API 30+, so hide() must call
- * WindowInsetsController.hide(Type.systemBars()) AND keep the old flags.
- * Flutter AnnotatedRegion can re-show bars a frame later, so hide is
- * posted once more after layout.
- */
 class SystemBarController(private val activity: Activity) {
     private var lastLightIcons = true
     private var lastContrast = true
     private var lastHide = false
+    private var hideGen = 0
     private var uiListenerAttached = false
 
     fun enableEdgeToEdge() {
@@ -32,6 +26,7 @@ class SystemBarController(private val activity: Activity) {
                 window.attributes.layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.statusBarColor = Color.TRANSPARENT
             window.navigationBarColor = Color.TRANSPARENT
             if (Build.VERSION.SDK_INT >= 29) {
@@ -47,16 +42,16 @@ class SystemBarController(private val activity: Activity) {
         lastLightIcons = lightIcons
         lastContrast = contrast
         lastHide = hide
+        hideGen++
+        val gen = hideGen
         activity.runOnUiThread {
             try {
                 val window = activity.window
                 attachUiListener(window)
                 if (hide) {
                     hideBars(window)
-                    window.decorView.post { if (lastHide) hideBars(window) }
-                    window.decorView.postDelayed({ if (lastHide) hideBars(window) }, NativeConstants.HIDE_RETRY_MS)
-                    window.decorView.postDelayed({ if (lastHide) hideBars(window) }, 400)
-                    window.decorView.postDelayed({ if (lastHide) hideBars(window) }, 800)
+                    window.decorView.post { if (lastHide && hideGen == gen) hideBars(window) }
+                    window.decorView.postDelayed({ if (lastHide && hideGen == gen) hideBars(window) }, NativeConstants.HIDE_RETRY_MS)
                 } else {
                     showBars(window, lightIcons, contrast)
                 }
@@ -78,20 +73,11 @@ class SystemBarController(private val activity: Activity) {
                 window.decorView.post { if (lastHide) hideBars(window) }
             }
         }
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.decorView.setOnApplyWindowInsetsListener { v, insets ->
-                val bars = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
-                if (lastHide && insets.isVisible(bars)) {
-                    v.post { if (lastHide) hideBars(window) }
-                }
-                v.onApplyWindowInsets(insets)
-            }
-        }
     }
 
     @Suppress("DEPRECATION")
     private fun hideBars(window: Window) {
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         if (Build.VERSION.SDK_INT >= 29) {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
@@ -100,7 +86,7 @@ class SystemBarController(private val activity: Activity) {
             window.setDecorFitsSystemWindows(false)
             val controller = window.insetsController ?: window.decorView.windowInsetsController
             controller?.let {
-                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars() or WindowInsets.Type.systemBars())
+                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
                 it.systemBarsBehavior =
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
