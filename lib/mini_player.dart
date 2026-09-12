@@ -537,15 +537,17 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
     final live = _dragging || _resizing;
     final aL = _arrowL * MiniGeom.arrowMax;
     final aR = _arrowR * MiniGeom.arrowMax;
+    final extraL = aR;
+    final extraR = aL;
     final radius = math.max(8.0, box.width * 0.035);
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
         Positioned(
-          left: _left,
+          left: _left - extraL,
           top: _top,
-          width: box.width,
+          width: box.width + extraL + extraR,
           height: box.height,
           child: AnimatedOpacity(
             duration: Duration(milliseconds: _closing ? MiniGeom.closeMs : 0),
@@ -557,131 +559,142 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
               child: AnimatedSlide(
                 duration: Duration(milliseconds: _closing ? MiniGeom.closeMs : 0),
                 offset: _closing ? const Offset(0, 0.3) : Offset.zero,
-                child: GestureDetector(
-                  onScaleStart: (d) => _onScaleStart(d, box),
-                  onScaleUpdate: (d) => _onScaleUpdate(d, screen),
-                  onScaleEnd: (d) => _onScaleEnd(d, screen, box),
-                  onTap: () {
-                    if (_moved || _dragging || live) return;
-                    if (_hiddenSide != null) {
-                      _unhide(screen, box);
-                      return;
-                    }
-                    widget.onExpand();
-                  },
-                  child: Material(
-                    color: const Color(0xFF14161C),
-                    elevation: 14,
-                    borderRadius: BorderRadius.circular(radius),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Stack(
-                            fit: StackFit.expand,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      left: extraL,
+                      top: 0,
+                      width: box.width,
+                      height: box.height,
+                      child: GestureDetector(
+                        onScaleStart: (d) => _onScaleStart(d, box),
+                        onScaleUpdate: (d) => _onScaleUpdate(d, screen),
+                        onScaleEnd: (d) => _onScaleEnd(d, screen, box),
+                        onTap: () {
+                          if (_moved || _dragging || live) return;
+                          if (_hiddenSide != null) {
+                            _unhide(screen, box);
+                            return;
+                          }
+                          widget.onExpand();
+                        },
+                        child: Material(
+                          color: const Color(0xFF14161C),
+                          elevation: 14,
+                          borderRadius: BorderRadius.circular(radius),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
                             children: [
-                              ColoredBox(color: const Color(0xFF05060A), child: frame),
-                              Align(
-                                alignment: Alignment.bottomCenter,
-                                child: SizedBox(
-                                  height: 2,
-                                  child: LinearProgressIndicator(
-                                    value: progress,
-                                    backgroundColor: Colors.white24,
-                                    color: const Color(0xFF7AA2FF),
-                                  ),
+                              Expanded(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ColoredBox(color: const Color(0xFF05060A), child: frame),
+                                    Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: SizedBox(
+                                        height: 2,
+                                        child: LinearProgressIndicator(
+                                          value: progress,
+                                          backgroundColor: Colors.white24,
+                                          color: const Color(0xFF7AA2FF),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              MiniTransportBar(
+                                title: item?.title ?? '',
+                                playing: playing,
+                                onPrev: () => unawaited(widget.onPrev()),
+                                onPlay: () => unawaited(_togglePlay()),
+                                onNext: () => unawaited(widget.onNext()),
                               ),
                             ],
                           ),
                         ),
-                        MiniTransportBar(
-                          title: item?.title ?? '',
-                          playing: playing,
-                          onPrev: () => unawaited(widget.onPrev()),
-                          onPlay: () => unawaited(_togglePlay()),
-                          onNext: () => unawaited(widget.onNext()),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    if (aL > 1)
+                      Positioned(
+                        left: extraL + box.width,
+                        top: (box.height - MiniGeom.arrowH) / 2,
+                        child: MiniStickyArrow(
+                          side: 'left',
+                          width: aL,
+                          onTap: () => _unhide(screen, box),
+                          onDragStart: (d) {
+                            _moved = false;
+                            _startFocal = d.globalPosition;
+                            _startPos = Offset(_left, _top);
+                          },
+                          onDragUpdate: (d) {
+                            if ((d.globalPosition - _startFocal).distance < MiniGeom.tapSlop && !_moved) return;
+                            if (!_moved) {
+                              _moved = true;
+                              _hiddenSide = null;
+                              _resumeIfNeeded();
+                            }
+                            setState(() {
+                              _dragging = true;
+                              _left += d.delta.dx;
+                              _top += d.delta.dy;
+                            });
+                          },
+                          onDragEnd: (_) {
+                            _dragging = false;
+                            if (!_moved) {
+                              _unhide(screen, box);
+                            } else {
+                              _finishDrag(screen, MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw));
+                            }
+                          },
+                        ),
+                      ),
+                    if (aR > 1)
+                      Positioned(
+                        left: 0,
+                        top: (box.height - MiniGeom.arrowH) / 2,
+                        child: MiniStickyArrow(
+                          side: 'right',
+                          width: aR,
+                          onTap: () => _unhide(screen, box),
+                          onDragStart: (d) {
+                            _moved = false;
+                            _startFocal = d.globalPosition;
+                            _startPos = Offset(_left, _top);
+                          },
+                          onDragUpdate: (d) {
+                            if ((d.globalPosition - _startFocal).distance < MiniGeom.tapSlop && !_moved) return;
+                            if (!_moved) {
+                              _moved = true;
+                              _hiddenSide = null;
+                              _resumeIfNeeded();
+                            }
+                            setState(() {
+                              _dragging = true;
+                              _left += d.delta.dx;
+                              _top += d.delta.dy;
+                            });
+                          },
+                          onDragEnd: (_) {
+                            _dragging = false;
+                            if (!_moved) {
+                              _unhide(screen, box);
+                            } else {
+                              _finishDrag(screen, MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw));
+                            }
+                          },
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-        if (_hiddenSide == 'left' && aL > 1)
-          Positioned(
-            left: _left + box.width,
-            top: _top + (box.height - MiniGeom.arrowH) / 2,
-            child: MiniStickyArrow(
-              side: 'left',
-              width: aL,
-              onTap: () => _unhide(screen, box),
-              onDragStart: (d) {
-                _moved = false;
-                _startFocal = d.globalPosition;
-                _startPos = Offset(_left, _top);
-              },
-              onDragUpdate: (d) {
-                if ((d.globalPosition - _startFocal).distance < MiniGeom.tapSlop && !_moved) return;
-                if (!_moved) {
-                  _moved = true;
-                  _hiddenSide = null;
-                  _resumeIfNeeded();
-                }
-                setState(() {
-                  _dragging = true;
-                  _left += d.delta.dx;
-                  _top += d.delta.dy;
-                });
-              },
-              onDragEnd: (_) {
-                _dragging = false;
-                if (!_moved) {
-                  _unhide(screen, box);
-                } else {
-                  _finishDrag(screen, MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw));
-                }
-              },
-            ),
-          ),
-        if (_hiddenSide == 'right' && aR > 1)
-          Positioned(
-            left: _left - aR,
-            top: _top + (box.height - MiniGeom.arrowH) / 2,
-            child: MiniStickyArrow(
-              side: 'right',
-              width: aR,
-              onTap: () => _unhide(screen, box),
-              onDragStart: (d) {
-                _moved = false;
-                _startFocal = d.globalPosition;
-                _startPos = Offset(_left, _top);
-              },
-              onDragUpdate: (d) {
-                if ((d.globalPosition - _startFocal).distance < MiniGeom.tapSlop && !_moved) return;
-                if (!_moved) {
-                  _moved = true;
-                  _hiddenSide = null;
-                  _resumeIfNeeded();
-                }
-                setState(() {
-                  _dragging = true;
-                  _left += d.delta.dx;
-                  _top += d.delta.dy;
-                });
-              },
-              onDragEnd: (_) {
-                _dragging = false;
-                if (!_moved) {
-                  _unhide(screen, box);
-                } else {
-                  _finishDrag(screen, MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw));
-                }
-              },
-            ),
-          ),
       ],
     );
   }
