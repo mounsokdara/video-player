@@ -50,6 +50,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   bool _moved = false;
   bool _live = false;
   bool _gestureActive = false;
+  bool _startedOnArrow = false;
   int _activePointers = 0;
 
   double _startW = MiniGeom.defW;
@@ -218,6 +219,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     }
   }
 
+  void _onFrameScaleStart(ScaleStartDetails d) {
+    _startedOnArrow = false;
+    _onScaleStart(d);
+  }
+
+  void _onArrowScaleStart(ScaleStartDetails d) {
+    _startedOnArrow = true;
+    _onScaleStart(d);
+  }
+
   void _onScaleStart(ScaleStartDetails d) {
     if (_dismissed) return;
     _anim.stop();
@@ -239,8 +250,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
     final wasParked = _parked;
     setState(() {
-      _parked = false;
-      _parkSide = 0;
+      if (!_startedOnArrow) {
+        _parked = false;
+        _parkSide = 0;
+      }
       _dismissed = false;
       _live = true;
     });
@@ -266,15 +279,17 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
     final focalInParent = d.focalPoint - _parentOrigin;
     final newPos = focalInParent - _anchorInWidget * ratio;
+
+    final wasParked = _parked;
     setState(() {
       _w = targetW;
       _pos = newPos;
       if (_parked) {
         _parked = false;
         _parkSide = 0;
-        _resumeIfNeeded();
       }
     });
+    if (wasParked) _resumeIfNeeded();
   }
 
   void _onScaleEnd(ScaleEndDetails d) {
@@ -287,37 +302,17 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (!_gestureActive) return;
     _gestureActive = false;
     _live = false;
+    final onArrow = _startedOnArrow;
+    _startedOnArrow = false;
+    if (_activePointers >= 2) _moved = true;
     if (!_moved) {
-      if (_parked) {
+      if (onArrow || _parked) {
         _unpark();
       } else {
         widget.onExpand();
       }
       return;
     }
-    _settle();
-  }
-
-  void _onArrowPanStart(DragStartDetails _) {
-    if (_dismissed) return;
-    _anim.stop();
-    final wasParked = _parked;
-    final oldSide = _parkSide;
-    setState(() {
-      _parked = false;
-      _parkSide = 0;
-      _dismissed = false;
-      _live = true;
-    });
-    if (wasParked && oldSide != 0) _resumeIfNeeded();
-  }
-
-  void _onArrowPanUpdate(DragUpdateDetails d) {
-    setState(() => _pos = _rawPos + d.delta);
-  }
-
-  void _onArrowPanEnd(DragEndDetails _) {
-    _live = false;
     _settle();
   }
 
@@ -505,7 +500,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPointerCancel: _handlePointerCancel,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onScaleStart: _onScaleStart,
+                  onScaleStart: _onFrameScaleStart,
                   onScaleUpdate: _onScaleUpdate,
                   onScaleEnd: _onScaleEnd,
                   child: Stack(
@@ -578,42 +573,47 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             height: MiniGeom.arrowH,
             child: IgnorePointer(
               ignoring: arrowW < 6,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _unpark,
-                onPanStart: _onArrowPanStart,
-                onPanUpdate: _onArrowPanUpdate,
-                onPanEnd: _onArrowPanEnd,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: side == 0 ? 1 : side,
-                      width: arrowW,
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.only(
-                              topLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              topRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
+              child: Listener(
+                onPointerDown: _handlePointerDown,
+                onPointerUp: _handlePointerUp,
+                onPointerCancel: _handlePointerCancel,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onScaleStart: _onArrowScaleStart,
+                  onScaleUpdate: _onScaleUpdate,
+                  onScaleEnd: _onScaleEnd,
+                  child: Stack(
+                    children: [
+                      MiniStickyArrow(
+                        side: side == 0 ? 1 : side,
+                        width: arrowW,
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.only(
+                                topLeft: side > 0
+                                    ? const Radius.circular(4)
+                                    : Radius.zero,
+                                bottomLeft: side > 0
+                                    ? const Radius.circular(4)
+                                    : Radius.zero,
+                                topRight: side < 0
+                                    ? const Radius.circular(4)
+                                    : Radius.zero,
+                                bottomRight: side < 0
+                                    ? const Radius.circular(4)
+                                    : Radius.zero,
+                              ),
+                              border:
+                                  Border.all(color: arrowStroke, width: 1.2),
                             ),
-                            border: Border.all(color: arrowStroke, width: 1.2),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
