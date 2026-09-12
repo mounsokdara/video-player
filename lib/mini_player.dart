@@ -9,7 +9,7 @@ import 'main.dart';
 import 'session.dart';
 
 // ---------------------------------------------------------------------------
-// Geometry constants & physics
+// Geometry & physics
 // ---------------------------------------------------------------------------
 
 class MiniGeom {
@@ -84,7 +84,7 @@ class MiniPhysics {
 }
 
 // ---------------------------------------------------------------------------
-// Small widgets
+// Widgets
 // ---------------------------------------------------------------------------
 
 class MiniStickyArrow extends StatelessWidget {
@@ -245,8 +245,7 @@ class MiniPlayerOverlay extends StatefulWidget {
 
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     with SingleTickerProviderStateMixin {
-  double _left = 0;
-  double _top = 0;
+  double _left = 0, _top = 0;
   double _widthVw = MiniGeom.defW;
   bool _ready = false;
   bool _dragging = false;
@@ -255,14 +254,12 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   bool _moved = false;
   String? _hiddenSide;
   bool _pausedForHide = false;
-  double _arrowL = 0;
-  double _arrowR = 0;
+  double _arrowL = 0, _arrowR = 0;
   double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
   Offset _startPos = Offset.zero;
   double _startBoxW = 0;
-  double _pinchFx = 0.5;
-  double _pinchFy = 0.5;
+  double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
 
   late final AnimationController _move;
@@ -294,7 +291,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     super.dispose();
   }
 
-  // --- controller binding -------------------------------------------------
+  // --- controller ---------------------------------------------------------
 
   void _bind() {
     final next = PlaybackSession.controller;
@@ -314,6 +311,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onMove() {
     final t = MiniGeom.ease.transform(_move.value.clamp(0.0, 1.0).toDouble());
+    if (!mounted) return;
     setState(() {
       _left = _fromLeft + (_toLeft - _fromLeft) * t;
       _top = _fromTop + (_toTop - _fromTop) * t;
@@ -333,6 +331,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _move.duration = const Duration(milliseconds: MiniGeom.snapMs);
     _move.forward(from: 0).whenComplete(() {
       if (!mounted) return;
+      // Snap to exact target (avoids 1px drift after long tweens).
       _left = _toLeft;
       _top = _toTop;
       _widthVw = _toW;
@@ -392,7 +391,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (mounted) setState(() {});
   }
 
-  // --- geometry helpers ---------------------------------------------------
+  // --- geometry -----------------------------------------------------------
 
   Rect _rect(Size box) => Rect.fromLTWH(_left, _top, box.width, box.height);
 
@@ -402,8 +401,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   String _sideFor(Rect r, Size screen) =>
       (r.left + r.width / 2) < screen.width / 2 ? 'left' : 'right';
 
-  /// Sets arrow visibility from current overlap. [threshold] matches the
-  /// original code (0.02 while settling, 0.05 while dragging).
   void _refreshArrows(Rect r, Size screen, {double threshold = 0.02}) {
     final ox = MiniPhysics.offX(r, screen);
     if (ox > threshold) {
@@ -426,7 +423,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _arrowR = side == 'right' ? p : 0;
   }
 
-  // --- park / unhide / settle --------------------------------------------
+  // --- state transitions --------------------------------------------------
 
   void _park(String side, Size screen, Size box) {
     _hiddenSide = side;
@@ -434,6 +431,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _dragOpacity = 1;
     final left = side == 'left' ? -box.width : screen.width;
     _animateTo(left, _top, _widthVw, onDone: () {
+      if (!mounted) return;
       _setArrows(side, 1);
       _pauseForHide();
     });
@@ -443,6 +441,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final side = _hiddenSide ?? _sideFor(_rect(box), screen);
     _setArrows(side, 1);
     _dragOpacity = 1;
+    _dragging = false;
+    _resizing = false;
     final seed = Rect.fromLTWH(
       side == 'left' ? 0 : screen.width - box.width,
       _top,
@@ -452,6 +452,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final target = MiniPhysics.settlePos(seed, screen, box,
         navH: widget.navH, pad: widget.pad);
     _animateTo(target.dx, target.dy, _widthVw, onDone: () {
+      if (!mounted) return;
       _hiddenSide = null;
       _followArrows();
       _resumeIfNeeded();
@@ -493,12 +494,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _pausedForHide = false;
     _hiddenSide = null;
     _setArrows(null, 0);
+    _move.stop(); // cancel any in-flight snap so close anim is clean
     if (mounted) setState(() {});
     await Future<void>.delayed(const Duration(milliseconds: MiniGeom.closeMs));
     await widget.onClose();
   }
 
-  // --- gestures -----------------------------------------------------------
+  // --- main-box gestures --------------------------------------------------
 
   void _onScaleStart(ScaleStartDetails d, Size box) {
     if (_closing) return;
@@ -553,8 +555,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _left = _startPos.dx + (d.focalPoint.dx - _startFocal.dx);
       _top = _startPos.dy + (d.focalPoint.dy - _startFocal.dy);
     });
-    final box = _boxFor(screen);
-    final r = _rect(box);
+    final r = _rect(_boxFor(screen));
     _dragOpacity = math.max(0.1, 1 - MiniPhysics.offBottom(r, screen));
     _refreshArrows(r, screen, threshold: 0.05);
     setState(() {});
@@ -566,18 +567,21 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _dragging = false;
     _resizing = false;
     if (!was) return;
-    _finishDrag(screen, box);
+    // Use a fresh box: width may have changed during a pinch.
+    _finishDrag(screen, _boxFor(screen));
   }
 
-  // --- arrow drag ---------------------------------------------------------
+  // --- arrow gestures -----------------------------------------------------
 
   void _arrowDragStart(DragStartDetails d) {
+    if (_closing) return;
     _moved = false;
     _startFocal = d.globalPosition;
     _startPos = Offset(_left, _top);
   }
 
   void _arrowDragUpdate(DragUpdateDetails d, Size screen) {
+    if (_closing) return;
     if (!_moved && (d.globalPosition - _startFocal).distance < MiniGeom.tapSlop) {
       return;
     }
@@ -594,7 +598,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _arrowDragEnd(Size screen) {
+    if (_closing) return;
     _dragging = false;
+    _resizing = false;
     final box = _boxFor(screen);
     if (!_moved) {
       _unhide(screen, box);
@@ -633,8 +639,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       final start = MiniPhysics.box(screen, video, _widthVw);
       _left = screen.width - start.width - widget.pad.right;
       _top = (screen.height * 0.55 - start.height / 2)
-          .clamp(widget.pad.top,
-              math.max(widget.pad.top, screen.height - widget.navH - start.height))
+          .clamp(
+            widget.pad.top,
+            math.max(widget.pad.top, screen.height - widget.navH - start.height),
+          )
           .toDouble();
     }
 
@@ -646,7 +654,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       playing = c?.value.isPlaying ?? false;
       final dur = c?.value.duration.inMilliseconds ?? 0;
       if (dur > 0) {
-        progress = (c!.value.position.inMilliseconds / dur).clamp(0.0, 1.0).toDouble();
+        progress = (c!.value.position.inMilliseconds / dur)
+            .clamp(0.0, 1.0)
+            .toDouble();
       }
     } catch (_) {}
 
@@ -704,7 +714,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                         onScaleUpdate: (d) => _onScaleUpdate(d, screen),
                         onScaleEnd: (d) => _onScaleEnd(d, screen, box),
                         onTap: () {
-                          if (_moved || live) return;
+                          if (_moved || live || _closing) return;
                           if (_hiddenSide != null) {
                             _unhide(screen, box);
                           } else {
@@ -722,7 +732,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    ColoredBox(color: const Color(0xFF05060A), child: frame),
+                                    ColoredBox(
+                                        color: const Color(0xFF05060A),
+                                        child: frame),
                                     Align(
                                       alignment: Alignment.bottomCenter,
                                       child: SizedBox(
