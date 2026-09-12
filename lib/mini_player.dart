@@ -410,6 +410,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final scheme = Theme.of(context).colorScheme;
     final stroke = scheme.outline.withValues(alpha: 0.55);
     final arrowStroke = scheme.outline.withValues(alpha: 0.85);
+    final showArrow = !_dismissed && arrowW >= 6 && side != 0;
 
     final double arrowLeft;
     if (side < 0) {
@@ -544,51 +545,48 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             ),
           ),
         ),
-        if (!_dismissed)
+        if (showArrow)
           Positioned(
             left: arrowLeft,
             top: arrowTop,
             width: arrowW,
             height: MiniGeom.arrowH,
-            child: IgnorePointer(
-              ignoring: arrowW < 6,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _unpark,
-                onPanStart: _onArrowPanStart,
-                onPanUpdate: _onArrowPanUpdate,
-                onPanEnd: _onArrowPanEnd,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: side == 0 ? 1 : side,
-                      width: arrowW,
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.only(
-                              topLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              topRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                            ),
-                            border: Border.all(color: arrowStroke, width: 1.2),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _unpark,
+              onPanStart: _onArrowPanStart,
+              onPanUpdate: _onArrowPanUpdate,
+              onPanEnd: _onArrowPanEnd,
+              child: Stack(
+                children: [
+                  MiniStickyArrow(
+                    side: side == 0 ? 1 : side,
+                    width: arrowW,
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.only(
+                            topLeft: side > 0
+                                ? const Radius.circular(4)
+                                : Radius.zero,
+                            bottomLeft: side > 0
+                                ? const Radius.circular(4)
+                                : Radius.zero,
+                            topRight: side < 0
+                                ? const Radius.circular(4)
+                                : Radius.zero,
+                            bottomRight: side < 0
+                                ? const Radius.circular(4)
+                                : Radius.zero,
                           ),
+                          border: Border.all(color: arrowStroke, width: 1.2),
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
