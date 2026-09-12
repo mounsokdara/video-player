@@ -135,7 +135,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (_parked) return MiniGeom.arrowMaxW;
     final o = _overhang(pos);
     final full = MiniGeom.parkT * _w;
-    return (MiniGeom.arrowMaxW * (o / full)).clamp(0.0, MiniGeom.arrowMaxW).toDouble();
+    return (MiniGeom.arrowMaxW * (o / full))
+        .clamp(0.0, MiniGeom.arrowMaxW)
+        .toDouble();
   }
 
   void _pauseForPark() {
@@ -213,7 +215,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (_dismissed) return;
     final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
     if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
-        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget)).distance >
+        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget))
+                .distance >
             MiniGeom.tapSlop ||
         pinching) {
       _moved = true;
@@ -326,7 +329,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final targetW = MiniPhysics.clampW(_w, _screen);
     final targetH = MiniPhysics.boxFor(targetW, video).height;
     final safe = _safe;
-    final targetX = side < 0 ? safe.left : math.max(safe.left, safe.right - targetW);
+    final targetX =
+        side < 0 ? safe.left : math.max(safe.left, safe.right - targetW);
     final maxY = math.max(safe.top, safe.bottom - targetH);
     final targetY = _rawPos.dy.clamp(safe.top, maxY).toDouble();
     final fromPos = _rawPos;
@@ -373,6 +377,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final arrowW = _arrowWidthFor(pos);
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
+    final stroke = scheme.outline.withValues(alpha: 0.55);
+    final arrowStroke = scheme.outline.withValues(alpha: 0.7);
 
     final double arrowLeft;
     if (side < 0) {
@@ -399,7 +405,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       playing = c?.value.isPlaying ?? false;
       final dur = c?.value.duration.inMilliseconds ?? 0;
       if (dur > 0) {
-        progress = (c!.value.position.inMilliseconds / dur).clamp(0.0, 1.0).toDouble();
+        progress =
+            (c!.value.position.inMilliseconds / dur).clamp(0.0, 1.0).toDouble();
       }
     } catch (_) {}
 
@@ -413,15 +420,15 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       } else {
         frame = ColoredBox(
           color: const Color(0xFF05060A),
-          child: Icon(Icons.play_circle, color: scheme.onSurface.withValues(alpha: 0.5)),
+          child: Icon(
+            Icons.play_circle,
+            color: scheme.onSurface.withValues(alpha: 0.5),
+          ),
         );
       }
     } catch (_) {
       frame = const ColoredBox(color: Color(0xFF05060A));
     }
-
-    final strokeColor = _live ? scheme.primary : scheme.outlineVariant;
-    final strokeWidth = _live ? 1.6 : 1.0;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -445,12 +452,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                   color: scheme.surface,
                   elevation: 0,
                   shadowColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(
-                      color: strokeColor,
-                      width: strokeWidth,
-                    ),
+                    side: BorderSide(color: stroke, width: 1.2),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
@@ -459,7 +464,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            ColoredBox(color: const Color(0xFF05060A), child: frame),
+                            ColoredBox(
+                              color: const Color(0xFF05060A),
+                              child: frame,
+                            ),
                             Align(
                               alignment: Alignment.bottomCenter,
                               child: SizedBox(
@@ -504,18 +512,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
                 child: DecoratedBox(
-                  position: DecorationPosition.foreground,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.horizontal(
-                      left: side > 0 ? Radius.zero : const Radius.circular(8),
-                      right: side > 0 ? const Radius.circular(8) : Radius.zero,
-                    ),
-                    border: Border.all(
-                      color: strokeColor,
-                      width: strokeWidth,
-                    ),
+                    borderRadius: BorderRadius.circular(MiniGeom.arrowH / 2),
+                    border: Border.all(color: arrowStroke, width: 1.2),
                   ),
-                  child: MiniStickyArrow(side: side == 0 ? 1 : side, width: arrowW),
+                  child: MiniStickyArrow(
+                    side: side == 0 ? 1 : side,
+                    width: arrowW,
+                  ),
                 ),
               ),
             ),
