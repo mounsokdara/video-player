@@ -213,13 +213,13 @@ class AboutActivity : Activity() {
 
     companion object {
         private const val LICENSES = "" +
-            "Flutter engine — BSD 3-Clause — Google LLC\n" +
-            "Dart — BSD 3-Clause — Google LLC\n" +
-            "video_player — BSD 3-Clause\n" +
-            "Media3 / ExoPlayer — Apache 2.0 — Google LLC\n" +
-            "AndroidX — Apache 2.0 — Google LLC\n" +
-            "Kotlin — Apache 2.0 — JetBrains\n" +
-            "Material Components — Apache 2.0\n" +
-            "battery_plus, permission_handler, shared_preferences, wakelock_plus, package_info_plus — BSD / Apache / MIT as published by each project."
+            "Flutter engine - BSD 3-Clause - Google LLC\n" +
+            "Dart - BSD 3-Clause - Google LLC\n" +
+            "video_player - BSD 3-Clause\n" +
+            "Media3 / ExoPlayer - Apache 2.0 - Google LLC\n" +
+            "AndroidX - Apache 2.0 - Google LLC\n" +
+            "Kotlin - Apache 2.0 - JetBrains\n" +
+            "Material Components - Apache 2.0\n" +
+            "battery_plus, permission_handler, shared_preferences, wakelock_plus, package_info_plus - BSD / Apache / MIT as published by each project."
     }
 }
