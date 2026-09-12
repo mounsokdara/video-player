@@ -84,52 +84,36 @@ class MiniStickyArrow extends StatelessWidget {
     super.key,
     required this.side,
     required this.width,
-    required this.onTap,
-    required this.onDragStart,
-    required this.onDragUpdate,
-    required this.onDragEnd,
   });
 
   final String side;
   final double width;
-  final VoidCallback onTap;
-  final GestureDragStartCallback onDragStart;
-  final GestureDragUpdateCallback onDragUpdate;
-  final GestureDragEndCallback onDragEnd;
 
   @override
   Widget build(BuildContext context) {
     final left = side == 'left';
     final scheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      onPanStart: onDragStart,
-      onPanUpdate: onDragUpdate,
-      onPanEnd: onDragEnd,
-      onPanCancel: () => onDragEnd(DragEndDetails()),
-      child: AnimatedContainer(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: MiniGeom.ease,
+      width: width,
+      height: MiniGeom.arrowH,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.horizontal(
+          left: left ? Radius.zero : const Radius.circular(12),
+          right: left ? const Radius.circular(12) : Radius.zero,
+        ),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: AnimatedOpacity(
         duration: const Duration(milliseconds: 250),
         curve: MiniGeom.ease,
-        width: width,
-        height: MiniGeom.arrowH,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          border: Border.all(color: scheme.outlineVariant),
-          borderRadius: BorderRadius.horizontal(
-            left: left ? Radius.zero : const Radius.circular(12),
-            right: left ? const Radius.circular(12) : Radius.zero,
-          ),
-        ),
-        clipBehavior: Clip.hardEdge,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 250),
-          curve: MiniGeom.ease,
-          opacity: width < 8 ? 0 : 1,
-          child: Icon(left ? Icons.chevron_right : Icons.chevron_left,
-              size: 24, color: scheme.onSurface),
-        ),
+        opacity: width < 8 ? 0 : 1,
+        child: Icon(left ? Icons.chevron_right : Icons.chevron_left,
+            size: 24, color: scheme.onSurface),
       ),
     );
   }
@@ -246,6 +230,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _arrowL = 0, _arrowR = 0;
   double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
+  Offset _startPos = Offset.zero;
   double _startBoxW = 0;
   double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
@@ -545,66 +530,19 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _finishDrag(screen, _boxFor(screen));
   }
 
-  void _arrowDragStart(DragStartDetails d) {
-    if (_closing) return;
-    _move.stop();
-    _moved = false;
-    _startFocal = d.globalPosition;
-  }
-
-  void _arrowDragUpdate(DragUpdateDetails d, String side) {
-    if (_closing) return;
-    if (!_moved && (d.globalPosition - _startFocal).distance < MiniGeom.tapSlop) {
-      return;
-    }
-    if (!_moved) {
-      _moved = true;
-      _resumeIfNeeded();
-    }
-    final pull = side == 'left'
-        ? math.max(0.0, d.delta.dx)
-        : math.min(0.0, d.delta.dx);
-    if (pull == 0) return;
-    setState(() {
-      _dragging = true;
-      _left += pull;
-    });
-    final screen = MediaQuery.sizeOf(context);
-    final r = _rect(_boxFor(screen));
-    _dragOpacity = math.max(0.1, 1 - MiniPhysics.offBottom(r, screen));
-    _refreshArrows(r, screen, threshold: 0.05);
-    setState(() {});
-  }
-
-  void _arrowDragEnd(String side, Size screen) {
-    if (_closing) return;
-    _dragging = false;
-    _resizing = false;
-    final box = _boxFor(screen);
-    if (!_moved) {
-      _unhide(screen, box);
-      return;
-    }
-    final r = _rect(box);
-    final ox = MiniPhysics.offX(r, screen);
-    if (ox >= MiniGeom.hideT) {
-      _park(side, screen, box);
-    } else {
-      _settle(screen, box);
-    }
-  }
-
   Widget _arrow(String side, double width, double leftOffset, Size screen, Size box) {
     return Positioned(
       left: leftOffset,
       top: (box.height - MiniGeom.arrowH) / 2,
-      child: MiniStickyArrow(
-        side: side,
-        width: width,
-        onTap: () => _unhide(screen, box),
-        onDragStart: _arrowDragStart,
-        onDragUpdate: (d) => _arrowDragUpdate(d, side),
-        onDragEnd: (_) => _arrowDragEnd(side, screen),
+      child: GestureDetector(
+        onScaleStart: (d) => _onScaleStart(d, box),
+        onScaleUpdate: (d) => _onScaleUpdate(d, screen),
+        onScaleEnd: (d) => _onScaleEnd(d, screen, box),
+        onTap: () {
+          if (_moved || _closing) return;
+          _unhide(screen, box);
+        },
+        child: MiniStickyArrow(side: side, width: width),
       ),
     );
   }
