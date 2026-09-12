@@ -102,6 +102,7 @@ class MiniStickyArrow extends StatelessWidget {
     final left = side == 'left';
     final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onPanStart: onDragStart,
       onPanUpdate: onDragUpdate,
@@ -245,7 +246,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _arrowL = 0, _arrowR = 0;
   double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
-  Offset _startPos = Offset.zero;
   double _startBoxW = 0;
   double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
@@ -547,37 +547,50 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _arrowDragStart(DragStartDetails d) {
     if (_closing) return;
+    _move.stop();
     _moved = false;
     _startFocal = d.globalPosition;
-    _startPos = Offset(_left, _top);
   }
 
-  void _arrowDragUpdate(DragUpdateDetails d, Size screen) {
+  void _arrowDragUpdate(DragUpdateDetails d, String side) {
     if (_closing) return;
     if (!_moved && (d.globalPosition - _startFocal).distance < MiniGeom.tapSlop) {
       return;
     }
     if (!_moved) {
       _moved = true;
-      _hiddenSide = null;
       _resumeIfNeeded();
     }
+    final pull = side == 'left'
+        ? math.max(0.0, d.delta.dx)
+        : math.min(0.0, d.delta.dx);
+    if (pull == 0) return;
     setState(() {
       _dragging = true;
-      _left += d.delta.dx;
-      _top += d.delta.dy;
+      _left += pull;
     });
+    final screen = MediaQuery.sizeOf(context);
+    final r = _rect(_boxFor(screen));
+    _dragOpacity = math.max(0.1, 1 - MiniPhysics.offBottom(r, screen));
+    _refreshArrows(r, screen, threshold: 0.05);
+    setState(() {});
   }
 
-  void _arrowDragEnd(Size screen) {
+  void _arrowDragEnd(String side, Size screen) {
     if (_closing) return;
     _dragging = false;
     _resizing = false;
     final box = _boxFor(screen);
     if (!_moved) {
       _unhide(screen, box);
+      return;
+    }
+    final r = _rect(box);
+    final ox = MiniPhysics.offX(r, screen);
+    if (ox >= MiniGeom.hideT) {
+      _park(side, screen, box);
     } else {
-      _finishDrag(screen, box);
+      _settle(screen, box);
     }
   }
 
@@ -590,8 +603,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         width: width,
         onTap: () => _unhide(screen, box),
         onDragStart: _arrowDragStart,
-        onDragUpdate: (d) => _arrowDragUpdate(d, screen),
-        onDragEnd: (_) => _arrowDragEnd(screen),
+        onDragUpdate: (d) => _arrowDragUpdate(d, side),
+        onDragEnd: (_) => _arrowDragEnd(side, screen),
       ),
     );
   }
