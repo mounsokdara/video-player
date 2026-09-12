@@ -127,7 +127,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   int _sideFor(Offset pos) {
     if (_parked && _parkSide != 0) return _parkSide;
     if (_parked) {
-      // parked but side lost: derive from position
       final screenW = _screen.width;
       if (pos.dx + _w / 2 < screenW / 2) return -1;
       return 1;
@@ -207,10 +206,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _handlePointerUp(PointerUpEvent _) {
     _activePointers = math.max(0, _activePointers - 1);
+    if (_activePointers == 0 && _gestureActive) {
+      _finalizeGesture();
+    }
   }
 
   void _handlePointerCancel(PointerCancelEvent _) {
     _activePointers = math.max(0, _activePointers - 1);
+    if (_activePointers == 0 && _gestureActive) {
+      _finalizeGesture();
+    }
   }
 
   void _onScaleStart(ScaleStartDetails d) {
@@ -274,10 +279,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onScaleEnd(ScaleEndDetails d) {
     if (_dismissed) return;
-    if (d.pointerCount > 0) return;
+    if (_activePointers > 0) return;
+    _finalizeGesture();
+  }
+
+  void _finalizeGesture() {
+    if (!_gestureActive) return;
     _gestureActive = false;
     _live = false;
-    if (_activePointers >= 2) _moved = true;
     if (!_moved) {
       if (_parked) {
         _unpark();
