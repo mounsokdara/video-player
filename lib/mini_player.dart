@@ -377,8 +377,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final arrowW = _arrowWidthFor(pos);
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
-    final stroke = scheme.outline.withValues(alpha: 0.55);
-    final arrowStroke = scheme.outline.withValues(alpha: 0.85);
+    final strokeColor = scheme.outline.withValues(alpha: 0.55);
+    final strokeW = _live ? 1.6 : 1.2;
 
     final double arrowLeft;
     if (side < 0) {
@@ -430,22 +430,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       frame = const ColoredBox(color: Color(0xFF05060A));
     }
 
-    final arrowRadius = MiniGeom.arrowH / 2;
-    final BorderRadius arrowBorderRadius;
-    if (side < 0) {
-      arrowBorderRadius = BorderRadius.only(
-        topRight: Radius.circular(arrowRadius),
-        bottomRight: Radius.circular(arrowRadius),
-      );
-    } else if (side > 0) {
-      arrowBorderRadius = BorderRadius.only(
-        topLeft: Radius.circular(arrowRadius),
-        bottomLeft: Radius.circular(arrowRadius),
-      );
-    } else {
-      arrowBorderRadius = BorderRadius.zero;
-    }
-
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -463,62 +447,51 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onScaleStart: _onScaleStart,
                 onScaleUpdate: _onScaleUpdate,
                 onScaleEnd: _onScaleEnd,
-                child: Stack(
-                  children: [
-                    Material(
-                      key: _cardKey,
-                      color: scheme.surface,
-                      elevation: 0,
-                      shadowColor: Colors.transparent,
-                      surfaceTintColor: Colors.transparent,
-                      borderRadius: BorderRadius.circular(14),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        children: [
-                          Expanded(
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ColoredBox(
-                                  color: const Color(0xFF05060A),
-                                  child: frame,
-                                ),
-                                Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: SizedBox(
-                                    height: 3,
-                                    child: LinearProgressIndicator(
-                                      value: progress,
-                                      minHeight: 3,
-                                      backgroundColor: Colors.white24,
-                                      color: const Color(0xFF9E8CFF),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                child: Material(
+                  key: _cardKey,
+                  color: scheme.surface,
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: strokeColor, width: strokeW),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              color: const Color(0xFF05060A),
+                              child: frame,
                             ),
-                          ),
-                          MiniTransportBar(
-                            title: item?.title ?? '',
-                            playing: playing,
-                            onPrev: () => unawaited(widget.onPrev()),
-                            onPlay: () => unawaited(_togglePlay()),
-                            onNext: () => unawaited(widget.onNext()),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: stroke, width: 1.2),
-                          ),
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: SizedBox(
+                                height: 3,
+                                child: LinearProgressIndicator(
+                                  value: progress,
+                                  minHeight: 3,
+                                  backgroundColor: Colors.white24,
+                                  color: const Color(0xFF9E8CFF),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
+                      MiniTransportBar(
+                        title: item?.title ?? '',
+                        playing: playing,
+                        onPrev: () => unawaited(widget.onPrev()),
+                        onPlay: () => unawaited(_togglePlay()),
+                        onNext: () => unawaited(widget.onNext()),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -538,23 +511,18 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanStart: _onArrowPanStart,
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: side == 0 ? 1 : side,
-                      width: arrowW,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.horizontal(
+                      left: Radius.circular(side < 0 ? 12 : 4),
+                      right: Radius.circular(side < 0 ? 4 : 12),
                     ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: arrowBorderRadius,
-                            border: Border.all(color: arrowStroke, width: 1.2),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                    border: Border.all(color: strokeColor, width: strokeW),
+                  ),
+                  child: MiniStickyArrow(
+                    side: side == 0 ? 1 : side,
+                    width: arrowW,
+                  ),
                 ),
               ),
             ),
