@@ -47,7 +47,7 @@ class AboutActivity : Activity() {
             @Suppress("DEPRECATION")
             info?.versionCode?.toLong() ?: 1
         }
-        val versionLabel = "$versionName ($versionCode) · 1.0.0_Indev"
+        val versionLabel = "$versionName ($versionCode) · 1.0.0_BETA"
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

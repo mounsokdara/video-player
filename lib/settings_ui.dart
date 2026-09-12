@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -66,7 +68,7 @@ class SettingsHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: const Text('Video Player 1.0.0_Indev'),
+              subtitle: const Text('Video Player 1.0.0_BETA'),
               onTap: () async {
                 final opened = await AndroidBridge.openAbout();
                 if (opened) return;
@@ -165,7 +167,13 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             title: const Text('Show hidden files'),
             subtitle: const Text('Include dot-folders and hidden videos when scanning'),
             value: s.showHiddenFolders,
-            onChanged: (v) => set(() => s.showHiddenFolders = v),
+            onChanged: (v) {
+              set(() => s.showHiddenFolders = v);
+              unawaited(() async {
+                await library.scan();
+                widget.onChanged();
+              }());
+            },
           ),
           SwitchListTile(title: const Text('Haptic feedback'), value: s.hapticFeedback, onChanged: (v) => set(() => s.hapticFeedback = v)),
           ListTile(

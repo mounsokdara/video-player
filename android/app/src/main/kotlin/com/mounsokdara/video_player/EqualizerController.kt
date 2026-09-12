@@ -8,7 +8,6 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import java.io.File
 
-/** Equalizer / bass / surround + ExoPlayer playback parameters. */
 class EqualizerController(
     private val activity: FlutterActivity,
     private val engine: () -> FlutterEngine?,
@@ -265,6 +264,7 @@ class EqualizerController(
         return null
     }
 
+    @Suppress("UNCHECKED_CAST")
     private fun findExoPlayer(): Any? {
         val engine = engine() ?: return null
         return try {
@@ -291,11 +291,13 @@ class EqualizerController(
         }
     }
 
+    @Suppress("DiscouragedPrivateApi")
     private fun findField(obj: Any, name: String): java.lang.reflect.Field? {
         var c: Class<*>? = obj.javaClass
         while (c != null) {
             try {
                 val f = c.getDeclaredField(name)
+                @Suppress("DEPRECATION")
                 f.isAccessible = true
                 return f
             } catch (_: NoSuchFieldException) {

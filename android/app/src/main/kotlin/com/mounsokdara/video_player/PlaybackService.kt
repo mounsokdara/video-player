@@ -43,14 +43,13 @@ class PlaybackService : Service() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = getString(R.string.playback_channel_desc)
+                    setSound(null, null)
+                }
             )
         }
         session = MediaSessionCompat(this, "video_player").apply {
-            setFlags(
-                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
-                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
-            )
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
                     MainActivity.emitMedia("play")
@@ -167,7 +166,7 @@ class PlaybackService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle(title)
             .setContentText(if (playing) artist else "Paused")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_play)
             .setContentIntent(launch)
             .setOngoing(playing)
             .setSilent(true)
@@ -206,6 +205,12 @@ class PlaybackService : Service() {
         session?.isActive = false
         session?.release()
         session = null
+        if (Build.VERSION.SDK_INT >= 24) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         super.onDestroy()
     }
 

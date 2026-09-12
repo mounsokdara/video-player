@@ -11,10 +11,6 @@ import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileNotFoundException
 
-/**
- * Surfaces this app in the system file picker's "Open from" sidebar.
- * https://developer.android.com/guide/topics/providers/create-document-provider
- */
 class VideoDocumentsProvider : DocumentsProvider() {
     override fun onCreate(): Boolean = true
 
@@ -30,7 +26,8 @@ class VideoDocumentsProvider : DocumentsProvider() {
             .add(
                 DocumentsContract.Root.COLUMN_FLAGS,
                 DocumentsContract.Root.FLAG_LOCAL_ONLY or
-                    DocumentsContract.Root.FLAG_SUPPORTS_RECENTS
+                    DocumentsContract.Root.FLAG_SUPPORTS_RECENTS or
+                    DocumentsContract.Root.FLAG_SUPPORTS_SEARCH
             )
         return result
     }
@@ -40,7 +37,7 @@ class VideoDocumentsProvider : DocumentsProvider() {
         if (documentId == DOC_ROOT) {
             addRootDoc(result)
         } else {
-            addVideo(result, documentId) ?: throw FileNotFoundException(documentId)
+            addVideo(result, documentId)
         }
         return result
     }
@@ -59,6 +56,16 @@ class VideoDocumentsProvider : DocumentsProvider() {
     override fun queryRecentDocuments(rootId: String, projection: Array<String>?): Cursor {
         val result = MatrixCursor(projection ?: DOC_COLUMNS)
         for (row in loadVideos(limit = 64)) addVideoRow(result, row)
+        return result
+    }
+
+    override fun querySearchDocuments(rootId: String, query: String, projection: Array<String>?): Cursor {
+        val result = MatrixCursor(projection ?: DOC_COLUMNS)
+        val q = query.lowercase()
+        if (q.isBlank()) return result
+        for (row in loadVideos(limit = 200)) {
+            if (row.name.lowercase().contains(q)) addVideoRow(result, row)
+        }
         return result
     }
 
@@ -86,10 +93,10 @@ class VideoDocumentsProvider : DocumentsProvider() {
             .add(DocumentsContract.Document.COLUMN_LAST_MODIFIED, System.currentTimeMillis())
     }
 
-    private fun addVideo(result: MatrixCursor, documentId: String): Boolean? {
-        val row = loadVideos(limit = 800).firstOrNull { it.id == documentId } ?: return null
+    private fun addVideo(result: MatrixCursor, documentId: String) {
+        val row = loadVideos(limit = 800).firstOrNull { it.id == documentId }
+            ?: throw FileNotFoundException(documentId)
         addVideoRow(result, row)
-        return true
     }
 
     private fun addVideoRow(result: MatrixCursor, row: VideoRow) {
@@ -118,6 +125,7 @@ class VideoDocumentsProvider : DocumentsProvider() {
         return if (f.exists()) f else null
     }
 
+    @Suppress("DEPRECATION")
     private fun loadVideos(limit: Int): List<VideoRow> {
         val out = ArrayList<VideoRow>()
         val cr = context?.contentResolver ?: return out

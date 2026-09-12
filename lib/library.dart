@@ -149,7 +149,7 @@ class LibraryService {
 
     final nativeTargets = <StorageVolumeInfo>[
       ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
-      if (next.isEmpty) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
+      if (next.isEmpty || hidden) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
     ];
     for (final vol in nativeTargets) {
       if (vol.path.isEmpty) continue;

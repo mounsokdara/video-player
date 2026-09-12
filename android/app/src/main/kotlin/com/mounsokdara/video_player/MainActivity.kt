@@ -194,7 +194,9 @@ class MainActivity : FlutterActivity() {
                             val root = call.argument<String>("path")
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
                             val hidden = call.argument<Boolean>("includeHidden") ?: false
-                            result.success(scanVideos(File(root), 3, hidden))
+                            val depth = if (hidden) 8 else 4
+                            val budget = if (hidden) 8000 else NativeConstants.SCAN_BUDGET
+                            result.success(scanVideos(File(root), depth, hidden, budget))
                         }
                         "deletePath" -> {
                             val path = call.argument<String>("path")
@@ -758,9 +760,9 @@ class MainActivity : FlutterActivity() {
         return if (candidate.exists()) candidate.absolutePath else null
     }
 
-    private fun scanVideos(dir: File, depth: Int, hidden: Boolean): List<Map<String, Any?>> {
+    private fun scanVideos(dir: File, depth: Int, hidden: Boolean, budget: Int = NativeConstants.SCAN_BUDGET): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
-        scanVideosInto(dir, depth, hidden, out, intArrayOf(NativeConstants.SCAN_BUDGET))
+        scanVideosInto(dir, depth, hidden, out, intArrayOf(budget))
         return out
     }
 
