@@ -52,6 +52,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _startFocal = Offset.zero;
   Offset _startPos = Offset.zero;
   double _startScale = 1;
+  double _scaleBase = 1;
+  int _lastPointers = 0;
   double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
 
@@ -283,24 +285,38 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     await widget.onClose();
   }
 
+  void _captureAnchor(Offset focal, Size screen, int pointers, double scaleBase) {
+    final box = _boxFor(screen);
+    _startFocal = focal;
+    _startPos = Offset(_left, _top);
+    _startScale = _scale;
+    _scaleBase = scaleBase == 0 ? 1.0 : scaleBase;
+    _lastPointers = pointers;
+    _pinchFx = box.width <= 0
+        ? 0.5
+        : ((focal.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
+    _pinchFy = box.height <= 0
+        ? 0.5
+        : ((focal.dy - _top) / box.height).clamp(0.0, 1.0).toDouble();
+  }
+
   void _onScaleStart(ScaleStartDetails d, Size box) {
     if (_closing) return;
     _move.stop();
     _moved = false;
-    _startFocal = d.focalPoint;
-    _startPos = Offset(_left, _top);
-    _startScale = _scale;
-    _pinchFx = box.width <= 0
-        ? 0.5
-        : ((d.focalPoint.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
-    _pinchFy = box.height <= 0
-        ? 0.5
-        : ((d.focalPoint.dy - _top) / box.height).clamp(0.0, 1.0).toDouble();
+    _captureAnchor(d.focalPoint, MediaQuery.sizeOf(context), 1, 1.0);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d, Size screen) {
     if (_closing) return;
-    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
+
+    if (d.pointerCount != _lastPointers) {
+      _captureAnchor(d.focalPoint, screen, d.pointerCount, d.scale);
+    }
+
+    final rel = _scaleBase == 0 ? 1.0 : d.scale / _scaleBase;
+    final pinching = (rel - 1).abs() > 0.02 || d.pointerCount >= 2;
+
     if ((_startFocal - d.focalPoint).distance > MiniGeom.tapSlop || pinching) {
       _moved = true;
     }
@@ -313,8 +329,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _resumeIfNeeded();
       }
       _setArrows(null, 0);
-      final nextScale = MiniGeom.clampScale(_startScale * d.scale, screen);
-      final box = MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), nextScale);
+      final nextScale =
+          MiniGeom.clampScale(_startScale * rel, screen);
+      final box =
+          MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), nextScale);
       setState(() {
         _scale = nextScale;
         _left = d.focalPoint.dx - _pinchFx * box.width;
@@ -346,6 +364,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final was = _moved;
     _dragging = false;
     _resizing = false;
+    _lastPointers = 0;
+    _scaleBase = 1.0;
     if (!was) return;
     _finishDrag(screen, _boxFor(screen));
   }
