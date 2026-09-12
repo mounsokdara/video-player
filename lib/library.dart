@@ -9,8 +9,6 @@ import 'android_bridge.dart';
 import 'models.dart';
 import 'settings.dart';
 
-enum ScanStatus { idle, running, ok, empty, noPermission, failed }
-
 class LibraryService {
   LibraryService(this.settings);
 
@@ -18,47 +16,11 @@ class LibraryService {
   final List<VideoItem> videos = [];
   final List<FolderNode> folders = [];
   final List<StorageVolumeInfo> volumes = [];
-
   bool permissionReady = false;
   bool allFiles = false;
   bool manageMedia = false;
 
   bool _scanning = false;
-  bool get scanning => _scanning;
-
-  ScanStatus scanStatus = ScanStatus.idle;
-  String? scanError;
-
-  int hiddenVideoCount = 0;
-  int unresolvedCount = 0;
-
-  bool get hasVideos => videos.isNotEmpty;
-
-  bool get shouldShowEmptyState =>
-      !_scanning && videos.isEmpty && scanStatus == ScanStatus.empty;
-
-  String? get emptyStateMessage {
-    if (_scanning || videos.isNotEmpty) return null;
-    if (!permissionReady && !allFiles) {
-      return 'Media permission is required to find your videos';
-    }
-    switch (scanStatus) {
-      case ScanStatus.failed:
-        return 'Scan failed. Pull to refresh to try again.';
-      case ScanStatus.empty:
-        if (hiddenVideoCount > 0) {
-          return '$hiddenVideoCount hidden video'
-              '${hiddenVideoCount == 1 ? '' : 's'} — enable "Show hidden folders"';
-        }
-        if (unresolvedCount > 0) {
-          return '$unresolvedCount video(s) could not be opened';
-        }
-        return 'No video found';
-      default:
-        return null;
-    }
-  }
-
   final Map<String, Uint8List?> _thumbs = {};
   String? clipPath;
   bool clipCut = false;
@@ -95,84 +57,43 @@ class LibraryService {
     }
   }
 
-  Future<void> scan({bool deep = false}) async {
+  Future<void> scan() async {
     if (_scanning) return;
     _scanning = true;
-    scanStatus = ScanStatus.running;
-    scanError = null;
-    hiddenVideoCount = 0;
-    unresolvedCount = 0;
-
     try {
-      var result = await _collect(deep: deep);
-      if (result.items.isEmpty && !deep) {
-        result = await _collect(deep: true);
-      }
-
-      videos
-        ..clear()
-        ..addAll(result.items);
-      hiddenVideoCount = result.hiddenCount;
-      unresolvedCount = result.unresolved;
-      _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k));
-      _rebuildFolders();
-
-      if (videos.isNotEmpty) {
-        scanStatus = ScanStatus.ok;
-      } else if (!permissionReady && !allFiles) {
-        scanStatus = ScanStatus.noPermission;
-      } else if (result.sourcesTried > 0 &&
-          result.sourcesFailed == result.sourcesTried) {
-        scanStatus = ScanStatus.failed;
-      } else {
-        scanStatus = ScanStatus.empty;
-      }
-    } catch (e) {
-      scanError = e.toString();
-      scanStatus = ScanStatus.failed;
+      await _scanBody();
     } finally {
       _scanning = false;
     }
   }
 
-  Future<_ScanResult> _collect({required bool deep}) async {
+  Future<void> _scanBody() async {
+    final next = <VideoItem>[];
+    final seen = <String>{};
     final hidden = settings.showHiddenFolders;
-    final items = <VideoItem>[];
-    final byPath = <String, int>{};
-    final byAsset = <String, int>{};
-
-    var sourcesTried = 0;
-    var sourcesFailed = 0;
-    var unresolved = 0;
-    var hiddenCount = 0;
 
     volumes
       ..clear()
       ..addAll(await AndroidBridge.listStorageVolumes());
 
-    sourcesTried++;
     try {
-      for (final m in await AndroidBridge.listIndexedVideos()) {
-        final path = (m['path'] as String?) ?? '';
-        if (path.isEmpty) continue;
+      final indexed = await AndroidBridge.listIndexedVideos();
+      for (final m in indexed) {
+        final path = m['path'] as String? ?? '';
+        if (path.isEmpty || seen.contains(path)) continue;
         if (!looksLikeVideo(path, mime: m['mime'] as String?)) continue;
         if (!hidden && _isHiddenPath(path)) continue;
-        _put(
-          items,
-          byPath,
-          byAsset,
+        seen.add(path);
+        final durMs = (m['durationMs'] as num?)?.toInt() ?? 0;
+        next.add(
           VideoItem(
             id: '${m['id'] ?? path}',
             path: path,
             title: m['name'] as String? ?? p.basename(path),
             folder: m['folder'] as String? ?? p.dirname(path),
             size: (m['size'] as num?)?.toInt() ?? 0,
-            modified: DateTime.fromMillisecondsSinceEpoch(
-              (m['modified'] as num?)?.toInt() ?? 0,
-            ),
-            duration: Duration(
-              milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0,
-            ),
+            modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
+            duration: Duration(milliseconds: durMs),
             width: (m['width'] as num?)?.toInt() ?? 0,
             height: (m['height'] as num?)?.toInt() ?? 0,
             mime: m['mime'] as String?,
@@ -182,172 +103,93 @@ class LibraryService {
           ),
         );
       }
-    } catch (e) {
-      sourcesFailed++;
-      scanError ??= 'MediaStore: $e';
-    }
+    } catch (_) {}
 
-    sourcesTried++;
-    try {
-      final albums = await PhotoManager.getAssetPathList(
-        type: RequestType.video,
-        hasAll: true,
-        onlyAll: true,
-      );
-      for (final album in albums) {
-        final count = await album.assetCountAsync;
-        for (var start = 0; start < count; start += 120) {
-          final end = (start + 120).clamp(0, count);
-          final assets = await album.getAssetListRange(start: start, end: end);
-          for (final a in assets) {
-            final path = await _resolveAssetPath(a);
-            if (path == null) {
-              unresolved++;
-              continue;
-            }
-            if (!looksLikeVideo(path, mime: a.mimeType)) continue;
-            if (!hidden && _isHiddenPath(path)) continue;
-            _put(
-              items,
-              byPath,
-              byAsset,
-              VideoItem(
-                id: a.id,
-                path: path,
-                title: p.basename(path),
-                folder: p.dirname(path),
-                size: 0,
-                modified: a.modifiedDateTime,
-                created: a.createDateTime,
-                duration:
-                    a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
-                width: a.width,
-                height: a.height,
-                mime: a.mimeType,
-                assetId: a.id,
-                progress: settings.resumeMap[path] ?? 0,
-                bookmarked: settings.bookmarks.contains(path),
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      sourcesFailed++;
-      scanError ??= 'MediaStore (media): $e';
-    }
-
-    final targets = <StorageVolumeInfo>[
-      ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
-      if (deep || items.isEmpty)
-        ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
-    ];
-    if (targets.isNotEmpty) {
-      sourcesTried++;
+    if (next.isEmpty) {
       try {
-        for (final vol in targets) {
-          final files =
-              await AndroidBridge.listVideoFiles(vol.path, includeHidden: hidden);
-          for (final m in files) {
-            final path = (m['path'] as String?) ?? '';
-            if (path.isEmpty) continue;
-            if (!looksLikeVideo(path)) continue;
-            if (!hidden && _isHiddenPath(path)) continue;
-            final name = m['name'] as String? ?? p.basename(path);
-            _put(
-              items,
-              byPath,
-              byAsset,
-              VideoItem(
-                id: path,
-                path: path,
-                title: name,
-                folder: m['folder'] as String? ?? p.dirname(path),
-                size: (m['size'] as num?)?.toInt() ?? 0,
-                modified: DateTime.fromMillisecondsSinceEpoch(
-                  (m['modified'] as num?)?.toInt() ?? 0,
+        final paths = await PhotoManager.getAssetPathList(
+          type: RequestType.video,
+          hasAll: true,
+          onlyAll: true,
+        );
+        for (final album in paths) {
+          final count = await album.assetCountAsync;
+          for (var start = 0; start < count; start += 120) {
+            final end = (start + 120).clamp(0, count);
+            final assets = await album.getAssetListRange(start: start, end: end);
+            for (final a in assets) {
+              final path = _assetPath(a);
+              if (path == null || path.isEmpty || seen.contains(path)) continue;
+              if (!looksLikeVideo(path, mime: a.mimeType)) continue;
+              if (!hidden && _isHiddenPath(path)) continue;
+              seen.add(path);
+              next.add(
+                VideoItem(
+                  id: a.id,
+                  path: path,
+                  title: p.basename(path),
+                  folder: p.dirname(path),
+                  size: 0,
+                  modified: a.modifiedDateTime,
+                  created: a.createDateTime,
+                  duration: a.duration > 0 ? Duration(seconds: a.duration) : Duration.zero,
+                  width: a.width,
+                  height: a.height,
+                  mime: a.mimeType,
+                  assetId: a.id,
+                  progress: settings.resumeMap[path] ?? 0,
+                  bookmarked: settings.bookmarks.contains(path),
                 ),
-                progress: settings.resumeMap[path] ?? 0,
-                bookmarked: settings.bookmarks.contains(path),
-              ),
-            );
+              );
+            }
           }
         }
-      } catch (e) {
-        sourcesFailed++;
-        scanError ??= 'Filesystem: $e';
-      }
+      } catch (_) {}
     }
 
-    if (deep && items.isEmpty && !hidden) {
-      for (final vol in volumes.where((v) => v.path.isNotEmpty)) {
-        try {
-          final files = await AndroidBridge.listVideoFiles(
-            vol.path,
-            includeHidden: true,
-          );
-          for (final m in files) {
-            final path = (m['path'] as String?) ?? '';
-            if (path.isEmpty) continue;
-            if (!looksLikeVideo(path)) continue;
-            if (_isHiddenPath(path)) hiddenCount++;
-          }
-        } catch (_) {
-        }
-      }
-    }
-
-    return _ScanResult(
-      items: items,
-      hiddenCount: hiddenCount,
-      unresolved: unresolved,
-      sourcesTried: sourcesTried,
-      sourcesFailed: sourcesFailed,
-    );
-  }
-
-  Future<String?> _resolveAssetPath(AssetEntity a) async {
-    final file = await _safeFile(a);
-    if (file != null && file.path.isNotEmpty) return file.path;
-
-    final origin = await _safeOriginFile(a);
-    if (origin != null && origin.path.isNotEmpty) return origin.path;
-
-    final title = a.title;
-    if (title.isEmpty) return null;
-
-    final rel = (a.relativePath ?? '').replaceAll('\\', '/');
-    final tail = rel.isEmpty
-        ? title
-        : '${rel.replaceAll(RegExp(r'^/+|/+$'), '')}/$title';
-
-    final roots = <String>[
-      '/storage/emulated/0',
-      for (final v in volumes)
-        if (v.path.isNotEmpty) v.path,
+    final nativeTargets = <StorageVolumeInfo>[
+      ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
+      if (next.isEmpty || hidden) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
     ];
-    for (final root in roots) {
-      final candidate = '$root/$tail';
-      if (File(candidate).existsSync()) return candidate;
+    for (final vol in nativeTargets) {
+      if (vol.path.isEmpty) continue;
+      final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: hidden);
+      for (final m in extra) {
+        final path = m['path'] as String? ?? '';
+        if (path.isEmpty || seen.contains(path)) continue;
+        if (!looksLikeVideo(path)) continue;
+        if (!hidden && _isHiddenPath(path)) continue;
+        seen.add(path);
+        final name = m['name'] as String? ?? p.basename(path);
+        next.add(
+          VideoItem(
+            id: path,
+            path: path,
+            title: name,
+            folder: m['folder'] as String? ?? p.dirname(path),
+            size: (m['size'] as num?)?.toInt() ?? 0,
+            modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
+            progress: settings.resumeMap[path] ?? 0,
+            bookmarked: settings.bookmarks.contains(path),
+          ),
+        );
+      }
     }
 
-    return roots.isEmpty ? null : '${roots.first}/$tail';
+    videos
+      ..clear()
+      ..addAll(next);
+    _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k));
+    _rebuildFolders();
   }
 
-  Future<File?> _safeFile(AssetEntity a) async {
-    try {
-      return await a.file;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<File?> _safeOriginFile(AssetEntity a) async {
-    try {
-      return await a.originFile;
-    } catch (_) {
-      return null;
-    }
+  String? _assetPath(AssetEntity a) {
+    final title = a.title;
+    final rel = a.relativePath;
+    if (title == null || title.isEmpty || rel == null || rel.isEmpty) return null;
+    final prefix = rel.startsWith('/') ? rel : '/storage/emulated/0/$rel';
+    final base = prefix.endsWith('/') ? prefix : '$prefix/';
+    return '$base$title';
   }
 
   bool _isHiddenPath(String path) {
@@ -369,31 +211,17 @@ class LibraryService {
     folders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   }
 
-  List<VideoItem> sorted(
-    SortBy sort, {
-    bool desc = true,
-    String query = '',
-    String filter = 'all',
-  }) {
+  List<VideoItem> sorted(SortBy sort, {bool desc = true, String query = '', String filter = 'all'}) {
     var list = List<VideoItem>.from(videos);
     if (filter == 'bookmarked') {
-      list = list
-          .where((v) => settings.bookmarks.contains(v.path) || v.bookmarked)
-          .toList();
+      list = list.where((v) => settings.bookmarks.contains(v.path) || v.bookmarked).toList();
     } else if (filter == 'pinned') {
       list = list.where((v) => settings.pinned.contains(v.path)).toList();
     }
     if (query.trim().isNotEmpty) {
       final q = query.toLowerCase();
-      list = list
-          .where(
-            (v) =>
-                v.title.toLowerCase().contains(q) ||
-                v.folder.toLowerCase().contains(q),
-          )
-          .toList();
+      list = list.where((v) => v.title.toLowerCase().contains(q) || v.folder.toLowerCase().contains(q)).toList();
     }
-
     int cmp(VideoItem a, VideoItem b) {
       final ap = settings.pinned.contains(a.path) ? 1 : 0;
       final bp = settings.pinned.contains(b.path) ? 1 : 0;
@@ -418,11 +246,7 @@ class LibraryService {
     list.sort(cmp);
     if (desc && sort != SortBy.name && sort != SortBy.folder) {
       final pins = list.where((v) => settings.pinned.contains(v.path)).toList();
-      final rest = list
-          .where((v) => !settings.pinned.contains(v.path))
-          .toList()
-          .reversed
-          .toList();
+      final rest = list.where((v) => !settings.pinned.contains(v.path)).toList().reversed.toList();
       return [...pins, ...rest];
     }
     return list;
@@ -447,10 +271,7 @@ class LibraryService {
 
   Future<bool> deleteVideos(List<VideoItem> items) async {
     if (items.isEmpty) return true;
-    final paths = items
-        .map((v) => v.path)
-        .where((path) => path.isNotEmpty)
-        .toList();
+    final paths = items.map((v) => v.path).where((p) => p.isNotEmpty).toList();
     await AndroidBridge.deletePaths(paths);
     var leftover = items.where((v) => File(v.path).existsSync()).toList();
     if (leftover.isNotEmpty) {
@@ -553,10 +374,7 @@ class LibraryService {
         final ad = a is Directory;
         final bd = b is Directory;
         if (ad != bd) return ad ? -1 : 1;
-        return p
-            .basename(a.path)
-            .toLowerCase()
-            .compareTo(p.basename(b.path).toLowerCase());
+        return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
       });
       return ents.where((e) {
         final name = p.basename(e.path);
@@ -568,59 +386,6 @@ class LibraryService {
       return [];
     }
   }
-}
-
-class _ScanResult {
-  _ScanResult({
-    required this.items,
-    required this.hiddenCount,
-    required this.unresolved,
-    required this.sourcesTried,
-    required this.sourcesFailed,
-  });
-
-  final List<VideoItem> items;
-  final int hiddenCount;
-  final int unresolved;
-  final int sourcesTried;
-  final int sourcesFailed;
-}
-
-void _put(
-  List<VideoItem> items,
-  Map<String, int> byPath,
-  Map<String, int> byAsset,
-  VideoItem v,
-) {
-  final path = v.path;
-  final asset = v.assetId;
-
-  int? index;
-  if (path.isNotEmpty) index = byPath[path];
-  if (index == null && asset != null) index = byAsset[asset];
-
-  if (index == null) {
-    final i = items.length;
-    items.add(v);
-    if (path.isNotEmpty) byPath[path] = i;
-    if (asset != null) byAsset[asset] = i;
-    return;
-  }
-
-  final old = items[index];
-  final merged = old.copyWith(
-    assetId: old.assetId ?? asset,
-    path: old.path.isNotEmpty ? old.path : path,
-    title: old.title.isNotEmpty ? old.title : v.title,
-    size: old.size != 0 ? old.size : v.size,
-    duration: old.duration > Duration.zero ? old.duration : v.duration,
-    width: old.width != 0 ? old.width : v.width,
-    height: old.height != 0 ? old.height : v.height,
-    mime: old.mime ?? v.mime,
-  );
-  items[index] = merged;
-  if (merged.path.isNotEmpty) byPath[merged.path] = index;
-  if (merged.assetId != null) byAsset[merged.assetId!] = index;
 }
 
 const videoExtensions = {
@@ -680,19 +445,18 @@ bool looksLikeVideo(String path, {String? mime}) {
   if (path.startsWith('content:')) {
     final m = (mime ?? '').toLowerCase();
     if (m.isEmpty) return true;
-    return m.startsWith('video/');
+    if (m.startsWith('video/')) return true;
+    return false;
   }
   final name = p.basename(path).toLowerCase();
   if (name.endsWith('.d.ts')) return false;
   final ext = p.extension(name).toLowerCase();
   final m = (mime ?? '').toLowerCase();
   if (m.startsWith('text/')) return false;
-  if (m.contains('javascript') || m.contains('json') || m.contains('typescript')) {
-    return false;
-  }
+  if (m.contains('javascript') || m.contains('json') || m.contains('typescript')) return false;
   if (m.startsWith('video/')) {
     if (ext == '.tsx' || ext == '.jsx') return false;
-    if (ext == '.ts' && !m.contains('mp2t')) {
+    if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
       return _isMpegTsFile(path);
     }
     return true;
@@ -718,9 +482,7 @@ bool _isMpegTsFile(String path) {
 String formatBytes(int n) {
   if (n < 1024) return '$n B';
   if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
-  if (n < 1024 * 1024 * 1024) {
-    return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
+  if (n < 1024 * 1024 * 1024) return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
   return '${(n / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
 }
 
