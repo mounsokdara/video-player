@@ -35,12 +35,8 @@ class SystemBars {
     iconBrightness = icons;
     final shouldHide = hide ?? (alwaysHide && popupCount <= 0 && !forceShow);
     _ensureUiCallback();
-    if (shouldHide) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setSystemUIOverlayStyle(overlay(icons: icons, contrast: contrast));
-    }
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(overlay(icons: icons, contrast: contrast));
     unawaited(AndroidBridge.applySystemBars(
       lightIcons: icons == Brightness.light,
       contrast: contrast,
@@ -55,7 +51,7 @@ class SystemBars {
     _cbBound = true;
     SystemChrome.setSystemUIChangeCallback((visible) async {
       if (visible && alwaysHide && popupCount <= 0) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         unawaited(AndroidBridge.applySystemBars(
           lightIcons: iconBrightness == Brightness.light,
           contrast: true,

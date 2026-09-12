@@ -6,7 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
 import 'main.dart';
-import 'player.dart';
+import 'session.dart';
 
 class MiniGeom {
   MiniGeom._();
@@ -97,6 +97,7 @@ class MiniStickyArrow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final left = side == 'left';
+    final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       onPanStart: onDragStart,
@@ -110,13 +111,13 @@ class MiniStickyArrow extends StatelessWidget {
         height: MiniGeom.arrowH,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: const Color(0xFF14161C),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          color: scheme.surface,
+          border: Border.all(color: scheme.outlineVariant),
           borderRadius: BorderRadius.horizontal(
             left: left ? Radius.zero : const Radius.circular(12),
             right: left ? const Radius.circular(12) : Radius.zero,
           ),
-          boxShadow: const [BoxShadow(color: Color(0x99000000), blurRadius: 20, offset: Offset(0, 6))],
+          boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 20, offset: Offset(0, 6))],
         ),
         clipBehavior: Clip.hardEdge,
         child: width < 8
@@ -124,7 +125,7 @@ class MiniStickyArrow extends StatelessWidget {
             : Icon(
                 left ? Icons.chevron_right : Icons.chevron_left,
                 size: 24,
-                color: const Color(0xFFCFD5E4),
+                color: scheme.onSurface,
               ),
       ),
     );
@@ -149,11 +150,12 @@ class MiniTransportBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     Widget ctrl({required String label, required IconData icon, required VoidCallback onTap, bool play = false}) {
       return Tooltip(
         message: label,
         child: Material(
-          color: play ? Colors.white.withValues(alpha: 0.13) : Colors.transparent,
+          color: play ? scheme.onSurface.withValues(alpha: 0.12) : Colors.transparent,
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -161,33 +163,36 @@ class MiniTransportBar extends StatelessWidget {
             child: SizedBox(
               width: play ? 34 : 30,
               height: play ? 34 : 30,
-              child: Icon(icon, size: play ? 18 : 17, color: const Color(0xFFCFD5E4)),
+              child: Icon(icon, size: play ? 18 : 17, color: scheme.onSurface),
             ),
           ),
         ),
       );
     }
 
-    return SizedBox(
-      height: MiniGeom.barH,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFFF1F3F8), fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.2),
+    return ColoredBox(
+      color: scheme.surface,
+      child: SizedBox(
+        height: MiniGeom.barH,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: scheme.onSurface, fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.2),
+                ),
               ),
-            ),
-            ctrl(label: 'Previous', icon: Icons.skip_previous, onTap: onPrev),
-            const SizedBox(width: 4),
-            ctrl(label: playing ? 'Pause' : 'Play', icon: playing ? Icons.pause : Icons.play_arrow, onTap: onPlay, play: true),
-            const SizedBox(width: 4),
-            ctrl(label: 'Next', icon: Icons.skip_next, onTap: onNext),
-          ],
+              ctrl(label: 'Previous', icon: Icons.skip_previous, onTap: onPrev),
+              const SizedBox(width: 4),
+              ctrl(label: playing ? 'Pause' : 'Play', icon: playing ? Icons.pause : Icons.play_arrow, onTap: onPlay, play: true),
+              const SizedBox(width: 4),
+              ctrl(label: 'Next', icon: Icons.skip_next, onTap: onNext),
+            ],
+          ),
         ),
       ),
     );
@@ -289,6 +294,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
       _left = _fromLeft + (_toLeft - _fromLeft) * t;
       _top = _fromTop + (_toTop - _fromTop) * t;
       _widthVw = _fromW + (_toW - _fromW) * t;
+      if (!_closing) _followArrows();
     });
   }
 
@@ -338,6 +344,20 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
 
   Rect _rect(Size box) => Rect.fromLTWH(_left, _top, box.width, box.height);
 
+  void _followArrows() {
+    if (!mounted || _closing || _dragging || _resizing) return;
+    final screen = MediaQuery.sizeOf(context);
+    final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw);
+    final r = _rect(box);
+    final ox = MiniPhysics.offX(r, screen);
+    if (ox > 0.02) {
+      final side = (r.left + r.width / 2) < screen.width / 2 ? 'left' : 'right';
+      _setArrows(side, (ox / MiniGeom.hideT).clamp(0.0, 1.0).toDouble());
+    } else {
+      _setArrows(null, 0);
+    }
+  }
+
   void _setArrows(String? side, double progress) {
     final p = progress.clamp(0.0, 1.0).toDouble();
     _arrowL = side == 'left' ? p : 0;
@@ -349,17 +369,23 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
     _setArrows(side, 1);
     _dragOpacity = 1;
     final left = side == 'left' ? -box.width : screen.width;
-    _animateTo(left, _top, _widthVw, onDone: _pauseForHide);
+    _animateTo(left, _top, _widthVw, onDone: () {
+      _setArrows(side, 1);
+      _pauseForHide();
+    });
   }
 
   void _unhide(Size screen, Size box) {
     final side = _hiddenSide ?? ((_left + box.width / 2) < screen.width / 2 ? 'left' : 'right');
-    _hiddenSide = null;
-    _setArrows(null, 0);
+    _setArrows(side, 1);
     _dragOpacity = 1;
     final seed = Rect.fromLTWH(side == 'left' ? 0 : screen.width - box.width, _top, box.width, box.height);
     final target = MiniPhysics.settlePos(seed, screen, box, navH: widget.navH, pad: widget.pad);
-    _animateTo(target.dx, target.dy, _widthVw, onDone: _resumeIfNeeded);
+    _animateTo(target.dx, target.dy, _widthVw, onDone: () {
+      _hiddenSide = null;
+      _followArrows();
+      _resumeIfNeeded();
+    });
   }
 
   void _settle(Size screen, Size box) {
@@ -540,6 +566,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
     final extraL = aR;
     final extraR = aL;
     final radius = math.max(8.0, box.width * 0.035);
+    final scheme = Theme.of(context).colorScheme;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -580,7 +607,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay> with SingleTicker
                           widget.onExpand();
                         },
                         child: Material(
-                          color: const Color(0xFF14161C),
+                          color: scheme.surface,
                           elevation: 14,
                           borderRadius: BorderRadius.circular(radius),
                           clipBehavior: Clip.antiAlias,

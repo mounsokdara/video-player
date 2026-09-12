@@ -36,9 +36,6 @@ class AppSettings {
   int seekStepSeconds = 10;
   bool autoMiniplayer = false;
   bool inAppMiniplayer = true;
-  bool antiBufferCrash = false;
-  bool decompressVideo = false;
-  bool lowMemoryBuffer = true;
   bool rememberBackgroundPlay = false;
   bool backgroundPlay = false;
   bool rememberAspect = true;
@@ -224,16 +221,6 @@ class AppSettings {
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
     autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
     inAppMiniplayer = p.getBool('inAppMiniplayer') ?? true;
-    antiBufferCrash = p.getBool('antiBufferCrash') ?? false;
-    decompressVideo = p.getBool('decompressVideo') ?? false;
-    lowMemoryBuffer = p.getBool('lowMemoryBuffer') ?? true;
-    if (p.getBool('decompressDefaultOffV2') != true) {
-      decompressVideo = false;
-      antiBufferCrash = false;
-      await p.setBool('decompressVideo', false);
-      await p.setBool('antiBufferCrash', false);
-      await p.setBool('decompressDefaultOffV2', true);
-    }
     if (p.getBool('pipDefaultOffV2') != true) {
       autoMiniplayer = false;
       await p.setBool('autoMiniplayer', false);
@@ -365,9 +352,6 @@ class AppSettings {
     await p.setInt('seekStepSeconds', seekStepSeconds);
     await p.setBool('autoMiniplayer', autoMiniplayer);
     await p.setBool('inAppMiniplayer', inAppMiniplayer);
-    await p.setBool('antiBufferCrash', antiBufferCrash);
-    await p.setBool('decompressVideo', decompressVideo);
-    await p.setBool('lowMemoryBuffer', lowMemoryBuffer);
     await p.setBool('rememberBackgroundPlay', rememberBackgroundPlay);
     await p.setBool('backgroundPlay', backgroundPlay);
     await p.setBool('rememberAspect', rememberAspect);

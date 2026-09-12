@@ -14,6 +14,8 @@ import 'main.dart';
 import 'mini_player.dart';
 import 'models.dart';
 import 'player.dart';
+import 'player_route.dart';
+import 'session.dart';
 import 'settings.dart';
 import 'settings_ui.dart';
 import 'widgets.dart';

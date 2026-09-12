@@ -393,28 +393,6 @@ class AndroidBridge {
     }
   }
 
-  static Future<String> decompressVideo(String path, {required bool lowMem}) async {
-    try {
-      return await _ch.invokeMethod<String>('decompressVideo', {
-            'path': path,
-            'lowMem': lowMem,
-          }) ??
-          path;
-    } catch (_) {
-      return path;
-    }
-  }
-
-  static Future<void> applyPlaybackGuard({required bool antiCrash, required bool lowMem, String path = ''}) async {
-    try {
-      await _ch.invokeMethod('applyPlaybackGuard', {
-        'antiCrash': antiCrash,
-        'lowMem': lowMem,
-        'path': path,
-      });
-    } catch (_) {}
-  }
-
   static Future<List<Map<String, dynamic>>> extractCaptions(String path) async {
     try {
       final raw = await _ch.invokeMethod<List<dynamic>>('extractCaptions', {'path': path}) ?? [];

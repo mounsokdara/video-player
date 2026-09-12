@@ -48,6 +48,10 @@ class SystemBarController(private val activity: Activity) {
             try {
                 val window = activity.window
                 attachUiListener(window)
+                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                if (Build.VERSION.SDK_INT >= 30) {
+                    window.setDecorFitsSystemWindows(false)
+                }
                 if (hide) {
                     hideBars(window)
                     window.decorView.post { if (lastHide && hideGen == gen) hideBars(window) }
@@ -82,14 +86,15 @@ class SystemBarController(private val activity: Activity) {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             val controller = window.insetsController ?: window.decorView.windowInsetsController
-            controller?.let {
-                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                it.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
+            controller?.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+            controller?.systemBarsBehavior =
+                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            return
         }
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
@@ -99,13 +104,13 @@ class SystemBarController(private val activity: Activity) {
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_FULLSCREEN
             )
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
     }
 
     @Suppress("DEPRECATION")
     private fun showBars(window: Window, lightIcons: Boolean, contrast: Boolean) {
         window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             val controller = window.insetsController ?: window.decorView.windowInsetsController
@@ -119,8 +124,6 @@ class SystemBarController(private val activity: Activity) {
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
             )
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 29) {
             window.isNavigationBarContrastEnforced = contrast
             window.isStatusBarContrastEnforced = false

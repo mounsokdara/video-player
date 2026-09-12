@@ -84,10 +84,6 @@ class MainActivity : FlutterActivity() {
         appNative = AppNative(this, systemBars, audioFocus, equalizer)
         super.onCreate(savedInstanceState)
         systemBars.enableEdgeToEdge()
-        try {
-            VideoDecompressor.wipeCache(this)
-        } catch (_: Exception) {
-        }
         NativeCrashLog.installHook(this) { emit(it) }
         handleIncoming(intent)
     }
@@ -411,40 +407,6 @@ class MainActivity : FlutterActivity() {
                             } else {
                                 pickResult = result
                                 launchPickVideo()
-                            }
-                        }
-                        "applyPlaybackGuard" -> {
-                            val anti = call.argument<Boolean>("antiCrash") ?: false
-                            val low = call.argument<Boolean>("lowMem") ?: true
-                            val path = call.argument<String>("path") ?: ""
-                            io.execute {
-                                val out = try {
-                                    if (anti) VideoDecompressor.decompress(this, path, low) else path
-                                } catch (_: Throwable) {
-                                    path
-                                }
-                                mainHandler.post { result.success(out) }
-                            }
-                        }
-                        "decompressVideo" -> {
-                            val path = call.argument<String>("path") ?: ""
-                            val low = call.argument<Boolean>("lowMem") ?: true
-                            io.execute {
-                                val out = try {
-                                    VideoDecompressor.decompress(this, path, low)
-                                } catch (_: Throwable) {
-                                    path
-                                }
-                                mainHandler.post { result.success(out) }
-                            }
-                        }
-                        "wipeDecompCache" -> {
-                            io.execute {
-                                try {
-                                    VideoDecompressor.wipeCache(this)
-                                } catch (_: Exception) {
-                                }
-                                mainHandler.post { result.success(true) }
                             }
                         }
                         "extractCaptions" -> {
@@ -784,17 +746,16 @@ class MainActivity : FlutterActivity() {
         return out
     }
 
-    @Suppress("DEPRECATION")
     private fun volumePath(volume: android.os.storage.StorageVolume): String? {
         if (Build.VERSION.SDK_INT >= 30) {
             return volume.directory?.absolutePath
         }
-        return try {
-            val method = volume.javaClass.getMethod("getPath")
-            method.invoke(volume) as? String
-        } catch (_: Exception) {
-            null
+        if (volume.isPrimary) {
+            return Environment.getExternalStorageDirectory()?.absolutePath
         }
+        val uuid = volume.uuid ?: return null
+        val candidate = File("/storage/$uuid")
+        return if (candidate.exists()) candidate.absolutePath else null
     }
 
     private fun scanVideos(dir: File, depth: Int, hidden: Boolean): List<Map<String, Any?>> {

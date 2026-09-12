@@ -49,7 +49,7 @@ class SettingsHub extends StatelessWidget {
             tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
             tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
             tile(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', AccessSettings(onChanged: onChanged)),
-            tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and Material 3 color', ThemeSettings(onChanged: onChanged)),
+            tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and seed color', ThemeSettings(onChanged: onChanged)),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.equalizer),
@@ -486,30 +486,6 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                     ),
                   ),
                 ),
-              GestureDetector(
-                onTap: () async {
-                  final picked = await showColorPicker(context, Color(s.seedColor));
-                  if (picked != null) {
-                    set(() {
-                      s.seedColor = picked.toARGB32();
-                      s.dynamicColor = false;
-                    });
-                  }
-                },
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const SweepGradient(colors: [Color(0xFFFF3B30), Color(0xFFFFCC00), Color(0xFF34C759), Color(0xFF007AFF), Color(0xFFAF52DE), Color(0xFFFF3B30)]),
-                    border: Border.all(
-                      color: seeds.every((e) => e.$2 != s.seedColor) ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
-                      width: 3,
-                    ),
-                  ),
-                  child: const Icon(Icons.colorize, size: 18, color: Colors.white),
-                ),
-              ),
             ],
           ),
           ListTile(
@@ -528,37 +504,8 @@ class _ThemeSettingsState extends State<ThemeSettings> {
               }
             },
           ),
-          const SizedBox(height: 24),
-          Text('Material 3 roles', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(
-            'Primary, secondary, tertiary, and surface containers are generated from the seed using ColorScheme.fromSeed. This matches Material You roles used by Flutter.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _swatch(context, 'Primary', Theme.of(context).colorScheme.primary),
-              _swatch(context, 'Secondary', Theme.of(context).colorScheme.secondary),
-              _swatch(context, 'Tertiary', Theme.of(context).colorScheme.tertiary),
-              _swatch(context, 'Surface', Theme.of(context).colorScheme.surface),
-              _swatch(context, 'Container', Theme.of(context).colorScheme.surfaceContainer),
-              _swatch(context, 'Error', Theme.of(context).colorScheme.error),
-            ],
-          ),
         ],
       ),
-    );
-  }
-
-  Widget _swatch(BuildContext context, String l, Color c) {
-    return Container(
-      width: 104,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(12)),
-      child: Text(l, style: TextStyle(color: c.computeLuminance() > 0.5 ? Colors.black : Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 }
