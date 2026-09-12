@@ -55,6 +55,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
 
+  /// Cumulative scale reported by the current Scale gesture.
+  double _baseScale = 1.0;
+  int _pointers = 0;
+  int _maxPointers = 0;
+  bool _pinchActive = false;
+  bool _resizeLocked = false;
+
   VideoPlayerController? _ctrl;
 
   @override
@@ -188,17 +195,54 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (mounted) setState(() {});
   }
 
-  void _onScaleStart(ScaleStartDetails d) {
-    if (_dismissed) return;
-    _anim.stop();
+  void _captureAnchor(Offset focalPoint) {
     final box = _cardKey.currentContext?.findRenderObject() as RenderBox?;
     final cardGlobal = box?.localToGlobal(Offset.zero) ?? Offset.zero;
     _startW = _w;
     _startPos = _rawPos;
     _parentOrigin = cardGlobal - _startPos;
-    final focalInParent = d.focalPoint - _parentOrigin;
+    final focalInParent = focalPoint - _parentOrigin;
     _anchorInWidget = focalInParent - _startPos;
+  }
+
+  void _lockResizeBaseline(ScaleUpdateDetails d) {
+    _captureAnchor(d.focalPoint);
+    _baseScale = d.scale == 0 ? 1.0 : d.scale;
+  }
+
+  void _onPointerDown(PointerDownEvent e) {
+    if (_dismissed) return;
+    _pointers += 1;
+    if (_pointers > _maxPointers) _maxPointers = _pointers;
+    if (_pointers >= 2) {
+      _pinchActive = true;
+      _moved = true;
+      _resizeLocked = false;
+    }
+  }
+
+  void _onPointerUpOrCancel(PointerEvent e) {
+    _pointers = math.max(0, _pointers - 1);
+    // No fingers, or dropped back to one finger after a pinch: stop resizing.
+    if (_pointers < 2) {
+      _resizeLocked = true;
+      _startW = _w;
+      _startPos = _rawPos;
+      _baseScale = 1.0;
+    }
+  }
+
+  void _onScaleStart(ScaleStartDetails d) {
+    if (_dismissed) return;
+    _anim.stop();
+    _captureAnchor(d.focalPoint);
+    _baseScale = 1.0;
     _moved = false;
+    _pinchActive = d.pointerCount >= 2;
+    _resizeLocked = d.pointerCount < 2;
+    if (d.pointerCount > _maxPointers) _maxPointers = d.pointerCount;
+    if (_pointers < d.pointerCount) _pointers = d.pointerCount;
+
     final wasParked = _parked;
     setState(() {
       _parked = false;
@@ -211,19 +255,45 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_dismissed) return;
-    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
-    if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
-        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget)).distance >
-            MiniGeom.tapSlop ||
-        pinching) {
+
+    final pointers = math.max(d.pointerCount, _pointers);
+    if (pointers > _maxPointers) _maxPointers = pointers;
+
+    final pinching = pointers >= 2 || (d.scale - _baseScale).abs() > 0.02;
+    if (pinching) {
+      _pinchActive = true;
       _moved = true;
     }
-    final hi = MiniPhysics.maxWFor(_screen);
-    final lo = math.min(MiniGeom.minW, hi);
-    final targetW = MiniPhysics.softClamp(_startW * d.scale, lo, hi);
+
+    if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
+        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget)).distance >
+            MiniGeom.tapSlop) {
+      _moved = true;
+    }
+
+    // Pointer count changed mid-gesture (1 -> 2 or 2 -> 1).
+    // Re-baseline so size does not jump when a finger is added or lifted.
+    if (pointers != math.max(_pointers, 1) && d.pointerCount > 0) {
+      _lockResizeBaseline(d);
+      _resizeLocked = pointers < 2;
+      _pointers = pointers;
+    }
+
+    final allowResize = !_resizeLocked && pointers >= 2 && _pinchActive;
+    double targetW = _w;
+    if (allowResize) {
+      final hi = MiniPhysics.maxWFor(_screen);
+      final lo = math.min(MiniGeom.minW, hi);
+      final rel = _baseScale == 0 ? 1.0 : d.scale / _baseScale;
+      targetW = MiniPhysics.softClamp(_startW * rel, lo, hi);
+    } else {
+      targetW = _w;
+    }
+
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
     final focalInParent = d.focalPoint - _parentOrigin;
     final newPos = focalInParent - _anchorInWidget * ratio;
+
     setState(() {
       _w = targetW;
       _pos = newPos;
@@ -238,14 +308,18 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _onScaleEnd(ScaleEndDetails _) {
     if (_dismissed) return;
     _live = false;
-    if (!_moved) {
-      if (_parked) {
-        _unpark();
-      } else {
-        widget.onExpand();
-      }
-      return;
-    }
+
+    final wasClick = !_moved && !_pinchActive && _maxPointers <= 1;
+
+    _pointers = 0;
+    _maxPointers = 0;
+    _pinchActive = false;
+    _resizeLocked = true;
+    _baseScale = 1.0;
+
+    // Real clicks go through onTap. Scale-end must not open the player
+    // (two-finger put-down used to look like a tap here).
+    if (wasClick) return;
     _settle();
   }
 
@@ -432,47 +506,63 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             opacity: opacity,
             child: IgnorePointer(
               ignoring: _dismissed || opacity < 0.1,
-              child: GestureDetector(
+              child: Listener(
                 behavior: HitTestBehavior.opaque,
-                onScaleStart: _onScaleStart,
-                onScaleUpdate: _onScaleUpdate,
-                onScaleEnd: _onScaleEnd,
-                child: Material(
-                  key: _cardKey,
-                  color: scheme.surface,
-                  elevation: _live ? 18 : 14,
-                  borderRadius: BorderRadius.circular(14),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ColoredBox(color: const Color(0xFF05060A), child: frame),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: SizedBox(
-                                height: 3,
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 3,
-                                  backgroundColor: Colors.white24,
-                                  color: const Color(0xFF9E8CFF),
+                onPointerDown: _onPointerDown,
+                onPointerUp: _onPointerUpOrCancel,
+                onPointerCancel: _onPointerUpOrCancel,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (_dismissed || _moved || _pinchActive || _maxPointers > 1) {
+                      return;
+                    }
+                    if (_parked) {
+                      _unpark();
+                    } else {
+                      widget.onExpand();
+                    }
+                  },
+                  onScaleStart: _onScaleStart,
+                  onScaleUpdate: _onScaleUpdate,
+                  onScaleEnd: _onScaleEnd,
+                  child: Material(
+                    key: _cardKey,
+                    color: scheme.surface,
+                    elevation: _live ? 18 : 14,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              ColoredBox(color: const Color(0xFF05060A), child: frame),
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: SizedBox(
+                                  height: 3,
+                                  child: LinearProgressIndicator(
+                                    value: progress,
+                                    minHeight: 3,
+                                    backgroundColor: Colors.white24,
+                                    color: const Color(0xFF9E8CFF),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                      MiniTransportBar(
-                        title: item?.title ?? '',
-                        playing: playing,
-                        onPrev: () => unawaited(widget.onPrev()),
-                        onPlay: () => unawaited(_togglePlay()),
-                        onNext: () => unawaited(widget.onNext()),
-                      ),
-                    ],
+                        MiniTransportBar(
+                          title: item?.title ?? '',
+                          playing: playing,
+                          onPrev: () => unawaited(widget.onPrev()),
+                          onPlay: () => unawaited(_togglePlay()),
+                          onNext: () => unawaited(widget.onNext()),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
