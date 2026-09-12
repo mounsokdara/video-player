@@ -29,13 +29,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: video-player-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0_Indev
-          name: Video Player v1.0.0_Indev
-          files: build/app/outputs/flutter-apk/app-release.apk
+          tag_name: v1.0.0_BETA
+          name: Video Player v1.0.0_BETA
+          files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: false
