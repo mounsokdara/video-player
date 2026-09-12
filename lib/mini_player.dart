@@ -55,6 +55,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _scaleBase = 1;
   int _lastPointers = 0;
   double _pinchFx = 0.5, _pinchFy = 0.5;
+  bool _startedHidden = false;
   VideoPlayerController? _ctrl;
 
   late final AnimationController _move;
@@ -264,13 +265,15 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
     if (ob >= MiniGeom.closeT && !over && !under) {
       unawaited(_close());
-    } else if (ox >= MiniGeom.hideT && !over && !under) {
-      _park(_sideFor(r, screen), screen, box);
-    } else if (_hiddenSide != null) {
-      _unhide(screen, box);
-    } else {
-      _settle(screen, box);
+      return;
     }
+
+    if (!_startedHidden && ox >= MiniGeom.hideT && !over && !under) {
+      _park(_sideFor(r, screen), screen, box);
+      return;
+    }
+
+    _settle(screen, box);
   }
 
   Future<void> _close() async {
@@ -304,6 +307,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (_closing) return;
     _move.stop();
     _moved = false;
+    _startedHidden = _hiddenSide != null;
     _captureAnchor(d.focalPoint, MediaQuery.sizeOf(context), 1, 1.0);
   }
 
@@ -329,8 +333,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _resumeIfNeeded();
       }
       _setArrows(null, 0);
-      final nextScale =
-          MiniGeom.clampScale(_startScale * rel, screen);
+      final nextScale = MiniGeom.clampScale(_startScale * rel, screen);
       final box =
           MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), nextScale);
       setState(() {
@@ -366,8 +369,12 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _resizing = false;
     _lastPointers = 0;
     _scaleBase = 1.0;
-    if (!was) return;
+    if (!was) {
+      _startedHidden = false;
+      return;
+    }
     _finishDrag(screen, _boxFor(screen));
+    _startedHidden = false;
   }
 
   Widget _arrow(String side, double width, double leftOffset, Size screen, Size box) {
