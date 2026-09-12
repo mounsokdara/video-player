@@ -55,6 +55,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
 
+  int _lastPointerCount = 1;
+  double _lastScale = 1.0;
+  double _accumulatedScale = 1.0;
+
   VideoPlayerController? _ctrl;
 
   @override
@@ -200,7 +204,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _parentOrigin = cardGlobal - _startPos;
     final focalInParent = d.focalPoint - _parentOrigin;
     _anchorInWidget = focalInParent - _startPos;
-    _moved = false;
+    _lastPointerCount = d.pointerCount;
+    _lastScale = 1.0;
+    _accumulatedScale = 1.0;
+    _moved = d.pointerCount >= 2;
     final wasParked = _parked;
     setState(() {
       _parked = false;
@@ -213,17 +220,31 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_dismissed) return;
-    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
-    if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
+
+    if (d.pointerCount != _lastPointerCount) {
+      _lastPointerCount = d.pointerCount;
+      _lastScale = d.scale;
+      _accumulatedScale = 1.0;
+      _startW = _w;
+      _startPos = _rawPos;
+      _anchorInWidget = d.focalPoint - _parentOrigin - _rawPos;
+      if (d.pointerCount >= 2) _moved = true;
+    }
+
+    final scaleDelta = _lastScale == 0 ? 1.0 : d.scale / _lastScale;
+    _accumulatedScale *= scaleDelta;
+    _lastScale = d.scale;
+
+    if (d.pointerCount >= 2 ||
         (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget))
                 .distance >
-            MiniGeom.tapSlop ||
-        pinching) {
+            MiniGeom.tapSlop) {
       _moved = true;
     }
+
     final hi = MiniPhysics.maxWFor(_screen);
     final lo = math.min(MiniGeom.minW, hi);
-    final targetW = MiniPhysics.softClamp(_startW * d.scale, lo, hi);
+    final targetW = MiniPhysics.softClamp(_startW * _accumulatedScale, lo, hi);
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
     final focalInParent = d.focalPoint - _parentOrigin;
     final newPos = focalInParent - _anchorInWidget * ratio;
@@ -379,6 +400,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final scheme = Theme.of(context).colorScheme;
     final strokeColor = scheme.outline.withValues(alpha: 0.55);
     final strokeW = _live ? 1.6 : 1.2;
+    const double cornerRadius = 34.0;
 
     final double arrowLeft;
     if (side < 0) {
@@ -447,15 +469,12 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onScaleStart: _onScaleStart,
                 onScaleUpdate: _onScaleUpdate,
                 onScaleEnd: _onScaleEnd,
-                child: Material(
+                child: Container(
                   key: _cardKey,
-                  color: scheme.surface,
-                  elevation: 0,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(color: strokeColor, width: strokeW),
+                  decoration: BoxDecoration(
+                    color: scheme.surface,
+                    borderRadius: BorderRadius.circular(cornerRadius),
+                    border: Border.all(color: strokeColor, width: strokeW),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
@@ -514,8 +533,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 child: Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.horizontal(
-                      left: Radius.circular(side < 0 ? 12 : 4),
-                      right: Radius.circular(side < 0 ? 4 : 12),
+                      left: Radius.circular(side < 0 ? cornerRadius : 0),
+                      right: Radius.circular(side < 0 ? 0 : cornerRadius),
                     ),
                     border: Border.all(color: strokeColor, width: strokeW),
                   ),
