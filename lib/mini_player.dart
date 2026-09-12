@@ -14,11 +14,13 @@ class MiniGeom {
   static const maxW = 95.0;
   static const defW = 30.0;
   static const hideT = 0.6;
+  static const closeT = 0.6;
   static const tapSlop = 5.0;
   static const arrowMax = 44.0;
   static const arrowH = 120.0;
   static const barH = 44.0;
   static const snapMs = 500;
+  static const closeMs = 300;
   static const ease = Cubic(0.22, 1.0, 0.36, 1.0);
 }
 
@@ -56,6 +58,9 @@ class MiniPhysics {
     final visW = math.max(0.0, math.min(screen.width, r.right) - math.max(0.0, r.left));
     return 1 - visW / r.width;
   }
+
+  static double offBottom(Rect r, Size screen) =>
+      r.height <= 0 ? 0 : math.max(0.0, (r.bottom - screen.height) / r.height);
 
   static Offset settlePos(
     Rect r,
@@ -217,12 +222,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _widthVw = MiniGeom.defW;
   bool _ready = false;
   bool _dragging = false;
+  bool _resizing = false;
+  bool _closing = false;
   bool _moved = false;
   String? _hiddenSide;
   bool _pausedForHide = false;
   double _arrowL = 0, _arrowR = 0;
+  double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
-  Offset _startPos = Offset.zero;
+  double _startBoxW = 0;
+  double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
 
   late final AnimationController _move;
@@ -275,7 +284,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _left = _fromLeft + (_toLeft - _fromLeft) * t;
       _top = _fromTop + (_toTop - _fromTop) * t;
       _widthVw = _fromW + (_toW - _fromW) * t;
-      _followArrows();
+      if (!_closing) _followArrows();
     });
   }
 
@@ -366,7 +375,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _followArrows() {
-    if (!mounted || _dragging) return;
+    if (!mounted || _closing || _dragging || _resizing) return;
     final screen = MediaQuery.sizeOf(context);
     _refreshArrows(_rect(_boxFor(screen)), screen);
   }
@@ -380,6 +389,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _park(String side, Size screen, Size box) {
     _hiddenSide = side;
     _setArrows(side, 1);
+    _dragOpacity = 1;
     final left = side == 'left' ? -box.width : screen.width;
     _animateTo(left, _top, _widthVw, onDone: () {
       if (!mounted) return;
@@ -391,7 +401,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _unhide(Size screen, Size box) {
     final side = _hiddenSide ?? _sideFor(_rect(box), screen);
     _setArrows(side, 1);
+    _dragOpacity = 1;
     _dragging = false;
+    _resizing = false;
     final seed = Rect.fromLTWH(
       side == 'left' ? 0 : screen.width - box.width,
       _top,
@@ -415,14 +427,17 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         navH: widget.navH, pad: widget.pad);
     _hiddenSide = null;
     _setArrows(null, 0);
+    _dragOpacity = 1;
     _animateTo(target.dx, target.dy, w, onDone: _resumeIfNeeded);
   }
 
   void _finishDrag(Size screen, Size box) {
     final r = _rect(box);
     final ox = MiniPhysics.offX(r, screen);
+    final over = _widthVw > MiniGeom.maxW;
+    final under = _widthVw < MiniGeom.minW;
 
-    if (ox >= MiniGeom.hideT) {
+    if (ox >= MiniGeom.hideT && !over && !under) {
       _park(_sideFor(r, screen), screen, box);
     } else if (_hiddenSide != null) {
       _unhide(screen, box);
@@ -431,33 +446,87 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     }
   }
 
-  void _onScaleStart(ScaleStartDetails d) {
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    _pausedForHide = false;
+    _hiddenSide = null;
+    _setArrows(null, 0);
+    _move.stop();
+    if (mounted) setState(() {});
+    await Future<void>.delayed(const Duration(milliseconds: MiniGeom.closeMs));
+    await widget.onClose();
+  }
+
+  void _onScaleStart(ScaleStartDetails d, Size box) {
+    if (_closing) return;
     _move.stop();
     _moved = false;
     _startFocal = d.focalPoint;
-    _startPos = Offset(_left, _top);
+    _startBoxW = box.width;
+    _pinchFx = box.width <= 0
+        ? 0.5
+        : ((d.focalPoint.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
+    _pinchFy = box.height <= 0
+        ? 0.5
+        : ((d.focalPoint.dy - _top) / box.height).clamp(0.0, 1.0).toDouble();
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d, Size screen) {
-    if ((_startFocal - d.focalPoint).distance > MiniGeom.tapSlop) _moved = true;
+    if (_closing) return;
+    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
+    if ((_startFocal - d.focalPoint).distance > MiniGeom.tapSlop || pinching) {
+      _moved = true;
+    }
     if (!_moved) return;
 
-    _dragging = true;
     if (_hiddenSide != null) {
       _hiddenSide = null;
       _resumeIfNeeded();
     }
+
+    final minTop = widget.pad.top;
+
+    if (pinching) {
+      _resizing = true;
+      _dragging = false;
+      _setArrows(null, 0);
+      final newWpx = math.max(_startBoxW * d.scale, 40.0);
+      final vw = newWpx / screen.width * 100;
+      final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), vw);
+      final maxTop = math.max(minTop, screen.height - box.height - widget.navH);
+      setState(() {
+        _widthVw = vw;
+        _left = d.focalPoint.dx - _pinchFx * box.width;
+        _top = (d.focalPoint.dy - _pinchFy * box.height)
+            .clamp(minTop, maxTop)
+            .toDouble();
+        _dragOpacity = 1;
+      });
+      return;
+    }
+
+    _dragging = true;
+    _resizing = false;
+    final box = _boxFor(screen);
+    final maxTop = math.max(minTop, screen.height - box.height - widget.navH);
     setState(() {
-      _left = _startPos.dx + (d.focalPoint.dx - _startFocal.dx);
-      _top = _startPos.dy + (d.focalPoint.dy - _startFocal.dy);
+      _left = d.focalPoint.dx - _pinchFx * box.width;
+      _top = (d.focalPoint.dy - _pinchFy * box.height)
+          .clamp(minTop, maxTop)
+          .toDouble();
+      _dragOpacity = 1;
     });
-    _refreshArrows(_rect(_boxFor(screen)), screen, threshold: 0.05);
+    final r = _rect(box);
+    _refreshArrows(r, screen, threshold: 0.05);
     setState(() {});
   }
 
-  void _onScaleEnd(ScaleEndDetails d, Size screen) {
+  void _onScaleEnd(ScaleEndDetails d, Size screen, Size box) {
+    if (_closing) return;
     final was = _moved;
     _dragging = false;
+    _resizing = false;
     if (!was) return;
     _finishDrag(screen, _boxFor(screen));
   }
@@ -467,11 +536,11 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       left: leftOffset,
       top: (box.height - MiniGeom.arrowH) / 2,
       child: GestureDetector(
-        onScaleStart: _onScaleStart,
+        onScaleStart: (d) => _onScaleStart(d, box),
         onScaleUpdate: (d) => _onScaleUpdate(d, screen),
-        onScaleEnd: (d) => _onScaleEnd(d, screen),
+        onScaleEnd: (d) => _onScaleEnd(d, screen, box),
         onTap: () {
-          if (_moved) return;
+          if (_moved || _closing) return;
           _unhide(screen, box);
         },
         child: MiniStickyArrow(side: side, width: width),
@@ -527,12 +596,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       frame = const ColoredBox(color: Color(0xFF05060A));
     }
 
+    final live = _dragging || _resizing;
     final aL = _arrowL * MiniGeom.arrowMax;
     final aR = _arrowR * MiniGeom.arrowMax;
     final extraL = aR;
     final extraR = aL;
     final radius = math.max(8.0, box.width * 0.035);
     final scheme = Theme.of(context).colorScheme;
+    final closeMs = _closing ? MiniGeom.closeMs : 0;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -542,69 +613,82 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
           top: _top,
           width: box.width + extraL + extraR,
           height: box.height,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                left: extraL,
-                top: 0,
-                width: box.width,
-                height: box.height,
-                child: GestureDetector(
-                  onScaleStart: _onScaleStart,
-                  onScaleUpdate: (d) => _onScaleUpdate(d, screen),
-                  onScaleEnd: (d) => _onScaleEnd(d, screen),
-                  onTap: () {
-                    if (_moved) return;
-                    if (_hiddenSide != null) {
-                      _unhide(screen, box);
-                    } else {
-                      widget.onExpand();
-                    }
-                  },
-                  child: Material(
-                    color: scheme.surface,
-                    elevation: 14,
-                    borderRadius: BorderRadius.circular(radius),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Stack(
-                            fit: StackFit.expand,
+          child: AnimatedOpacity(
+            duration: Duration(milliseconds: closeMs),
+            opacity: _closing ? 0 : _dragOpacity,
+            child: AnimatedScale(
+              duration: Duration(milliseconds: closeMs),
+              scale: _closing ? 0.8 : 1,
+              alignment: Alignment.bottomCenter,
+              child: AnimatedSlide(
+                duration: Duration(milliseconds: closeMs),
+                offset: _closing ? const Offset(0, 0.3) : Offset.zero,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      left: extraL,
+                      top: 0,
+                      width: box.width,
+                      height: box.height,
+                      child: GestureDetector(
+                        onScaleStart: (d) => _onScaleStart(d, box),
+                        onScaleUpdate: (d) => _onScaleUpdate(d, screen),
+                        onScaleEnd: (d) => _onScaleEnd(d, screen, box),
+                        onTap: () {
+                          if (_moved || live || _closing) return;
+                          if (_hiddenSide != null) {
+                            _unhide(screen, box);
+                          } else {
+                            widget.onExpand();
+                          }
+                        },
+                        child: Material(
+                          color: scheme.surface,
+                          elevation: 14,
+                          borderRadius: BorderRadius.circular(radius),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
                             children: [
-                              ColoredBox(
-                                  color: const Color(0xFF05060A),
-                                  child: frame),
-                              Align(
-                                alignment: Alignment.bottomCenter,
-                                child: SizedBox(
-                                  height: 2,
-                                  child: LinearProgressIndicator(
-                                    value: progress,
-                                    backgroundColor: Colors.white24,
-                                    color: const Color(0xFF7AA2FF),
-                                  ),
+                              Expanded(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ColoredBox(
+                                        color: const Color(0xFF05060A),
+                                        child: frame),
+                                    Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: SizedBox(
+                                        height: 2,
+                                        child: LinearProgressIndicator(
+                                          value: progress,
+                                          backgroundColor: Colors.white24,
+                                          color: const Color(0xFF7AA2FF),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              MiniTransportBar(
+                                title: item?.title ?? '',
+                                playing: playing,
+                                onPrev: () => unawaited(widget.onPrev()),
+                                onPlay: () => unawaited(_togglePlay()),
+                                onNext: () => unawaited(widget.onNext()),
                               ),
                             ],
                           ),
                         ),
-                        MiniTransportBar(
-                          title: item?.title ?? '',
-                          playing: playing,
-                          onPrev: () => unawaited(widget.onPrev()),
-                          onPlay: () => unawaited(_togglePlay()),
-                          onNext: () => unawaited(widget.onNext()),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    _arrow('left', aL, extraL + box.width, screen, box),
+                    _arrow('right', aR, 0, screen, box),
+                  ],
                 ),
               ),
-              _arrow('left', aL, extraL + box.width, screen, box),
-              _arrow('right', aR, 0, screen, box),
-            ],
+            ),
           ),
         ),
       ],
