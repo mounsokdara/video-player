@@ -22,6 +22,7 @@ import 'main.dart';
 import 'models.dart';
 import 'player_fx.dart';
 import 'player_more.dart';
+import 'player_picture.dart';
 import 'settings.dart';
 import 'settings_ui.dart';
 import 'session.dart';
@@ -947,31 +948,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         child: player,
       );
     }
-    if (mirror) player = Transform.flip(flipX: true, child: player);
-    final filters = <ColorFilter>[];
-    if (invert) filters.add(const ColorFilter.matrix(_invert));
-    if (appSettings.grayscale || appSettings.monochrome) {
-      filters.add(const ColorFilter.matrix(_gray));
-    }
-    if (appSettings.colorCorrection && (appSettings.contrast != 1 || appSettings.saturation != 1)) {
-      filters.add(ColorFilter.matrix(_cs(appSettings.contrast, appSettings.saturation)));
-    }
-    if (appSettings.colorBlindDeuteranopia) filters.add(const ColorFilter.matrix(_deut));
-    if (appSettings.colorBlindProtanopia) filters.add(const ColorFilter.matrix(_prot));
-    if (appSettings.colorBlindTritanopia) filters.add(const ColorFilter.matrix(_trit));
-    for (final f in filters) {
-      player = ColorFiltered(colorFilter: f, child: player);
-    }
-    if (night || appSettings.nightMode) {
-      player = ColorFiltered(
-        colorFilter: ColorFilter.mode(Color.fromARGB((80 + appSettings.nightWarmth * 80).round(), 255, 140, 40), BlendMode.multiply),
+    return Center(
+      child: VideoPicture(
+        looks: PictureLooks.current(invert: invert, mirror: mirror, night: night),
         child: player,
-      );
-    }
-    if (appSettings.extraDim) {
-      player = ColorFiltered(colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.35), BlendMode.darken), child: player);
-    }
-    return Center(child: player);
+      ),
+    );
   }
 
   Widget _fit(Widget child, VideoPlayerController c, Size screen) {
@@ -1498,51 +1480,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
     if (mounted) _applySystemUi();
   }
-}
-
-const _invert = <double>[
-  -1, 0, 0, 0, 255,
-  0, -1, 0, 0, 255,
-  0, 0, -1, 0, 255,
-  0, 0, 0, 1, 0,
-];
-const _gray = <double>[
-  0.2126, 0.7152, 0.0722, 0, 0,
-  0.2126, 0.7152, 0.0722, 0, 0,
-  0.2126, 0.7152, 0.0722, 0, 0,
-  0, 0, 0, 1, 0,
-];
-const _deut = <double>[
-  0.625, 0.375, 0, 0, 0,
-  0.7, 0.3, 0, 0, 0,
-  0, 0.3, 0.7, 0, 0,
-  0, 0, 0, 1, 0,
-];
-const _prot = <double>[
-  0.567, 0.433, 0, 0, 0,
-  0.558, 0.442, 0, 0, 0,
-  0, 0.242, 0.758, 0, 0,
-  0, 0, 0, 1, 0,
-];
-const _trit = <double>[
-  0.95, 0.05, 0, 0, 0,
-  0, 0.433, 0.567, 0, 0,
-  0, 0.475, 0.525, 0, 0,
-  0, 0, 0, 1, 0,
-];
-
-List<double> _cs(double c, double s) {
-  final lumR = 0.2126, lumG = 0.7152, lumB = 0.0722;
-  final sr = (1 - s) * lumR;
-  final sg = (1 - s) * lumG;
-  final sb = (1 - s) * lumB;
-  final t = (1 - c) / 2 * 255;
-  return [
-    c * (sr + s), c * sg, c * sb, 0, t,
-    c * sr, c * (sg + s), c * sb, 0, t,
-    c * sr, c * sg, c * (sb + s), 0, t,
-    0, 0, 0, 1, 0,
-  ];
 }
 
 class _HudChip extends StatelessWidget {

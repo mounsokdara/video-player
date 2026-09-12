@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
 
+final appSettings = AppSettings();
+
 class AppSettings {
   ThemeModePref themeMode = ThemeModePref.system;
   int seedColor = 0xFF8BA3B8;
@@ -91,6 +93,8 @@ class AppSettings {
   bool mirror = false;
   bool colorCorrection = false;
   bool alwaysHideNavBar = false;
+  bool developerEnabled = false;
+  bool debugLog = false;
 
   /// Tab ids hidden from the bottom bar and moved into the overflow menu.
   /// Valid: videos, folders, settings. At least one tab must stay visible.
@@ -275,6 +279,8 @@ class AppSettings {
     mirror = p.getBool('mirror') ?? false;
     colorCorrection = p.getBool('colorCorrection') ?? false;
     alwaysHideNavBar = p.getBool('alwaysHideNavBar') ?? false;
+    developerEnabled = p.getBool('developerEnabled') ?? false;
+    debugLog = p.getBool('debugLog') ?? false;
     hiddenTabs = List<String>.from(p.getStringList('hiddenTabs') ?? const []);
     hiddenTabs.removeWhere((t) => !tabIds.contains(t));
     if (hiddenTabs.length >= tabIds.length) {
@@ -401,6 +407,8 @@ class AppSettings {
     await p.setBool('mirror', mirror);
     await p.setBool('colorCorrection', colorCorrection);
     await p.setBool('alwaysHideNavBar', alwaysHideNavBar);
+    await p.setBool('developerEnabled', developerEnabled);
+    await p.setBool('debugLog', debugLog);
     await p.setStringList('hiddenTabs', hiddenTabs);
     await p.setStringList('quickActions', quickActions);
     await p.setStringList('titleActions', titleActions);

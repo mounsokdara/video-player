@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'android_bridge.dart';
+import 'developer_log.dart';
 
 final appNavigator = GlobalKey<NavigatorState>();
 
@@ -96,6 +97,7 @@ class CrashLog {
     if (extra != null && extra.trim().isNotEmpty) buf.writeln(extra.trim());
     reports.add(buf.toString().trim());
     if (reports.length > _max) reports.removeAt(0);
+    DeveloperLog.append('$kind $message');
     const autoShow = {
       'PLAY',
       'EQ',

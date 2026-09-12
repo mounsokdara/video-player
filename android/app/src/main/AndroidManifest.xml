@@ -85,6 +85,12 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:excludeFromRecents="true" />
 
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:excludeFromRecents="true" />
+
         <service
             android:name=".PlaybackService"
             android:exported="false"

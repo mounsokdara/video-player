@@ -14,7 +14,6 @@ import 'theme.dart';
 
 export 'settings.dart';
 
-final appSettings = AppSettings();
 final library = LibraryService(appSettings);
 
 Future<void> main() async {
@@ -44,7 +43,28 @@ class VideoPlayerApp extends StatefulWidget {
   State<VideoPlayerApp> createState() => _VideoPlayerAppState();
 }
 
-class _VideoPlayerAppState extends State<VideoPlayerApp> {
+class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      appSettings.load().then((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DynamicColorBuilder(

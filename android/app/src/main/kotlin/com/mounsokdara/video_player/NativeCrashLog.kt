@@ -8,6 +8,25 @@ import java.util.Date
 import java.util.Locale
 
 object NativeCrashLog {
+    fun peek(context: Context): String {
+        val crash = File(context.filesDir, NativeConstants.FILE_CRASH)
+        val actionFile = File(context.filesDir, NativeConstants.FILE_ACTION)
+        val buf = StringBuilder()
+        try {
+            if (actionFile.exists()) {
+                val action = actionFile.readText()
+                if (action.isNotBlank()) buf.append("Last action: ").append(action).append('\n')
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            if (crash.exists()) buf.append(crash.readText()).append('\n')
+        } catch (_: Exception) {
+        }
+        val out = buf.toString().trim()
+        return if (out.isEmpty()) "No crash captured." else out
+    }
+
     fun write(context: Context, text: String) {
         try {
             File(context.filesDir, NativeConstants.FILE_CRASH).writeText(

@@ -5,194 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
-import 'main.dart';
+import 'mini_chrome.dart';
+import 'mini_geom.dart';
+import 'player_picture.dart';
 import 'session.dart';
+import 'settings.dart';
 
-class MiniGeom {
-  MiniGeom._();
-  static const minW = 15.0;
-  static const maxW = 95.0;
-  static const defW = 30.0;
-  static const hideT = 0.6;
-  static const closeT = 0.6;
-  static const tapSlop = 5.0;
-  static const arrowMax = 44.0;
-  static const arrowH = 120.0;
-  static const barH = 44.0;
-  static const snapMs = 500;
-  static const closeMs = 300;
-  static const ease = Cubic(0.22, 1.0, 0.36, 1.0);
-}
-
-class MiniPhysics {
-  MiniPhysics._();
-
-  static Size videoSize() {
-    try {
-      final s = PlaybackSession.controller?.value.size;
-      if (s != null && s.width > 1 && s.height > 1) return s;
-    } catch (_) {}
-    final item = PlaybackSession.item;
-    if (item != null && item.width > 1 && item.height > 1) {
-      return Size(item.width.toDouble(), item.height.toDouble());
-    }
-    return const Size(16, 9);
-  }
-
-  static Size box(Size screen, Size video, double widthVw) {
-    final ar = (video.width <= 0 || video.height <= 0)
-        ? 16 / 9
-        : video.width / video.height;
-    var w = (widthVw / 100) * screen.width;
-    var vidH = w / ar;
-    final maxVid = screen.height * 0.55;
-    if (vidH > maxVid) {
-      vidH = maxVid;
-      w = vidH * ar;
-    }
-    return Size(w, vidH + MiniGeom.barH);
-  }
-
-  static double offX(Rect r, Size screen) {
-    if (r.width <= 0) return 1;
-    final visW = math.max(0.0, math.min(screen.width, r.right) - math.max(0.0, r.left));
-    return 1 - visW / r.width;
-  }
-
-  static double offBottom(Rect r, Size screen) =>
-      r.height <= 0 ? 0 : math.max(0.0, (r.bottom - screen.height) / r.height);
-
-  static Offset settlePos(
-    Rect r,
-    Size screen,
-    Size box, {
-    required double navH,
-    required EdgeInsets pad,
-  }) {
-    final minX = pad.left;
-    final maxX = math.max(minX, screen.width - box.width - pad.right);
-    final minY = pad.top;
-    final maxY = math.max(minY, screen.height - box.height - navH);
-    final left = (r.left + r.width / 2) < screen.width / 2 ? minX : maxX;
-    final top = r.top.clamp(minY, maxY).toDouble();
-    return Offset(left, top);
-  }
-}
-
-class MiniStickyArrow extends StatelessWidget {
-  const MiniStickyArrow({
-    super.key,
-    required this.side,
-    required this.width,
-  });
-
-  final String side;
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    final left = side == 'left';
-    final scheme = Theme.of(context).colorScheme;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: MiniGeom.ease,
-      width: width,
-      height: MiniGeom.arrowH,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.horizontal(
-          left: left ? Radius.zero : const Radius.circular(12),
-          right: left ? const Radius.circular(12) : Radius.zero,
-        ),
-      ),
-      clipBehavior: Clip.hardEdge,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 250),
-        curve: MiniGeom.ease,
-        opacity: width < 8 ? 0 : 1,
-        child: Icon(left ? Icons.chevron_right : Icons.chevron_left,
-            size: 24, color: scheme.onSurface),
-      ),
-    );
-  }
-}
-
-class MiniTransportBar extends StatelessWidget {
-  const MiniTransportBar({
-    super.key,
-    required this.title,
-    required this.playing,
-    required this.onPrev,
-    required this.onPlay,
-    required this.onNext,
-  });
-
-  final String title;
-  final bool playing;
-  final VoidCallback onPrev;
-  final VoidCallback onPlay;
-  final VoidCallback onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    Widget ctrl(String label, IconData icon, VoidCallback onTap, {bool play = false}) {
-      final size = play ? 34.0 : 30.0;
-      return Tooltip(
-        message: label,
-        child: Material(
-          color: play ? scheme.onSurface.withValues(alpha: 0.12) : Colors.transparent,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: Icon(icon, size: play ? 18 : 17, color: scheme.onSurface),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return ColoredBox(
-      color: scheme.surface,
-      child: SizedBox(
-        height: MiniGeom.barH,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: scheme.onSurface,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-              ctrl('Previous', Icons.skip_previous, onPrev),
-              const SizedBox(width: 4),
-              ctrl(playing ? 'Pause' : 'Play',
-                  playing ? Icons.pause : Icons.play_arrow, onPlay, play: true),
-              const SizedBox(width: 4),
-              ctrl('Next', Icons.skip_next, onNext),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+export 'mini_chrome.dart';
+export 'mini_geom.dart';
 
 class MiniPlayerOverlay extends StatefulWidget {
   const MiniPlayerOverlay({
@@ -219,7 +39,7 @@ class MiniPlayerOverlay extends StatefulWidget {
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     with SingleTickerProviderStateMixin {
   double _left = 0, _top = 0;
-  double _widthVw = MiniGeom.defW;
+  double _scale = 1;
   bool _ready = false;
   bool _dragging = false;
   bool _resizing = false;
@@ -231,13 +51,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
   Offset _startPos = Offset.zero;
-  double _startBoxW = 0;
+  double _startScale = 1;
   double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
 
   late final AnimationController _move;
-  double _fromLeft = 0, _fromTop = 0, _fromW = MiniGeom.defW;
-  double _toLeft = 0, _toTop = 0, _toW = MiniGeom.defW;
+  double _fromLeft = 0, _fromTop = 0, _fromScale = 1;
+  double _toLeft = 0, _toTop = 0, _toScale = 1;
 
   @override
   void initState() {
@@ -284,25 +104,25 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     setState(() {
       _left = _fromLeft + (_toLeft - _fromLeft) * t;
       _top = _fromTop + (_toTop - _fromTop) * t;
-      _widthVw = _fromW + (_toW - _fromW) * t;
+      _scale = _fromScale + (_toScale - _fromScale) * t;
       if (!_closing) _followArrows();
     });
   }
 
-  void _animateTo(double left, double top, double widthVw, {VoidCallback? onDone}) {
+  void _animateTo(double left, double top, double scale, {VoidCallback? onDone}) {
     _fromLeft = _left;
     _fromTop = _top;
-    _fromW = _widthVw;
+    _fromScale = _scale;
     _toLeft = left;
     _toTop = top;
-    _toW = widthVw;
+    _toScale = scale;
     _move.stop();
     _move.duration = const Duration(milliseconds: MiniGeom.snapMs);
     _move.forward(from: 0).whenComplete(() {
       if (!mounted) return;
       _left = _toLeft;
       _top = _toTop;
-      _widthVw = _toW;
+      _scale = _toScale;
       onDone?.call();
       if (mounted) setState(() {});
     });
@@ -360,7 +180,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Rect _rect(Size box) => Rect.fromLTWH(_left, _top, box.width, box.height);
 
   Size _boxFor(Size screen) =>
-      MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw);
+      MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), _scale);
 
   String _sideFor(Rect r, Size screen) =>
       (r.left + r.width / 2) < screen.width / 2 ? 'left' : 'right';
@@ -392,7 +212,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _setArrows(side, 1);
     _dragOpacity = 1;
     final left = side == 'left' ? -box.width : screen.width;
-    _animateTo(left, _top, _widthVw, onDone: () {
+    _animateTo(left, _top, _scale, onDone: () {
       if (!mounted) return;
       _setArrows(side, 1);
       _pauseForHide();
@@ -413,7 +233,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     );
     final target = MiniPhysics.settlePos(seed, screen, box,
         navH: widget.navH, pad: widget.pad);
-    _animateTo(target.dx, target.dy, _widthVw, onDone: () {
+    _animateTo(target.dx, target.dy, _scale, onDone: () {
       if (!mounted) return;
       _hiddenSide = null;
       _followArrows();
@@ -422,22 +242,23 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _settle(Size screen, Size box) {
-    final w = _widthVw.clamp(MiniGeom.minW, MiniGeom.maxW).toDouble();
-    final next = MiniPhysics.box(screen, MiniPhysics.videoSize(), w);
+    final s = MiniGeom.clampScale(_scale, screen);
+    final next = MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), s);
     final target = MiniPhysics.settlePos(_rect(box), screen, next,
         navH: widget.navH, pad: widget.pad);
     _hiddenSide = null;
     _setArrows(null, 0);
     _dragOpacity = 1;
-    _animateTo(target.dx, target.dy, w, onDone: _resumeIfNeeded);
+    _animateTo(target.dx, target.dy, s, onDone: _resumeIfNeeded);
   }
 
   void _finishDrag(Size screen, Size box) {
     final r = _rect(box);
     final ox = MiniPhysics.offX(r, screen);
     final ob = MiniPhysics.offBottom(r, screen);
-    final over = _widthVw > MiniGeom.maxW;
-    final under = _widthVw < MiniGeom.minW;
+    final lo = MiniGeom.clampScale(MiniGeom.minScale, screen);
+    final over = _scale > MiniGeom.maxScale + 0.001;
+    final under = _scale < lo - 0.001;
 
     if (ob >= MiniGeom.closeT && !over && !under) {
       unawaited(_close());
@@ -468,7 +289,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _moved = false;
     _startFocal = d.focalPoint;
     _startPos = Offset(_left, _top);
-    _startBoxW = box.width;
+    _startScale = _scale;
     _pinchFx = box.width <= 0
         ? 0.5
         : ((d.focalPoint.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
@@ -492,11 +313,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _resumeIfNeeded();
       }
       _setArrows(null, 0);
-      final newWpx = math.max(_startBoxW * d.scale, 40.0);
-      final vw = newWpx / screen.width * 100;
-      final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), vw);
+      final nextScale = MiniGeom.clampScale(_startScale * d.scale, screen);
+      final box = MiniPhysics.visualBox(screen, MiniPhysics.videoSize(), nextScale);
       setState(() {
-        _widthVw = vw;
+        _scale = nextScale;
         _left = d.focalPoint.dx - _pinchFx * box.width;
         _top = d.focalPoint.dy - _pinchFy * box.height;
         _dragOpacity = 1;
@@ -552,12 +372,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _bind();
     final screen = MediaQuery.sizeOf(context);
     final video = MiniPhysics.videoSize();
-    final box = MiniPhysics.box(screen, video, _widthVw);
+    final base = MiniPhysics.baseBox(screen, video);
+    var box = MiniPhysics.visualBox(screen, video, _scale);
 
     if (!_ready) {
       _ready = true;
-      _widthVw = MiniGeom.defW;
-      final start = MiniPhysics.box(screen, video, _widthVw);
+      _scale = MiniGeom.clampScale(1, screen);
+      final start = MiniPhysics.visualBox(screen, video, _scale);
+      box = start;
       _left = screen.width - start.width - widget.pad.right;
       _top = (screen.height * 0.55 - start.height / 2)
           .clamp(
@@ -584,7 +406,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     Widget frame;
     try {
       if (c != null && c.value.isInitialized) {
-        frame = VideoPlayer(c);
+        frame = VideoPicture(
+          looks: PictureLooks.current(),
+          child: VideoPlayer(c),
+        );
       } else {
         frame = const ColoredBox(
           color: Color(0xFF05060A),
@@ -600,7 +425,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final aR = _arrowR * MiniGeom.arrowMax;
     final extraL = aR;
     final extraR = aL;
-    final radius = math.max(8.0, box.width * 0.035);
+    final radius = math.max(8.0, base.width * 0.035);
     final scheme = Theme.of(context).colorScheme;
     final closeMs = _closing ? MiniGeom.closeMs : 0;
 
@@ -642,42 +467,50 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                             widget.onExpand();
                           }
                         },
-                        child: Material(
-                          color: scheme.surface,
-                          elevation: 14,
-                          borderRadius: BorderRadius.circular(radius),
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            children: [
-                              Expanded(
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    ColoredBox(
-                                        color: const Color(0xFF05060A),
-                                        child: frame),
-                                    Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: SizedBox(
-                                        height: 2,
-                                        child: LinearProgressIndicator(
-                                          value: progress,
-                                          backgroundColor: Colors.white24,
-                                          color: const Color(0xFF7AA2FF),
+                        child: Transform.scale(
+                          scale: _scale,
+                          alignment: Alignment.topLeft,
+                          child: SizedBox(
+                            width: base.width,
+                            height: base.height,
+                            child: Material(
+                              color: scheme.surface,
+                              elevation: 14,
+                              borderRadius: BorderRadius.circular(radius),
+                              clipBehavior: Clip.antiAlias,
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        ColoredBox(
+                                            color: const Color(0xFF05060A),
+                                            child: frame),
+                                        Align(
+                                          alignment: Alignment.bottomCenter,
+                                          child: SizedBox(
+                                            height: 2,
+                                            child: LinearProgressIndicator(
+                                              value: progress,
+                                              backgroundColor: Colors.white24,
+                                              color: const Color(0xFF7AA2FF),
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  MiniTransportBar(
+                                    title: item?.title ?? '',
+                                    playing: playing,
+                                    onPrev: () => unawaited(widget.onPrev()),
+                                    onPlay: () => unawaited(_togglePlay()),
+                                    onNext: () => unawaited(widget.onNext()),
+                                  ),
+                                ],
                               ),
-                              MiniTransportBar(
-                                title: item?.title ?? '',
-                                playing: playing,
-                                onPrev: () => unawaited(widget.onPrev()),
-                                onPlay: () => unawaited(_togglePlay()),
-                                onNext: () => unawaited(widget.onNext()),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),

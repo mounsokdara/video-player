@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'android_bridge.dart';
+import 'about.dart';
 import 'crash.dart';
 import 'hud.dart';
 import 'insets.dart';
@@ -68,14 +68,11 @@ class SettingsHub extends StatelessWidget {
               title: const Text('About'),
               subtitle: const Text('Video Player 1.0.0_Indev'),
               onTap: () async {
-                final info = await PackageInfo.fromPlatform();
+                final opened = await AndroidBridge.openAbout();
+                if (opened) return;
                 if (!context.mounted) return;
-                showAboutDialog(
-                  context: context,
-                  applicationName: 'Video Player',
-                  applicationVersion: '${info.version} (${info.buildNumber})',
-                  applicationLegalese: 'Local-only Android player. Material 3.',
-                );
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
+                onChanged();
               },
             ),
           ]),

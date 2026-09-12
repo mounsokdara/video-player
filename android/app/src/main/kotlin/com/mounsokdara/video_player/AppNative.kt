@@ -58,6 +58,16 @@ class AppNative(
                 result.success(true)
                 return true
             }
+            NativeConstants.Method.OPEN_ABOUT -> {
+                activity.startActivity(Intent(activity, AboutActivity::class.java))
+                result.success(true)
+                return true
+            }
+            NativeConstants.Method.DEBUG_LOG -> {
+                DeveloperLog.append(activity, call.argument<String>("line") ?: "")
+                result.success(true)
+                return true
+            }
             else -> return false
         }
     }

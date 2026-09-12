@@ -22,6 +22,7 @@ object NativeConstants {
     const val FILE_DIRTY = "session_dirty.txt"
     const val FILE_ACTION = "last_action.txt"
     const val FILE_EQ_DIRTY = "eq_dirty.txt"
+    const val FILE_DEBUG = "debug_log.txt"
 
     val TEN_BAND_HZ = intArrayOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
@@ -58,5 +59,7 @@ object NativeConstants {
         const val ABANDON_AUDIO_FOCUS = "abandonAudioFocus"
         const val APPLY_EQUALIZER = "applyEqualizer"
         const val OPEN_CRASH_REPORT = "openCrashReport"
+        const val OPEN_ABOUT = "openAbout"
+        const val DEBUG_LOG = "debugLog"
     }
 }

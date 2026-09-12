@@ -427,6 +427,20 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<bool> openAbout() async {
+    try {
+      return await _ch.invokeMethod<bool>('openAbout') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> debugLog(String line) async {
+    try {
+      await _ch.invokeMethod('debugLog', {'line': line});
+    } catch (_) {}
+  }
+
   static Future<void> breadcrumb(String action) async {
     try {
       await _ch.invokeMethod('breadcrumb', {'action': action});
