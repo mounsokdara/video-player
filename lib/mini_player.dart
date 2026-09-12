@@ -49,15 +49,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   bool _wasPlayingBeforePark = false;
   bool _moved = false;
   bool _live = false;
+  bool _gestureActive = false;
+  int _activePointers = 0;
 
   double _startW = MiniGeom.defW;
   Offset _startPos = Offset.zero;
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
-
-  int _lastPointerCount = 1;
-  double _lastScale = 1.0;
-  double _accumulatedScale = 1.0;
 
   VideoPlayerController? _ctrl;
 
@@ -194,6 +192,21 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (mounted) setState(() {});
   }
 
+  void _handlePointerDown(PointerDownEvent _) {
+    _activePointers++;
+    if (_activePointers >= 2 && _gestureActive) {
+      _moved = true;
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent _) {
+    _activePointers = math.max(0, _activePointers - 1);
+  }
+
+  void _handlePointerCancel(PointerCancelEvent _) {
+    _activePointers = math.max(0, _activePointers - 1);
+  }
+
   void _onScaleStart(ScaleStartDetails d) {
     if (_dismissed) return;
     _anim.stop();
@@ -204,10 +217,15 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _parentOrigin = cardGlobal - _startPos;
     final focalInParent = d.focalPoint - _parentOrigin;
     _anchorInWidget = focalInParent - _startPos;
-    _lastPointerCount = d.pointerCount;
-    _lastScale = 1.0;
-    _accumulatedScale = 1.0;
-    _moved = d.pointerCount >= 2;
+
+    if (!_gestureActive) {
+      _gestureActive = true;
+      _moved = false;
+    }
+    if (d.pointerCount >= 2 || _activePointers >= 2) {
+      _moved = true;
+    }
+
     final wasParked = _parked;
     setState(() {
       _parked = false;
@@ -220,31 +238,20 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
     if (_dismissed) return;
-
-    if (d.pointerCount != _lastPointerCount) {
-      _lastPointerCount = d.pointerCount;
-      _lastScale = d.scale;
-      _accumulatedScale = 1.0;
-      _startW = _w;
-      _startPos = _rawPos;
-      _anchorInWidget = d.focalPoint - _parentOrigin - _rawPos;
-      if (d.pointerCount >= 2) _moved = true;
-    }
-
-    final scaleDelta = _lastScale == 0 ? 1.0 : d.scale / _lastScale;
-    _accumulatedScale *= scaleDelta;
-    _lastScale = d.scale;
-
-    if (d.pointerCount >= 2 ||
-        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget))
-                .distance >
-            MiniGeom.tapSlop) {
+    if (d.pointerCount >= 2 || _activePointers >= 2) {
       _moved = true;
     }
-
+    final pinching = (d.scale - 1).abs() > 0.02 || d.pointerCount >= 2;
+    if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
+        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget))
+                .distance >
+            MiniGeom.tapSlop ||
+        pinching) {
+      _moved = true;
+    }
     final hi = MiniPhysics.maxWFor(_screen);
     final lo = math.min(MiniGeom.minW, hi);
-    final targetW = MiniPhysics.softClamp(_startW * _accumulatedScale, lo, hi);
+    final targetW = MiniPhysics.softClamp(_startW * d.scale, lo, hi);
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
     final focalInParent = d.focalPoint - _parentOrigin;
     final newPos = focalInParent - _anchorInWidget * ratio;
@@ -259,9 +266,12 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     });
   }
 
-  void _onScaleEnd(ScaleEndDetails _) {
+  void _onScaleEnd(ScaleEndDetails d) {
     if (_dismissed) return;
+    if (d.pointerCount > 0) return;
+    _gestureActive = false;
     _live = false;
+    if (_activePointers >= 2) _moved = true;
     if (!_moved) {
       if (_parked) {
         _unpark();
@@ -398,9 +408,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final arrowW = _arrowWidthFor(pos);
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
-    final strokeColor = scheme.outline.withValues(alpha: 0.55);
-    final strokeW = _live ? 1.6 : 1.2;
-    const double cornerRadius = 34.0;
+    final stroke = scheme.outline.withValues(alpha: 0.55);
+    final arrowStroke = scheme.outline.withValues(alpha: 0.85);
 
     final double arrowLeft;
     if (side < 0) {
@@ -464,50 +473,69 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             opacity: opacity,
             child: IgnorePointer(
               ignoring: _dismissed || opacity < 0.1,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onScaleStart: _onScaleStart,
-                onScaleUpdate: _onScaleUpdate,
-                onScaleEnd: _onScaleEnd,
-                child: Container(
-                  key: _cardKey,
-                  decoration: BoxDecoration(
-                    color: scheme.surface,
-                    borderRadius: BorderRadius.circular(cornerRadius),
-                    border: Border.all(color: strokeColor, width: strokeW),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
+              child: Listener(
+                onPointerDown: _handlePointerDown,
+                onPointerUp: _handlePointerUp,
+                onPointerCancel: _handlePointerCancel,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onScaleStart: _onScaleStart,
+                  onScaleUpdate: _onScaleUpdate,
+                  onScaleEnd: _onScaleEnd,
+                  child: Stack(
                     children: [
-                      Expanded(
-                        child: Stack(
-                          fit: StackFit.expand,
+                      Material(
+                        key: _cardKey,
+                        color: scheme.surface,
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        surfaceTintColor: Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
                           children: [
-                            ColoredBox(
-                              color: const Color(0xFF05060A),
-                              child: frame,
-                            ),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: SizedBox(
-                                height: 3,
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 3,
-                                  backgroundColor: Colors.white24,
-                                  color: const Color(0xFF9E8CFF),
-                                ),
+                            Expanded(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ColoredBox(
+                                    color: const Color(0xFF05060A),
+                                    child: frame,
+                                  ),
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: SizedBox(
+                                      height: 3,
+                                      child: LinearProgressIndicator(
+                                        value: progress,
+                                        minHeight: 3,
+                                        backgroundColor: Colors.white24,
+                                        color: const Color(0xFF9E8CFF),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            MiniTransportBar(
+                              title: item?.title ?? '',
+                              playing: playing,
+                              onPrev: () => unawaited(widget.onPrev()),
+                              onPlay: () => unawaited(_togglePlay()),
+                              onNext: () => unawaited(widget.onNext()),
                             ),
                           ],
                         ),
                       ),
-                      MiniTransportBar(
-                        title: item?.title ?? '',
-                        playing: playing,
-                        onPrev: () => unawaited(widget.onPrev()),
-                        onPlay: () => unawaited(_togglePlay()),
-                        onNext: () => unawaited(widget.onNext()),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: stroke, width: 1.2),
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -530,18 +558,36 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanStart: _onArrowPanStart,
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.horizontal(
-                      left: Radius.circular(side < 0 ? cornerRadius : 0),
-                      right: Radius.circular(side < 0 ? 0 : cornerRadius),
+                child: Stack(
+                  children: [
+                    MiniStickyArrow(
+                      side: side == 0 ? 1 : side,
+                      width: arrowW,
                     ),
-                    border: Border.all(color: strokeColor, width: strokeW),
-                  ),
-                  child: MiniStickyArrow(
-                    side: side == 0 ? 1 : side,
-                    width: arrowW,
-                  ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.only(
+                              topLeft: side > 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              bottomLeft: side > 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              topRight: side < 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                              bottomRight: side < 0
+                                  ? const Radius.circular(4)
+                                  : Radius.zero,
+                            ),
+                            border: Border.all(color: arrowStroke, width: 1.2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
