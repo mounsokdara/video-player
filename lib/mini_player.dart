@@ -435,13 +435,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _finishDrag(Size screen, Size box) {
     final r = _rect(box);
     final ox = MiniPhysics.offX(r, screen);
-    final ob = MiniPhysics.offBottom(r, screen);
     final over = _widthVw > MiniGeom.maxW;
     final under = _widthVw < MiniGeom.minW;
 
-    if (ob >= MiniGeom.closeT && !over && !under) {
-      unawaited(_close());
-    } else if (ox >= MiniGeom.hideT && !over && !under) {
+    if (ox >= MiniGeom.hideT && !over && !under) {
       _park(_sideFor(r, screen), screen, box);
     } else if (_hiddenSide != null) {
       _unhide(screen, box);
@@ -511,11 +508,19 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _hiddenSide = null;
       _resumeIfNeeded();
     }
+
+    final box = _boxFor(screen);
+    final minTop = widget.pad.top;
+    final maxTop = math.max(minTop, screen.height - box.height - widget.navH);
+
     setState(() {
       _left = _startPos.dx + (d.focalPoint.dx - _startFocal.dx);
-      _top = _startPos.dy + (d.focalPoint.dy - _startFocal.dy);
+      _top = (_startPos.dy + (d.focalPoint.dy - _startFocal.dy))
+          .clamp(minTop, maxTop)
+          .toDouble();
     });
-    final r = _rect(_boxFor(screen));
+
+    final r = _rect(box);
     _dragOpacity = math.max(0.1, 1 - MiniPhysics.offBottom(r, screen));
     _refreshArrows(r, screen, threshold: 0.05);
     setState(() {});
