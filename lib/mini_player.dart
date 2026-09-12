@@ -125,7 +125,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   int _sideFor(Offset pos) {
-    if (_parked) return _parkSide;
+    if (_parked && _parkSide != 0) return _parkSide;
+    if (_parked) {
+      // parked but side lost: derive from position
+      final screenW = _screen.width;
+      if (pos.dx + _w / 2 < screenW / 2) return -1;
+      return 1;
+    }
     final screenW = _screen.width;
     if (pos.dx < 0) return -1;
     if (pos.dx + _w > screenW) return 1;
@@ -133,8 +139,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   double _arrowWidthFor(Offset pos) {
-    if (!_parked && _overhang(pos) <= 0) return 0;
     if (_parked) return MiniGeom.arrowMaxW;
+    if (_overhang(pos) <= 0) return 0;
     final o = _overhang(pos);
     final full = MiniGeom.parkT * _w;
     return (MiniGeom.arrowMaxW * (o / full))
@@ -286,13 +292,15 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _onArrowPanStart(DragStartDetails _) {
     if (_dismissed) return;
     _anim.stop();
+    final wasParked = _parked;
+    final oldSide = _parkSide;
     setState(() {
       _parked = false;
       _parkSide = 0;
       _dismissed = false;
       _live = true;
     });
-    _resumeIfNeeded();
+    if (wasParked && oldSide != 0) _resumeIfNeeded();
   }
 
   void _onArrowPanUpdate(DragUpdateDetails d) {
@@ -350,12 +358,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     }
     final dist = (to - fromPos).distance;
     final ms = (220 + dist * 0.45).clamp(220, 700).round();
-    _animate(fromPos, to, _w, settledW, ms, null);
+    _animate(fromPos, to, _w, settledW, ms, () {
+      _pos = to;
+      _w = settledW;
+    });
   }
 
   void _unpark() {
     if (!_parked && _parkSide == 0) return;
-    final side = _parkSide == 0 ? _sideFor(_rawPos) : _parkSide;
+    final side = _parkSide != 0 ? _parkSide : _sideFor(_rawPos);
+    if (side == 0) return;
     final video = _video;
     final targetW = MiniPhysics.clampW(_w, _screen);
     final targetH = MiniPhysics.boxFor(targetW, video).height;
@@ -373,7 +385,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _parkSide = 0;
     });
     _resumeIfNeeded();
-    _animate(fromPos, to, _w, targetW, ms, null);
+    _animate(fromPos, to, _w, targetW, ms, () {
+      _pos = to;
+      _w = targetW;
+    });
   }
 
   void _animate(
@@ -410,8 +425,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final scheme = Theme.of(context).colorScheme;
     final stroke = scheme.outline.withValues(alpha: 0.55);
     final arrowStroke = scheme.outline.withValues(alpha: 0.85);
-    final arrowVisible = arrowW >= 6;
-    final arrowFullyShown = _parked && arrowW >= MiniGeom.arrowMaxW - 0.5;
+
+    final bool showArrow = !_dismissed && side != 0 && arrowW > 0.5;
 
     final double arrowLeft;
     if (side < 0) {
@@ -546,25 +561,26 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
             ),
           ),
         ),
-        if (!_dismissed && arrowVisible)
+        if (showArrow)
           Positioned(
             left: arrowLeft,
             top: arrowTop,
             width: arrowW,
             height: MiniGeom.arrowH,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _unpark,
-              onPanStart: _onArrowPanStart,
-              onPanUpdate: _onArrowPanUpdate,
-              onPanEnd: _onArrowPanEnd,
-              child: Stack(
-                children: [
-                  MiniStickyArrow(
-                    side: side == 0 ? 1 : side,
-                    width: arrowW,
-                  ),
-                  if (arrowFullyShown)
+            child: IgnorePointer(
+              ignoring: arrowW < 6,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _unpark,
+                onPanStart: _onArrowPanStart,
+                onPanUpdate: _onArrowPanUpdate,
+                onPanEnd: _onArrowPanEnd,
+                child: Stack(
+                  children: [
+                    MiniStickyArrow(
+                      side: side == 0 ? 1 : side,
+                      width: arrowW,
+                    ),
                     Positioned.fill(
                       child: IgnorePointer(
                         child: DecoratedBox(
@@ -588,7 +604,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                         ),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
