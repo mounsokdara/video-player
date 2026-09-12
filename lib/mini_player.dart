@@ -447,62 +447,51 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onScaleStart: _onScaleStart,
                 onScaleUpdate: _onScaleUpdate,
                 onScaleEnd: _onScaleEnd,
-                child: Stack(
-                  children: [
-                    Material(
-                      key: _cardKey,
-                      color: scheme.surface,
-                      elevation: 0,
-                      shadowColor: Colors.transparent,
-                      surfaceTintColor: Colors.transparent,
-                      borderRadius: BorderRadius.circular(14),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        children: [
-                          Expanded(
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ColoredBox(
-                                  color: const Color(0xFF05060A),
-                                  child: frame,
-                                ),
-                                Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: SizedBox(
-                                    height: 3,
-                                    child: LinearProgressIndicator(
-                                      value: progress,
-                                      minHeight: 3,
-                                      backgroundColor: Colors.white24,
-                                      color: const Color(0xFF9E8CFF),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                child: Material(
+                  key: _cardKey,
+                  color: scheme.surface,
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: stroke, width: 1.2),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              color: const Color(0xFF05060A),
+                              child: frame,
                             ),
-                          ),
-                          MiniTransportBar(
-                            title: item?.title ?? '',
-                            playing: playing,
-                            onPrev: () => unawaited(widget.onPrev()),
-                            onPlay: () => unawaited(_togglePlay()),
-                            onNext: () => unawaited(widget.onNext()),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: stroke, width: 1.2),
-                          ),
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: SizedBox(
+                                height: 3,
+                                child: LinearProgressIndicator(
+                                  value: progress,
+                                  minHeight: 3,
+                                  backgroundColor: Colors.white24,
+                                  color: const Color(0xFF9E8CFF),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
+                      MiniTransportBar(
+                        title: item?.title ?? '',
+                        playing: playing,
+                        onPrev: () => unawaited(widget.onPrev()),
+                        onPlay: () => unawaited(_togglePlay()),
+                        onNext: () => unawaited(widget.onNext()),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -522,36 +511,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanStart: _onArrowPanStart,
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: side == 0 ? 1 : side,
-                      width: arrowW,
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.only(
-                              topLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomLeft: side > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              topRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomRight: side < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                            ),
-                            border: Border.all(color: arrowStroke, width: 1.2),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                child: CustomPaint(
+                  foregroundPainter: _StickyArrowBorderPainter(
+                    side: side == 0 ? 1 : side,
+                    color: arrowStroke,
+                    strokeWidth: 1.2,
+                  ),
+                  child: MiniStickyArrow(
+                    side: side == 0 ? 1 : side,
+                    width: arrowW,
+                  ),
                 ),
               ),
             ),
@@ -559,4 +528,60 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       ],
     );
   }
+}
+
+class _StickyArrowBorderPainter extends CustomPainter {
+  _StickyArrowBorderPainter({
+    required this.side,
+    required this.color,
+    this.strokeWidth = 1.2,
+  });
+
+  final int side;
+  final Color color;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(strokeWidth / 2);
+    final r = rect.height / 2;
+    final path = Path();
+
+    if (side < 0) {
+      path.moveTo(rect.left, rect.top);
+      path.lineTo(rect.right - r, rect.top);
+      path.arcToPoint(
+        Offset(rect.right - r, rect.bottom),
+        radius: Radius.circular(r),
+        clockwise: true,
+      );
+      path.lineTo(rect.left, rect.bottom);
+      path.close();
+    } else {
+      path.moveTo(rect.right, rect.top);
+      path.lineTo(rect.left + r, rect.top);
+      path.arcToPoint(
+        Offset(rect.left + r, rect.bottom),
+        radius: Radius.circular(r),
+        clockwise: false,
+      );
+      path.lineTo(rect.right, rect.bottom);
+      path.close();
+    }
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _StickyArrowBorderPainter old) =>
+      old.side != side ||
+      old.color != color ||
+      old.strokeWidth != strokeWidth;
 }
