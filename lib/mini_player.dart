@@ -378,7 +378,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final h = _h;
     final scheme = Theme.of(context).colorScheme;
     final stroke = scheme.outline.withValues(alpha: 0.55);
-    final arrowStroke = scheme.outline.withValues(alpha: 0.7);
+    final arrowStroke = scheme.outline.withValues(alpha: 0.85);
 
     final double arrowLeft;
     if (side < 0) {
@@ -447,51 +447,62 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onScaleStart: _onScaleStart,
                 onScaleUpdate: _onScaleUpdate,
                 onScaleEnd: _onScaleEnd,
-                child: Material(
-                  key: _cardKey,
-                  color: scheme.surface,
-                  elevation: 0,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(color: stroke, width: 1.2),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ColoredBox(
-                              color: const Color(0xFF05060A),
-                              child: frame,
-                            ),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: SizedBox(
-                                height: 3,
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 3,
-                                  backgroundColor: Colors.white24,
-                                  color: const Color(0xFF9E8CFF),
+                child: Stack(
+                  children: [
+                    Material(
+                      key: _cardKey,
+                      color: scheme.surface,
+                      elevation: 0,
+                      shadowColor: Colors.transparent,
+                      surfaceTintColor: Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ColoredBox(
+                                  color: const Color(0xFF05060A),
+                                  child: frame,
                                 ),
-                              ),
+                                Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: SizedBox(
+                                    height: 3,
+                                    child: LinearProgressIndicator(
+                                      value: progress,
+                                      minHeight: 3,
+                                      backgroundColor: Colors.white24,
+                                      color: const Color(0xFF9E8CFF),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
+                          MiniTransportBar(
+                            title: item?.title ?? '',
+                            playing: playing,
+                            onPrev: () => unawaited(widget.onPrev()),
+                            onPlay: () => unawaited(_togglePlay()),
+                            onNext: () => unawaited(widget.onNext()),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: stroke, width: 1.2),
+                          ),
                         ),
                       ),
-                      MiniTransportBar(
-                        title: item?.title ?? '',
-                        playing: playing,
-                        onPrev: () => unawaited(widget.onPrev()),
-                        onPlay: () => unawaited(_togglePlay()),
-                        onNext: () => unawaited(widget.onNext()),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -511,8 +522,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanStart: _onArrowPanStart,
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
+                child: Container(
+                  foregroundDecoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(MiniGeom.arrowH / 2),
                     border: Border.all(color: arrowStroke, width: 1.2),
                   ),
