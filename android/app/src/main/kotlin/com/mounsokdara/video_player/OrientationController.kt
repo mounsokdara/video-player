@@ -3,7 +3,6 @@ package com.mounsokdara.video_player
 import android.app.Activity
 import android.content.pm.ActivityInfo
 
-/** Maps player rotation strings onto ActivityInfo constants. */
 object OrientationController {
     fun apply(activity: Activity, mode: String) {
         activity.requestedOrientation = when (mode) {

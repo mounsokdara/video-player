@@ -22,13 +22,14 @@ class AppTheme {
     }
 
     final radius = 16.0;
+    final typography = Typography.material2021(
+      platform: TargetPlatform.android,
+      colorScheme: scheme,
+    );
     return ThemeData(
-      useMaterial3: true,
       colorScheme: scheme,
       brightness: brightness,
-      visualDensity: VisualDensity.standard,
-      splashFactory: InkSparkle.splashFactory,
-      appBarTheme: AppBarTheme(
+      appBarTheme: AppBarThemeData(
         centerTitle: false,
         scrolledUnderElevation: 0,
         backgroundColor: scheme.surface,
@@ -94,9 +95,7 @@ class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         ),
       ),
-      textTheme: brightness == Brightness.dark
-          ? Typography.material2021(platform: TargetPlatform.android).white
-          : Typography.material2021(platform: TargetPlatform.android).black,
+      textTheme: brightness == Brightness.dark ? typography.white : typography.black,
     );
   }
 }

@@ -3,4 +3,10 @@
     <string name="app_name">Video Player</string>
     <string name="playback_channel">Playback</string>
     <string name="playback_channel_desc">Now playing controls</string>
+    <string name="crash_title">Crash report</string>
+    <string name="crash_empty">No crash captured.</string>
+    <string name="crash_copy">Copy</string>
+    <string name="crash_close">Close</string>
+    <string name="crash_copied">Copied. Paste it in chat.</string>
+    <string name="crash_clip_label">crash</string>
 </resources>

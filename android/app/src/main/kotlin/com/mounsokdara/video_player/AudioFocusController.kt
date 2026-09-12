@@ -7,10 +7,6 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 
-/**
- * Single AUDIOFOCUS_GAIN owner. Duck (never pause) on CAN_DUCK.
- * Transient loss still pauses so a phone call wins.
- */
 class AudioFocusController(
     context: Context,
     private val mainHandler: Handler,
@@ -19,7 +15,7 @@ class AudioFocusController(
     private var playing: Boolean,
     private val onPlaying: (Boolean) -> Unit
 ) {
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val audioManager = context.getSystemService(AudioManager::class.java)
     private var focusRequest: AudioFocusRequest? = null
     private var hasAudioFocus = false
     private var resumeOnFocusGain = false
@@ -83,6 +79,7 @@ class AudioFocusController(
 
     fun request() {
         if (hasAudioFocus) return
+        val manager = audioManager ?: return
         try {
             val granted = if (Build.VERSION.SDK_INT >= 26) {
                 val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -97,20 +94,16 @@ class AudioFocusController(
                     .setWillPauseWhenDucked(false)
                     .build()
                 focusRequest = req
-                audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                manager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
                 @Suppress("DEPRECATION")
-                audioManager.requestAudioFocus(
+                manager.requestAudioFocus(
                     focusListener,
                     AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN
                 ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
             hasAudioFocus = granted
-            if (granted) {
-                playing = true
-                onPlaying(true)
-            }
             breadcrumb("audio focus granted=$granted")
         } catch (t: Throwable) {
             breadcrumb("audio focus: ${t.message}")
@@ -121,14 +114,16 @@ class AudioFocusController(
         hasAudioFocus = false
         resumeOnFocusGain = false
         ducked = false
+        val manager = audioManager
         try {
             if (Build.VERSION.SDK_INT >= 26) {
-                focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+                focusRequest?.let { manager?.abandonAudioFocusRequest(it) }
             } else {
                 @Suppress("DEPRECATION")
-                audioManager.abandonAudioFocus(focusListener)
+                manager?.abandonAudioFocus(focusListener)
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            breadcrumb("audio focus abandon: ${t.message}")
         }
         focusRequest = null
     }

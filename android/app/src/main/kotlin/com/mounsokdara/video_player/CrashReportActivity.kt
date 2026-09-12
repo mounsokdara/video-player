@@ -3,7 +3,7 @@ package com.mounsokdara.video_player
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
@@ -13,27 +13,26 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-/** Dedicated native screen for the last crash log. Not a Flutter activity. */
 class CrashReportActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val report = intent.getStringExtra(EXTRA_REPORT)
             ?: NativeCrashLog.readLast(this)
-            ?: "No crash captured."
+            ?: getString(R.string.crash_empty)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#121212"))
+            setBackgroundColor(getColor(R.color.crash_bg))
             setPadding(dp(20), dp(28), dp(20), dp(20))
         }
         val title = TextView(this).apply {
-            text = "Crash report"
-            setTextColor(Color.WHITE)
+            text = getString(R.string.crash_title)
+            setTextColor(getColor(R.color.crash_title))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
         }
         val body = TextView(this).apply {
             text = report
-            setTextColor(Color.parseColor("#DDDDDD"))
+            setTextColor(getColor(R.color.crash_body))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             typeface = android.graphics.Typeface.MONOSPACE
             setTextIsSelectable(true)
@@ -47,15 +46,23 @@ class CrashReportActivity : Activity() {
             addView(body)
         }
         val copy = Button(this).apply {
-            text = "Copy"
+            text = getString(R.string.crash_copy)
             setOnClickListener {
-                val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("crash", report))
-                Toast.makeText(this@CrashReportActivity, "Copied. Paste it in chat.", Toast.LENGTH_SHORT).show()
+                val cm = getSystemService(ClipboardManager::class.java) ?: return@setOnClickListener
+                cm.setPrimaryClip(
+                    ClipData.newPlainText(getString(R.string.crash_clip_label), report)
+                )
+                if (Build.VERSION.SDK_INT < 33) {
+                    Toast.makeText(
+                        this@CrashReportActivity,
+                        getString(R.string.crash_copied),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
         val close = Button(this).apply {
-            text = "Close"
+            text = getString(R.string.crash_close)
             setOnClickListener { finish() }
         }
         val actions = LinearLayout(this).apply {
