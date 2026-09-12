@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -9,7 +10,7 @@ import 'android_bridge.dart';
 import 'models.dart';
 import 'settings.dart';
 
-class LibraryService {
+class LibraryService extends ChangeNotifier {
   LibraryService(this.settings);
 
   final AppSettings settings;
@@ -24,6 +25,10 @@ class LibraryService {
   final Map<String, Uint8List?> _thumbs = {};
   String? clipPath;
   bool clipCut = false;
+
+  bool get isScanning => _scanning;
+  bool get isEmpty => videos.isEmpty;
+  bool get isNotEmpty => videos.isNotEmpty;
 
   Future<void> requestPermissions() async {
     await [
@@ -42,11 +47,13 @@ class LibraryService {
       allFiles = await AndroidBridge.hasAllFilesAccess();
     }
     manageMedia = await AndroidBridge.canManageMedia();
+    notifyListeners();
   }
 
   Future<void> ensureAllFiles() async {
     allFiles = await AndroidBridge.hasAllFilesAccess();
     if (!allFiles) await AndroidBridge.requestAllFilesAccess();
+    notifyListeners();
   }
 
   Future<void> ensureManageMedia() async {
@@ -55,15 +62,18 @@ class LibraryService {
       await AndroidBridge.requestManageMedia();
       manageMedia = await AndroidBridge.canManageMedia();
     }
+    notifyListeners();
   }
 
   Future<void> scan() async {
     if (_scanning) return;
     _scanning = true;
+    notifyListeners();
     try {
       await _scanBody();
     } finally {
       _scanning = false;
+      notifyListeners();
     }
   }
 
@@ -181,6 +191,7 @@ class LibraryService {
       ..addAll(next);
     _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k));
     _rebuildFolders();
+    notifyListeners();
   }
 
   String? _assetPath(AssetEntity a) {
@@ -245,7 +256,6 @@ class LibraryService {
 
     list.sort(cmp);
     if (desc && sort != SortBy.name && sort != SortBy.folder) {
-      // keep pins at top: partition, reverse rest
       final pins = list.where((v) => settings.pinned.contains(v.path)).toList();
       final rest = list.where((v) => !settings.pinned.contains(v.path)).toList().reversed.toList();
       return [...pins, ...rest];
@@ -292,6 +302,7 @@ class LibraryService {
       }
     }
     _rebuildFolders();
+    notifyListeners();
     return ok;
   }
 
@@ -301,17 +312,21 @@ class LibraryService {
     final next = item.copyWith(title: newName, path: dest);
     final i = videos.indexWhere((v) => v.id == item.id);
     if (i >= 0) videos[i] = next;
+    _rebuildFolders();
+    notifyListeners();
     return next;
   }
 
   void copyEntry(String path) {
     clipPath = path;
     clipCut = false;
+    notifyListeners();
   }
 
   void cutEntry(String path) {
     clipPath = path;
     clipCut = true;
+    notifyListeners();
   }
 
   Future<bool> pasteInto(String dir) async {
@@ -335,6 +350,7 @@ class LibraryService {
         videos[i] = videos[i].copyWith(path: moved, title: p.basename(moved));
       }
       _rebuildFolders();
+      notifyListeners();
       return true;
     }
     final ok = await AndroidBridge.copyPath(src, dest);
@@ -355,6 +371,7 @@ class LibraryService {
         ),
       );
       _rebuildFolders();
+      notifyListeners();
     }
     return ok;
   }
@@ -363,6 +380,7 @@ class LibraryService {
     final ok = await AndroidBridge.deletePath(path);
     videos.removeWhere((v) => v.path == path);
     _rebuildFolders();
+    notifyListeners();
     return ok;
   }
 
@@ -458,7 +476,6 @@ bool looksLikeVideo(String path, {String? mime}) {
   if (m.startsWith('video/')) {
     if (ext == '.tsx' || ext == '.jsx') return false;
     if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
-      // Some stacks mislabel TypeScript as a generic video type; require MPEG-TS.
       return _isMpegTsFile(path);
     }
     return true;
