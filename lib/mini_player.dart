@@ -55,12 +55,15 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
 
-  /// Cumulative scale reported by the current Scale gesture.
   double _baseScale = 1.0;
-  int _pointers = 0;
+  final Set<int> _downs = <int>{};
+  int _lastCount = 0;
   int _maxPointers = 0;
   bool _pinchActive = false;
-  bool _resizeLocked = false;
+  bool _resizeLocked = true;
+  bool _finishing = false;
+  bool _startedParked = false;
+  Offset _pressFocal = Offset.zero;
 
   VideoPlayerController? _ctrl;
 
@@ -120,6 +123,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   Offset get _rawPos =>
       _pos ?? MiniPhysics.defaultPos(_screen, _w, _h, _safe);
+
+  int get _count => _downs.length;
 
   double _overhang(Offset pos) {
     if (_parked) return 0;
@@ -195,6 +200,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (mounted) setState(() {});
   }
 
+  void _resetTouchState() {
+    _downs.clear();
+    _lastCount = 0;
+    _maxPointers = 0;
+    _pinchActive = false;
+    _resizeLocked = true;
+    _baseScale = 1.0;
+    _finishing = false;
+  }
+
   void _captureAnchor(Offset focalPoint) {
     final box = _cardKey.currentContext?.findRenderObject() as RenderBox?;
     final cardGlobal = box?.localToGlobal(Offset.zero) ?? Offset.zero;
@@ -205,16 +220,27 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _anchorInWidget = focalInParent - _startPos;
   }
 
-  void _lockResizeBaseline(ScaleUpdateDetails d) {
-    _captureAnchor(d.focalPoint);
-    _baseScale = d.scale == 0 ? 1.0 : d.scale;
+  void _applyPointerCount(int count, Offset focal, double scale) {
+    if (count == _lastCount) return;
+    _lastCount = count;
+    if (count > _maxPointers) _maxPointers = count;
+    if (count >= 2) {
+      _pinchActive = true;
+      _moved = true;
+      _resizeLocked = false;
+    } else {
+      // 0 or 1 finger: keep current size, do not keep applying old pinch scale.
+      _resizeLocked = true;
+    }
+    _captureAnchor(focal);
+    _baseScale = scale == 0 ? 1.0 : scale;
   }
 
   void _onPointerDown(PointerDownEvent e) {
     if (_dismissed) return;
-    _pointers += 1;
-    if (_pointers > _maxPointers) _maxPointers = _pointers;
-    if (_pointers >= 2) {
+    _downs.add(e.pointer);
+    if (_count > _maxPointers) _maxPointers = _count;
+    if (_count >= 2) {
       _pinchActive = true;
       _moved = true;
       _resizeLocked = false;
@@ -222,27 +248,34 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _onPointerUpOrCancel(PointerEvent e) {
-    _pointers = math.max(0, _pointers - 1);
-    // No fingers, or dropped back to one finger after a pinch: stop resizing.
-    if (_pointers < 2) {
+    _downs.remove(e.pointer);
+    if (_count < 2) {
       _resizeLocked = true;
       _startW = _w;
       _startPos = _rawPos;
       _baseScale = 1.0;
+    }
+    // Scale recognizer can miss the end when extra fingers cancel.
+    // Last finger up always finishes so drag cannot freeze.
+    if (_count == 0 && _live && !_finishing) {
+      _finishGesture();
     }
   }
 
   void _onScaleStart(ScaleStartDetails d) {
     if (_dismissed) return;
     _anim.stop();
-    _captureAnchor(d.focalPoint);
-    _baseScale = 1.0;
+    _finishing = false;
     _moved = false;
     _pinchActive = d.pointerCount >= 2;
     _resizeLocked = d.pointerCount < 2;
-    if (d.pointerCount > _maxPointers) _maxPointers = d.pointerCount;
-    if (_pointers < d.pointerCount) _pointers = d.pointerCount;
+    _baseScale = 1.0;
+    _lastCount = math.max(d.pointerCount, _count);
+    _maxPointers = _lastCount;
+    _pressFocal = d.focalPoint;
+    _captureAnchor(d.focalPoint);
 
+    _startedParked = _parked;
     final wasParked = _parked;
     setState(() {
       _parked = false;
@@ -254,40 +287,23 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d) {
-    if (_dismissed) return;
+    if (_dismissed || _finishing) return;
 
-    final pointers = math.max(d.pointerCount, _pointers);
-    if (pointers > _maxPointers) _maxPointers = pointers;
+    final count = math.max(d.pointerCount, _count);
+    _applyPointerCount(count, d.focalPoint, d.scale);
 
-    final pinching = pointers >= 2 || (d.scale - _baseScale).abs() > 0.02;
-    if (pinching) {
-      _pinchActive = true;
+    if ((d.focalPoint - _pressFocal).distance > MiniGeom.tapSlop ||
+        (_rawPos - _startPos).distance > MiniGeom.tapSlop) {
       _moved = true;
     }
 
-    if ((_startPos - _rawPos).distance > MiniGeom.tapSlop ||
-        (d.focalPoint - (_parentOrigin + _startPos + _anchorInWidget)).distance >
-            MiniGeom.tapSlop) {
-      _moved = true;
-    }
-
-    // Pointer count changed mid-gesture (1 -> 2 or 2 -> 1).
-    // Re-baseline so size does not jump when a finger is added or lifted.
-    if (pointers != math.max(_pointers, 1) && d.pointerCount > 0) {
-      _lockResizeBaseline(d);
-      _resizeLocked = pointers < 2;
-      _pointers = pointers;
-    }
-
-    final allowResize = !_resizeLocked && pointers >= 2 && _pinchActive;
-    double targetW = _w;
+    final allowResize = !_resizeLocked && count >= 2;
+    var targetW = _w;
     if (allowResize) {
       final hi = MiniPhysics.maxWFor(_screen);
       final lo = math.min(MiniGeom.minW, hi);
       final rel = _baseScale == 0 ? 1.0 : d.scale / _baseScale;
       targetW = MiniPhysics.softClamp(_startW * rel, lo, hi);
-    } else {
-      targetW = _w;
     }
 
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
@@ -297,30 +313,45 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     setState(() {
       _w = targetW;
       _pos = newPos;
-      if (_parked) {
-        _parked = false;
-        _parkSide = 0;
-        _resumeIfNeeded();
-      }
     });
   }
 
   void _onScaleEnd(ScaleEndDetails _) {
-    if (_dismissed) return;
+    if (_count > 0) {
+      // A finger is still down. Lock resize and keep dragging.
+      _resizeLocked = true;
+      _startW = _w;
+      _startPos = _rawPos;
+      _baseScale = 1.0;
+      return;
+    }
+    _finishGesture();
+  }
+
+  void _finishGesture() {
+    if (_finishing) return;
+    _finishing = true;
     _live = false;
 
-    final wasClick = !_moved && !_pinchActive && _maxPointers <= 1;
-
-    _pointers = 0;
+    final click = !_moved && !_pinchActive && _maxPointers <= 1;
+    _downs.clear();
+    _lastCount = 0;
     _maxPointers = 0;
     _pinchActive = false;
     _resizeLocked = true;
     _baseScale = 1.0;
 
-    // Real clicks go through onTap. Scale-end must not open the player
-    // (two-finger put-down used to look like a tap here).
-    if (wasClick) return;
+    if (click) {
+      if (_startedParked) {
+        _unpark();
+      } else {
+        widget.onExpand();
+      }
+      _finishing = false;
+      return;
+    }
     _settle();
+    _finishing = false;
   }
 
   void _onArrowPanStart(DragStartDetails _) {
@@ -394,8 +425,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _unpark() {
-    if (!_parked && _parkSide == 0) return;
     final side = _parkSide == 0 ? _sideFor(_rawPos) : _parkSide;
+    if (side == 0 && !_startedParked) return;
     final video = _video;
     final targetW = MiniPhysics.clampW(_w, _screen);
     final targetH = MiniPhysics.boxFor(targetW, video).height;
@@ -513,24 +544,22 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPointerCancel: _onPointerUpOrCancel,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    if (_dismissed || _moved || _pinchActive || _maxPointers > 1) {
-                      return;
-                    }
-                    if (_parked) {
-                      _unpark();
-                    } else {
-                      widget.onExpand();
-                    }
-                  },
                   onScaleStart: _onScaleStart,
                   onScaleUpdate: _onScaleUpdate,
                   onScaleEnd: _onScaleEnd,
                   child: Material(
                     key: _cardKey,
                     color: scheme.surface,
-                    elevation: _live ? 18 : 14,
-                    borderRadius: BorderRadius.circular(14),
+                    elevation: 0,
+                    shadowColor: Colors.transparent,
+                    surfaceTintColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: BorderSide(
+                        color: scheme.outline.withValues(alpha: 0.55),
+                        width: 1.25,
+                      ),
+                    ),
                     clipBehavior: Clip.antiAlias,
                     child: Column(
                       children: [
