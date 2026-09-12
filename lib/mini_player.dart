@@ -218,7 +218,7 @@ class MiniPlayerOverlay extends StatefulWidget {
 
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     with SingleTickerProviderStateMixin {
-  double _leftFrac = 0, _topFrac = 0;
+  double _left = 0, _top = 0;
   double _widthVw = MiniGeom.defW;
   bool _ready = false;
   bool _dragging = false;
@@ -230,15 +230,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   double _arrowL = 0, _arrowR = 0;
   double _dragOpacity = 1;
   Offset _startFocal = Offset.zero;
-  Offset _startPosFrac = Offset.zero;
+  Offset _startPos = Offset.zero;
   double _startBoxW = 0;
   double _pinchFx = 0.5, _pinchFy = 0.5;
   VideoPlayerController? _ctrl;
-  Size? _lastScreen;
 
   late final AnimationController _move;
-  double _fromLeftFrac = 0, _fromTopFrac = 0, _fromW = MiniGeom.defW;
-  double _toLeftFrac = 0, _toTopFrac = 0, _toW = MiniGeom.defW;
+  double _fromLeft = 0, _fromTop = 0, _fromW = MiniGeom.defW;
+  double _toLeft = 0, _toTop = 0, _toW = MiniGeom.defW;
 
   @override
   void initState() {
@@ -253,12 +252,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bind();
-    final screen = MediaQuery.sizeOf(context);
-    final prev = _lastScreen;
-    _lastScreen = screen;
-    if (prev != null && prev != screen && _ready) {
-      _handleResize(screen);
-    }
   }
 
   @override
@@ -269,21 +262,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _ctrl?.removeListener(_onTick);
     } catch (_) {}
     super.dispose();
-  }
-
-  void _handleResize(Size screen) {
-    if (_dragging || _resizing || _closing) return;
-    final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw);
-    if (_hiddenSide != null) {
-      _leftFrac = _hiddenSide == 'left' ? -box.width / screen.width : 1.0;
-      return;
-    }
-    final minLF = widget.pad.left / screen.width;
-    final maxLF = (screen.width - box.width - widget.pad.right) / screen.width;
-    final minTF = widget.pad.top / screen.height;
-    final maxTF = (screen.height - box.height - widget.navH) / screen.height;
-    _leftFrac = _leftFrac.clamp(minLF, math.max(minLF, maxLF));
-    _topFrac = _topFrac.clamp(minTF, math.max(minTF, maxTF));
   }
 
   void _bind() {
@@ -304,27 +282,26 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final t = MiniGeom.ease.transform(_move.value.clamp(0.0, 1.0).toDouble());
     if (!mounted) return;
     setState(() {
-      _leftFrac = _fromLeftFrac + (_toLeftFrac - _fromLeftFrac) * t;
-      _topFrac = _fromTopFrac + (_toTopFrac - _fromTopFrac) * t;
+      _left = _fromLeft + (_toLeft - _fromLeft) * t;
+      _top = _fromTop + (_toTop - _fromTop) * t;
       _widthVw = _fromW + (_toW - _fromW) * t;
       if (!_closing) _followArrows();
     });
   }
 
-  void _animateTo(double leftFrac, double topFrac, double widthVw,
-      {VoidCallback? onDone}) {
-    _fromLeftFrac = _leftFrac;
-    _fromTopFrac = _topFrac;
+  void _animateTo(double left, double top, double widthVw, {VoidCallback? onDone}) {
+    _fromLeft = _left;
+    _fromTop = _top;
     _fromW = _widthVw;
-    _toLeftFrac = leftFrac;
-    _toTopFrac = topFrac;
+    _toLeft = left;
+    _toTop = top;
     _toW = widthVw;
     _move.stop();
     _move.duration = const Duration(milliseconds: MiniGeom.snapMs);
     _move.forward(from: 0).whenComplete(() {
       if (!mounted) return;
-      _leftFrac = _toLeftFrac;
-      _topFrac = _toTopFrac;
+      _left = _toLeft;
+      _top = _toTop;
       _widthVw = _toW;
       onDone?.call();
       if (mounted) setState(() {});
@@ -380,12 +357,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     if (mounted) setState(() {});
   }
 
-  Rect _rect(Size screen, Size box) => Rect.fromLTWH(
-        _leftFrac * screen.width,
-        _topFrac * screen.height,
-        box.width,
-        box.height,
-      );
+  Rect _rect(Size box) => Rect.fromLTWH(_left, _top, box.width, box.height);
 
   Size _boxFor(Size screen) =>
       MiniPhysics.box(screen, MiniPhysics.videoSize(), _widthVw);
@@ -406,7 +378,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _followArrows() {
     if (!mounted || _closing || _dragging || _resizing) return;
     final screen = MediaQuery.sizeOf(context);
-    _refreshArrows(_rect(screen, _boxFor(screen)), screen);
+    _refreshArrows(_rect(_boxFor(screen)), screen);
   }
 
   void _setArrows(String? side, double progress) {
@@ -419,8 +391,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _hiddenSide = side;
     _setArrows(side, 1);
     _dragOpacity = 1;
-    final leftFrac = side == 'left' ? -box.width / screen.width : 1.0;
-    _animateTo(leftFrac, _topFrac, _widthVw, onDone: () {
+    final left = side == 'left' ? -box.width : screen.width;
+    _animateTo(left, _top, _widthVw, onDone: () {
       if (!mounted) return;
       _setArrows(side, 1);
       _pauseForHide();
@@ -428,21 +400,20 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _unhide(Size screen, Size box) {
-    final side = _hiddenSide ?? _sideFor(_rect(screen, box), screen);
+    final side = _hiddenSide ?? _sideFor(_rect(box), screen);
     _setArrows(side, 1);
     _dragOpacity = 1;
     _dragging = false;
     _resizing = false;
     final seed = Rect.fromLTWH(
       side == 'left' ? 0 : screen.width - box.width,
-      _topFrac * screen.height,
+      _top,
       box.width,
       box.height,
     );
     final target = MiniPhysics.settlePos(seed, screen, box,
         navH: widget.navH, pad: widget.pad);
-    _animateTo(target.dx / screen.width, target.dy / screen.height, _widthVw,
-        onDone: () {
+    _animateTo(target.dx, target.dy, _widthVw, onDone: () {
       if (!mounted) return;
       _hiddenSide = null;
       _followArrows();
@@ -453,17 +424,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void _settle(Size screen, Size box) {
     final w = _widthVw.clamp(MiniGeom.minW, MiniGeom.maxW).toDouble();
     final next = MiniPhysics.box(screen, MiniPhysics.videoSize(), w);
-    final target = MiniPhysics.settlePos(_rect(screen, box), screen, next,
+    final target = MiniPhysics.settlePos(_rect(box), screen, next,
         navH: widget.navH, pad: widget.pad);
     _hiddenSide = null;
     _setArrows(null, 0);
     _dragOpacity = 1;
-    _animateTo(target.dx / screen.width, target.dy / screen.height, w,
-        onDone: _resumeIfNeeded);
+    _animateTo(target.dx, target.dy, w, onDone: _resumeIfNeeded);
   }
 
   void _finishDrag(Size screen, Size box) {
-    final r = _rect(screen, box);
+    final r = _rect(box);
     final ox = MiniPhysics.offX(r, screen);
     final ob = MiniPhysics.offBottom(r, screen);
     final over = _widthVw > MiniGeom.maxW;
@@ -497,20 +467,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _move.stop();
     _moved = false;
     _startFocal = d.focalPoint;
-    _startPosFrac = Offset(_leftFrac, _topFrac);
+    _startPos = Offset(_left, _top);
     _startBoxW = box.width;
     _pinchFx = box.width <= 0
         ? 0.5
-        : ((d.focalPoint.dx - _leftFrac * MediaQuery.sizeOf(context).width) /
-                box.width)
-            .clamp(0.0, 1.0)
-            .toDouble();
+        : ((d.focalPoint.dx - _left) / box.width).clamp(0.0, 1.0).toDouble();
     _pinchFy = box.height <= 0
         ? 0.5
-        : ((d.focalPoint.dy - _topFrac * MediaQuery.sizeOf(context).height) /
-                box.height)
-            .clamp(0.0, 1.0)
-            .toDouble();
+        : ((d.focalPoint.dy - _top) / box.height).clamp(0.0, 1.0).toDouble();
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d, Size screen) {
@@ -533,8 +497,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       final box = MiniPhysics.box(screen, MiniPhysics.videoSize(), vw);
       setState(() {
         _widthVw = vw;
-        _leftFrac = (d.focalPoint.dx - _pinchFx * box.width) / screen.width;
-        _topFrac = (d.focalPoint.dy - _pinchFy * box.height) / screen.height;
+        _left = d.focalPoint.dx - _pinchFx * box.width;
+        _top = d.focalPoint.dy - _pinchFy * box.height;
         _dragOpacity = 1;
       });
       return;
@@ -548,12 +512,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _resumeIfNeeded();
     }
     setState(() {
-      _leftFrac = _startPosFrac.dx +
-          (d.focalPoint.dx - _startFocal.dx) / screen.width;
-      _topFrac = _startPosFrac.dy +
-          (d.focalPoint.dy - _startFocal.dy) / screen.height;
+      _left = _startPos.dx + (d.focalPoint.dx - _startFocal.dx);
+      _top = _startPos.dy + (d.focalPoint.dy - _startFocal.dy);
     });
-    final r = _rect(screen, _boxFor(screen));
+    final r = _rect(_boxFor(screen));
     _dragOpacity = math.max(0.1, 1 - MiniPhysics.offBottom(r, screen));
     _refreshArrows(r, screen, threshold: 0.05);
     setState(() {});
@@ -596,17 +558,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _ready = true;
       _widthVw = MiniGeom.defW;
       final start = MiniPhysics.box(screen, video, _widthVw);
-      _leftFrac = (screen.width - start.width - widget.pad.right) / screen.width;
-      _topFrac = ((screen.height * 0.55 - start.height / 2).clamp(
-        widget.pad.top,
-        math.max(widget.pad.top,
-            screen.height - widget.navH - start.height),
-      )) /
-          screen.height;
+      _left = screen.width - start.width - widget.pad.right;
+      _top = (screen.height * 0.55 - start.height / 2)
+          .clamp(
+            widget.pad.top,
+            math.max(widget.pad.top, screen.height - widget.navH - start.height),
+          )
+          .toDouble();
     }
-
-    final left = _leftFrac * screen.width;
-    final top = _topFrac * screen.height;
 
     final c = PlaybackSession.controller;
     final item = PlaybackSession.item;
@@ -649,8 +608,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       clipBehavior: Clip.none,
       children: [
         Positioned(
-          left: left - extraL,
-          top: top,
+          left: _left - extraL,
+          top: _top,
           width: box.width + extraL + extraR,
           height: box.height,
           child: AnimatedOpacity(
