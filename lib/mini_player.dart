@@ -58,6 +58,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   bool _arrowDragging = false;
   int _dragSide = 0;
 
+  Size? _lastScreen;
+
   double _startW = MiniGeom.defW;
   Offset _startPos = Offset.zero;
   Offset _parentOrigin = Offset.zero;
@@ -82,6 +84,11 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bind();
+    final s = MediaQuery.sizeOf(context);
+    if (_lastScreen != null && _lastScreen != s) {
+      _onScreenChanged(s);
+    }
+    _lastScreen = s;
   }
 
   @override
@@ -105,6 +112,55 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onTick() {
     if (mounted) setState(() {});
+  }
+
+  void _onScreenChanged(Size newSize) {
+    if (!mounted || _dismissed) return;
+    if (_gestureActive || _arrowDragging) return;
+    if (_anim.isAnimating) return;
+
+    final safe = MiniPhysics.safeZone(
+      newSize,
+      pad: widget.pad,
+      navH: widget.navH,
+    );
+    final video = _video;
+    final clampedW = MiniPhysics.clampW(_w, newSize);
+    final h = MiniPhysics.boxFor(clampedW, video).height;
+    final cur = _pos;
+
+    if (cur == null) {
+      if (clampedW != _w) {
+        setState(() => _w = clampedW);
+      }
+      return;
+    }
+
+    if (_parked) {
+      final side = _parkSide != 0 ? _parkSide : _sideFor(cur);
+      final maxY = math.max(safe.top, safe.bottom - h);
+      final targetY = cur.dy.clamp(safe.top, maxY).toDouble();
+      final targetX = side < 0 ? -clampedW : newSize.width;
+      setState(() {
+        _w = clampedW;
+        _pos = Offset(targetX, targetY);
+        _parked = true;
+        _parkSide = side;
+      });
+      return;
+    }
+
+    final maxX = math.max(safe.left, safe.right - clampedW);
+    final maxY = math.max(safe.top, safe.bottom - h);
+    final targetX = cur.dx.clamp(safe.left, maxX).toDouble();
+    final targetY = cur.dy.clamp(safe.top, maxY).toDouble();
+
+    if (clampedW == _w && targetX == cur.dx && targetY == cur.dy) return;
+
+    setState(() {
+      _w = clampedW;
+      _pos = Offset(targetX, targetY);
+    });
   }
 
   Size get _screen => MediaQuery.sizeOf(context);
