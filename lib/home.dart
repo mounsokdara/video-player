@@ -1107,12 +1107,6 @@ class FoldersHub extends StatelessWidget {
     }
 
     final ents = library.listDir(path);
-    if (library.lastIoFailed) {
-      library.lastIoFailed = false;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) showAllFilesFailed(context, 'Read');
-      });
-    }
     final files = ents.whereType<File>().toList();
     final fileIds = files.map((e) {
       for (final v in library.videos) {

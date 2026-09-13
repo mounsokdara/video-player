@@ -63,6 +63,7 @@ class MainActivity : FlutterActivity() {
     private lateinit var systemBars: SystemBarController
     private lateinit var audioFocus: AudioFocusController
     private lateinit var equalizer: EqualizerController
+    private lateinit var decoder: DecoderController
     private lateinit var appNative: AppNative
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +72,12 @@ class MainActivity : FlutterActivity() {
             this,
             { flutterEngine },
             mainHandler,
+            { NativeCrashLog.breadcrumb(this, it) },
+            { NativeCrashLog.write(this, it) }
+        )
+        decoder = DecoderController(
+            this,
+            { flutterEngine },
             { NativeCrashLog.breadcrumb(this, it) },
             { NativeCrashLog.write(this, it) }
         )
@@ -294,6 +301,13 @@ class MainActivity : FlutterActivity() {
                             val pitchShift = call.argument<Boolean>("pitchShift") ?: false
                             equalizer.applyPlaybackParams(speed, pitchShift)
                             result.success(true)
+                        }
+                        "setDecoderMode" -> {
+                            decoder.setMode(call.argument<String>("mode") ?: "auto")
+                            result.success(true)
+                        }
+                        "applyDecoder" -> {
+                            result.success(decoder.apply())
                         }
                         "setStereoVolume" -> {
                             val left = (call.argument<Double>("left") ?: 1.0).toFloat()
@@ -809,17 +823,13 @@ class MainActivity : FlutterActivity() {
                 if (hiddenOnly && !fileHidden) continue
                 if (!isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
-                val meta = fileVideoMeta(f.absolutePath)
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
                         "name" to f.name,
                         "size" to f.length(),
                         "modified" to f.lastModified(),
-                        "folder" to (f.parent ?: ""),
-                        "durationMs" to meta.first,
-                        "width" to meta.second,
-                        "height" to meta.third
+                        "folder" to (f.parent ?: "")
                     )
                 )
             }
@@ -845,36 +855,6 @@ class MainActivity : FlutterActivity() {
             low == "alarms" ||
             low == "ringtones" ||
             low == "notifications"
-    }
-
-    private fun fileVideoMeta(path: String): Triple<Long, Int, Int> {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(path)
-            var durationUs = 0L
-            var width = 0
-            var height = 0
-            for (i in 0 until extractor.trackCount) {
-                val fmt = extractor.getTrackFormat(i)
-                val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
-                if (fmt.containsKey(MediaFormat.KEY_DURATION)) {
-                    val d = fmt.getLong(MediaFormat.KEY_DURATION)
-                    if (d > durationUs) durationUs = d
-                }
-                if (mime.startsWith("video/")) {
-                    if (fmt.containsKey(MediaFormat.KEY_WIDTH)) width = fmt.getInteger(MediaFormat.KEY_WIDTH)
-                    if (fmt.containsKey(MediaFormat.KEY_HEIGHT)) height = fmt.getInteger(MediaFormat.KEY_HEIGHT)
-                }
-            }
-            return Triple(durationUs / 1000L, width, height)
-        } catch (_: Exception) {
-            return Triple(0L, 0, 0)
-        } finally {
-            try {
-                extractor.release()
-            } catch (_: Exception) {
-            }
-        }
     }
 
     @Suppress("DEPRECATION")

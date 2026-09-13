@@ -67,19 +67,56 @@ class PlaybackSession {
   }
 
   static Future<VideoPlayerController> openWithFallback(VideoItem next) async {
-    VideoPlayerController? c;
+    final path = await resolvePlayPath(next.path);
+    final preferSw = appSettings.decoder == DecoderMode.sw || !appSettings.hwPriority;
     try {
-      c = controllerFor(await resolvePlayPath(next.path));
-      await c.initialize();
+      return await _openOnce(path, software: preferSw);
+    } catch (e, s) {
+      if (preferSw || !_isCodecError('$e')) {
+        CrashLog.record('PLAY', '$e', s);
+        rethrow;
+      }
+      try {
+        return await _openOnce(path, software: true);
+      } catch (e2, s2) {
+        CrashLog.record('PLAY', '$e2', s2);
+        rethrow;
+      }
+    }
+  }
+
+  static bool _isCodecError(String msg) {
+    final m = msg.toLowerCase();
+    return m.contains('mediacodec') ||
+        m.contains('decoder') ||
+        m.contains('videoerror') ||
+        m.contains('exoplayer') ||
+        m.contains('source error');
+  }
+
+  static Future<VideoPlayerController> _openOnce(String path, {required bool software}) async {
+    await AndroidBridge.setDecoderMode(software ? 'sw' : appSettings.decoder.name);
+    final c = controllerFor(path);
+    try {
+      if (software) {
+        final init = c.initialize();
+        var applied = await AndroidBridge.applyDecoder();
+        if (!applied) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          applied = await AndroidBridge.applyDecoder();
+        }
+        await init;
+      } else {
+        await c.initialize();
+      }
       if (c.value.hasError) {
         throw StateError(c.value.errorDescription ?? 'Source error');
       }
       return c;
-    } catch (e, s) {
+    } catch (e) {
       try {
-        await c?.dispose();
+        await c.dispose();
       } catch (_) {}
-      CrashLog.record('PLAY', '$e', s);
       rethrow;
     }
   }

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'android_bridge.dart';
@@ -23,15 +24,19 @@ class LibraryService {
   final Map<String, Uint8List?> _thumbs = {};
   String? clipPath;
   bool clipCut = false;
-  bool lastIoFailed = false;
 
   Future<void> requestPermissions() async {
+    await [
+      Permission.videos,
+      Permission.storage,
+      Permission.audio,
+      Permission.notification,
+    ].request();
+
+    final pm = await PhotoManager.requestPermissionExtend();
+    permissionReady = pm.isAuth || pm.hasAccess;
+
     allFiles = await AndroidBridge.hasAllFilesAccess();
-    if (!allFiles) {
-      await AndroidBridge.requestAllFilesAccess();
-      allFiles = await AndroidBridge.hasAllFilesAccess();
-    }
-    permissionReady = allFiles;
     manageMedia = await AndroidBridge.canManageMedia();
   }
 
@@ -199,7 +204,6 @@ class LibraryService {
       if (!settings.showHiddenFolders && _isHiddenPath(path)) continue;
       seen.add(path);
       final name = m['name'] as String? ?? p.basename(path);
-      final durMs = (m['durationMs'] as num?)?.toInt() ?? 0;
       into.add(
         VideoItem(
           id: path,
@@ -208,9 +212,6 @@ class LibraryService {
           folder: m['folder'] as String? ?? p.dirname(path),
           size: (m['size'] as num?)?.toInt() ?? 0,
           modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
-          duration: Duration(milliseconds: durMs),
-          width: (m['width'] as num?)?.toInt() ?? 0,
-          height: (m['height'] as num?)?.toInt() ?? 0,
           progress: settings.resumeMap[path] ?? 0,
           bookmarked: settings.bookmarks.contains(path),
         ),
@@ -300,11 +301,6 @@ class LibraryService {
         }
       } catch (_) {}
     }
-    if (data == null) {
-      try {
-        data = await AndroidBridge.previewFrame(path: item.path, positionMs: 1000);
-      } catch (_) {}
-    }
     _thumbs[item.id] = data;
     return data;
   }
@@ -315,6 +311,10 @@ class LibraryService {
     await AndroidBridge.deletePaths(paths);
     var leftover = items.where((v) => File(v.path).existsSync()).toList();
     if (leftover.isNotEmpty) {
+      manageMedia = await AndroidBridge.canManageMedia();
+      if (!manageMedia) {
+        await AndroidBridge.requestManageMedia();
+      }
       await AndroidBridge.deletePaths(leftover.map((v) => v.path).toList());
       leftover = leftover.where((v) => File(v.path).existsSync()).toList();
     }
@@ -396,21 +396,14 @@ class LibraryService {
 
   Future<bool> deletePath(String path) async {
     final ok = await AndroidBridge.deletePath(path);
-    if (ok || !File(path).existsSync()) {
-      videos.removeWhere((v) => v.path == path);
-      _rebuildFolders();
-      return true;
-    }
-    return false;
+    videos.removeWhere((v) => v.path == path);
+    _rebuildFolders();
+    return ok;
   }
 
   List<FileSystemEntity> listDir(String path) {
-    lastIoFailed = false;
     final dir = Directory(path);
-    if (!dir.existsSync()) {
-      lastIoFailed = true;
-      return [];
-    }
+    if (!dir.existsSync()) return [];
     try {
       final ents = dir.listSync();
       ents.sort((a, b) {
@@ -426,7 +419,6 @@ class LibraryService {
         return looksLikeVideo(e.path);
       }).toList();
     } catch (_) {
-      lastIoFailed = true;
       return [];
     }
   }
