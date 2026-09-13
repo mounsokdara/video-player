@@ -454,17 +454,18 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final arrowStroke = scheme.outline.withValues(alpha: 0.85);
 
     final int renderSide = _arrowDragging && _dragSide != 0 ? _dragSide : side;
-    final double renderArrowW = _arrowDragging
-        ? math.max(arrowW, MiniGeom.arrowMaxW)
-        : arrowW;
+    final double visibleArrowW = arrowW;
+    final double hitArrowW =
+        _arrowDragging ? MiniGeom.arrowMaxW : visibleArrowW;
+
     final bool showArrow = !_dismissed &&
-        (_arrowDragging || (side != 0 && arrowW > 0.5));
+        (_arrowDragging || (renderSide != 0 && visibleArrowW > 0.5));
 
     final double arrowLeft;
     if (renderSide < 0) {
       arrowLeft = pos.dx + _w;
     } else if (renderSide > 0) {
-      arrowLeft = pos.dx - renderArrowW;
+      arrowLeft = pos.dx - hitArrowW;
     } else {
       arrowLeft = 0;
     }
@@ -597,10 +598,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
           Positioned(
             left: arrowLeft,
             top: arrowTop,
-            width: renderArrowW,
+            width: hitArrowW,
             height: MiniGeom.arrowH,
             child: IgnorePointer(
-              ignoring: !_arrowDragging && renderArrowW < 6,
+              ignoring: !_arrowDragging && hitArrowW < 6,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _unpark,
@@ -608,36 +609,46 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
                 onPanUpdate: _onArrowPanUpdate,
                 onPanEnd: _onArrowPanEnd,
                 onPanCancel: _onArrowPanCancel,
-                child: Stack(
-                  children: [
-                    MiniStickyArrow(
-                      side: renderSide == 0 ? 1 : renderSide,
-                      width: renderArrowW,
-                    ),
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.only(
-                              topLeft: renderSide > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomLeft: renderSide > 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              topRight: renderSide < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
-                              bottomRight: renderSide < 0
-                                  ? const Radius.circular(4)
-                                  : Radius.zero,
+                child: Align(
+                  alignment: renderSide < 0
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
+                  child: SizedBox(
+                    width: visibleArrowW.clamp(0.0, hitArrowW),
+                    height: MiniGeom.arrowH,
+                    child: Stack(
+                      children: [
+                        MiniStickyArrow(
+                          side: renderSide == 0 ? 1 : renderSide,
+                          width: visibleArrowW,
+                        ),
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.only(
+                                  topLeft: renderSide > 0
+                                      ? const Radius.circular(4)
+                                      : Radius.zero,
+                                  bottomLeft: renderSide > 0
+                                      ? const Radius.circular(4)
+                                      : Radius.zero,
+                                  topRight: renderSide < 0
+                                      ? const Radius.circular(4)
+                                      : Radius.zero,
+                                  bottomRight: renderSide < 0
+                                      ? const Radius.circular(4)
+                                      : Radius.zero,
+                                ),
+                                border:
+                                    Border.all(color: arrowStroke, width: 1.2),
+                              ),
                             ),
-                            border: Border.all(color: arrowStroke, width: 1.2),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
