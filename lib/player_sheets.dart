@@ -488,6 +488,97 @@ extension PlayerSheets on _PlayerPageState {
     ]);
   }
 
+  Future<void> _volumeSheet() async {
+    var vol = volume;
+    try {
+      vol = await VolumeController.instance.getVolume();
+      volume = vol;
+    } catch (_) {}
+    var left = appSettings.audioBalanceLeft.clamp(0.0, 1.0).toDouble();
+    var right = appSettings.audioBalanceRight.clamp(0.0, 1.0).toDouble();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final insets = MediaQuery.viewInsetsOf(ctx);
+        final pad = SystemBars.rawOf(context);
+        return SafeArea(
+          child: StatefulBuilder(builder: (ctx, ss) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Volume', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      const Icon(Icons.volume_down),
+                      Expanded(
+                        child: Slider(
+                          value: vol.clamp(0.0, 1.0).toDouble(),
+                          onChanged: (v) {
+                            ss(() {
+                              vol = v;
+                              volume = v;
+                            });
+                            try {
+                              VolumeController.instance.setVolume(v);
+                            } catch (_) {}
+                          },
+                        ),
+                      ),
+                      SizedBox(width: 40, child: Text('${(vol * 100).round()}%')),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Audio Balance', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  ),
+                  Row(
+                    children: [
+                      const SizedBox(width: 52, child: Text('Left')),
+                      Expanded(
+                        child: Slider(
+                          value: left,
+                          onChanged: (v) {
+                            ss(() => left = v);
+                            appSettings.audioBalanceLeft = v;
+                            unawaited(AndroidBridge.setStereoVolume(left, right));
+                          },
+                          onChangeEnd: (_) => appSettings.save(),
+                        ),
+                      ),
+                      SizedBox(width: 40, child: Text('${(left * 100).round()}%')),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const SizedBox(width: 52, child: Text('Right')),
+                      Expanded(
+                        child: Slider(
+                          value: right,
+                          onChanged: (v) {
+                            ss(() => right = v);
+                            appSettings.audioBalanceRight = v;
+                            unawaited(AndroidBridge.setStereoVolume(left, right));
+                          },
+                          onChangeEnd: (_) => appSettings.save(),
+                        ),
+                      ),
+                      SizedBox(width: 40, child: Text('${(right * 100).round()}%')),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
   Future<void> _timerSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -501,16 +592,7 @@ extension PlayerSheets on _PlayerPageState {
                 ListTile(
                   title: Text('Stop in $m min'),
                   onTap: () {
-                    sleepTimer?.cancel();
-                    var left = Duration(minutes: m);
-                    sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-                      left -= const Duration(seconds: 1);
-                      if (left <= Duration.zero) {
-                        t.cancel();
-                        vc?.pause();
-                      }
-                      if (mounted) setState(() => sleepLeft = left);
-                    });
+                    PlaybackSession.armSleep(Duration(minutes: m));
                     Navigator.pop(ctx);
                     _flash('Timer $m min');
                   },
@@ -518,9 +600,9 @@ extension PlayerSheets on _PlayerPageState {
               ListTile(
                 title: const Text('Cancel timer'),
                 onTap: () {
-                  sleepTimer?.cancel();
-                  sleepLeft = null;
+                  PlaybackSession.cancelSleep();
                   Navigator.pop(ctx);
+                  _flash('Timer off');
                 },
               ),
             ],

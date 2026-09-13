@@ -77,6 +77,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         if (_wAnim != null) _w = _wAnim!.value;
       });
     });
+    _restoreMem();
     _bind();
   }
 
@@ -93,6 +94,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   @override
   void dispose() {
+    if (PlaybackSession.active || PlaybackSession.transferring) _saveMem();
     _anim.dispose();
     try {
       _ctrl?.removeListener(_onTick);
@@ -108,6 +110,23 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     } catch (_) {}
     _ctrl = next;
     _ctrl?.addListener(_onTick);
+  }
+
+  void _restoreMem() {
+    _w = MiniMemory.w;
+    if (MiniMemory.dx != null && MiniMemory.dy != null) {
+      _pos = Offset(MiniMemory.dx!, MiniMemory.dy!);
+    }
+    _parked = MiniMemory.parked;
+    _parkSide = MiniMemory.parkSide;
+  }
+
+  void _saveMem() {
+    MiniMemory.w = _w;
+    MiniMemory.dx = _pos?.dx;
+    MiniMemory.dy = _pos?.dy;
+    MiniMemory.parked = _parked;
+    MiniMemory.parkSide = _parkSide;
   }
 
   void _onTick() {
@@ -147,6 +166,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _parked = true;
         _parkSide = side;
       });
+      _saveMem();
       return;
     }
 
@@ -161,6 +181,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       _w = clampedW;
       _pos = Offset(targetX, targetY);
     });
+    _saveMem();
   }
 
   Size get _screen => MediaQuery.sizeOf(context);
@@ -435,12 +456,14 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _parked = true;
         _parkSide = side;
       });
+      _saveMem();
     } else {
       to = MiniPhysics.edgeTarget(fromPos, settledW, settledH, safe);
       setState(() {
         _parked = false;
         _parkSide = 0;
       });
+      _saveMem();
     }
     final dist = (to - fromPos).distance;
     final ms = (220 + dist * 0.45).clamp(220, 700).round();
@@ -496,6 +519,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       if (!mounted) return;
       _pos = to;
       _w = toW;
+      _saveMem();
       onDone?.call();
       if (mounted) setState(() {});
     });

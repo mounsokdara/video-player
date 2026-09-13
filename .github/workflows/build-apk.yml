@@ -34,10 +34,10 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0_BETA
-          name: Video Player v1.0.0_BETA
+          tag_name: v1.0.0_pre-Release
+          name: Video Player v1.0.0 pre-Release
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
-          prerelease: false
+          prerelease: true
           make_latest: true

@@ -27,7 +27,7 @@ This app under development it's may have alot bugs
 - Properties include frame rate
 - Auto-refresh library toggle and pull-to-refresh on Videos / Folders
 - Settings persist (equalizer, tabs, resume, zoom, playback)
-- Deletes use `MANAGE_MEDIA` so Android does not show a confirmation sheet
+- Deletes and renames need all-files access; failures tell you to enable it
 - Skips plain text and TypeScript files (`.ts` only if it is MPEG-TS)
 - PIP (system picture-in-picture) off by default and only while a video is actually playing
 - Mini player keeps a 0–1 dock scale so pinch-resize stays on screen
@@ -50,13 +50,12 @@ CI on `main` publishes the APK to GitHub Releases.
 
 The app requests:
 
-- Read/write media and **all-files** access (`MANAGE_EXTERNAL_STORAGE`)
-- **Media management** (`MANAGE_MEDIA`) so deletes skip the system confirmation sheet
+- **All-files access** (`MANAGE_EXTERNAL_STORAGE`) as the single storage prompt
 - USB host (OTG) and removable volumes
 - Notifications / foreground media playback for background play
-- Picture-in-picture and display-over-apps for pop-up play
+- Picture-in-picture
 
-On first launch, grant **All files access** in system settings. If access is already granted and the library is empty, the app tells you there are no videos - it does not keep asking for permission.
+On first launch, grant **All files access** in system settings. If a delete, rename, or read fails, the app tells you to enable it.
 
 ## License
 

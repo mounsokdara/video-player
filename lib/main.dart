@@ -100,6 +100,12 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
               child: child ?? const SizedBox.shrink(),
             );
           },
+          onUnknownRoute: (settings) {
+            return MaterialPageRoute<void>(
+              settings: settings,
+              builder: (_) => const SizedBox.shrink(),
+            );
+          },
           home: HomeShell(
             onSettingsChanged: () {
               setState(() {});

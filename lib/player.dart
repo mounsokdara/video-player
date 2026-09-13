@@ -55,8 +55,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool speeding = false;
   double? abA;
   double? abB;
-  Timer? sleepTimer;
-  Duration? sleepLeft;
   Timer? clockTimer;
   Timer? persistTimer;
   DateTime now = DateTime.now();
@@ -182,6 +180,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           case 'play':
             unawaited(AndroidBridge.requestAudioFocus());
             vc?.setVolume(1);
+            unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
             vc?.play();
           case 'pause':
             vc?.pause();
@@ -189,6 +188,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             vc?.setVolume(0.2);
           case 'unduck':
             vc?.setVolume(1);
+            unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
           case 'next':
             unawaited(_next());
           case 'prev':
@@ -533,6 +533,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       surroundOn: appSettings.surroundOn,
       surround: appSettings.surround,
     );
+    await AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight);
   }
 
   Future<void> _hookBrightness() async {
@@ -568,7 +569,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     overlayTimer?.cancel();
     clockTimer?.cancel();
     persistTimer?.cancel();
-    sleepTimer?.cancel();
     events?.cancel();
     _zoomHudTimer?.cancel();
     _leftHide?.cancel();
@@ -592,6 +592,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       try {
         keep = (appSettings.inAppMiniplayer || appSettings.backgroundPlay) &&
             vc != null &&
+            PlaybackSession.item != null &&
+            PlaybackSession.controller != null &&
             ready &&
             (vc?.value.isInitialized ?? false);
       } catch (_) {
@@ -607,6 +609,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           aspect: aspect,
         );
         unawaited(_syncBackground());
+      } else if (PlaybackSession.controller == null) {
+        vc = null;
       } else {
         PlaybackSession.keepAlive = false;
         final dying = vc;
@@ -836,6 +840,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               IgnorePointer(
                 child: Center(
                   child: _HudChip(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
+                ),
+              ),
+            if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 96 + pad.bottom,
+                child: IgnorePointer(
+                  child: Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(_previewBytes!, width: 160, height: 90, fit: BoxFit.cover),
+                    ),
+                  ),
                 ),
               ),
             if (_showZoomHud || _pinching)
@@ -1301,7 +1319,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       case 'delete':
         final ok = await confirm(context, 'Delete this video?', item.title);
         if (ok) {
-          await library.deleteVideos([item]);
+          final done = await library.deleteVideos([item]);
+          if (!done && mounted) showAllFilesFailed(context, 'Delete');
           PlaybackSession.keepAlive = false;
           widget.onChanged();
           if (mounted) Navigator.pop(context);
@@ -1322,6 +1341,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         } catch (e, s) {
           CrashLog.record('EQ', '$e', s);
         }
+      case 'volume':
+        await _volumeSheet();
       case 'night':
         setState(() {
           night = !night;

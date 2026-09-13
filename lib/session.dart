@@ -7,8 +7,25 @@ import 'package:video_player/video_player.dart';
 
 import 'android_bridge.dart';
 import 'crash.dart';
-import 'main.dart';
 import 'models.dart';
+import 'settings.dart';
+
+class MiniMemory {
+  MiniMemory._();
+  static double w = 216;
+  static double? dx;
+  static double? dy;
+  static bool parked = false;
+  static int parkSide = 0;
+
+  static void reset() {
+    w = 216;
+    dx = null;
+    dy = null;
+    parked = false;
+    parkSide = 0;
+  }
+}
 
 class PlaybackSession {
   static VideoPlayerController? controller;
@@ -20,6 +37,8 @@ class PlaybackSession {
   static double speed = 1;
   static AspectMode aspect = AspectMode.fit;
   static VoidCallback? onMutated;
+  static Timer? sleepTimer;
+  static Duration? sleepLeft;
 
   static bool _endedLatch = false;
   static bool _busy = false;
@@ -31,9 +50,9 @@ class PlaybackSession {
 
   static bool get active => keepAlive && controller != null && item != null;
 
-  static VideoPlayerOptions get playerOptions => VideoPlayerOptions(
+  static const playerOptions = VideoPlayerOptions(
         mixWithOthers: true,
-        allowBackgroundPlayback: appSettings.backgroundPlay,
+        allowBackgroundPlayback: true,
       );
 
   static VideoPlayerController controllerFor(String playPath) {
@@ -146,6 +165,10 @@ class PlaybackSession {
     _endedLatch = false;
     _busy = false;
     _failStreak = 0;
+    sleepTimer?.cancel();
+    sleepTimer = null;
+    sleepLeft = null;
+    MiniMemory.reset();
     final dying = controller;
     controller = null;
     item = null;
@@ -162,6 +185,45 @@ class PlaybackSession {
     await AndroidBridge.abandonAudioFocus();
   }
 
+  static void armSleep(Duration total) {
+    sleepTimer?.cancel();
+    sleepLeft = total;
+    sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      final left = sleepLeft;
+      if (left == null) {
+        t.cancel();
+        return;
+      }
+      final next = left - const Duration(seconds: 1);
+      if (next <= Duration.zero) {
+        t.cancel();
+        sleepTimer = null;
+        sleepLeft = null;
+        unawaited(_onSleepFire());
+        return;
+      }
+      sleepLeft = next;
+      onMutated?.call();
+    });
+  }
+
+  static void cancelSleep() {
+    sleepTimer?.cancel();
+    sleepTimer = null;
+    sleepLeft = null;
+    onMutated?.call();
+  }
+
+  static Future<void> _onSleepFire() async {
+    try {
+      await controller?.pause();
+    } catch (_) {}
+    await stop();
+    try {
+      appNavigator.currentState?.popUntil((r) => r.isFirst);
+    } catch (_) {}
+  }
+
   static void pauseForBackground() {
     if (appSettings.backgroundPlay) return;
     final c = controller;
@@ -172,6 +234,20 @@ class PlaybackSession {
         unawaited(AndroidBridge.stopBackground());
       }
     } catch (_) {}
+  }
+
+  static Future<void> keepBackgroundAlive() async {
+    if (!appSettings.backgroundPlay || !active) return;
+    final c = controller;
+    final next = item;
+    if (c == null || next == null) return;
+    await AndroidBridge.startBackground(
+      title: next.title,
+      artist: next.folderName,
+      playing: c.value.isPlaying,
+      positionMs: c.value.position.inMilliseconds,
+      durationMs: c.value.duration.inMilliseconds,
+    );
   }
 
   static Future<void> applyOutput(VideoPlayerController c, VideoItem next) async {
@@ -190,6 +266,7 @@ class PlaybackSession {
       surroundOn: appSettings.surroundOn,
       surround: appSettings.surround,
     );
+    await AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight);
     if (appSettings.backgroundPlay) {
       await AndroidBridge.startBackground(
         title: next.title,

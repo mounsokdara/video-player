@@ -248,6 +248,50 @@ class EqualizerController(
         }
     }
 
+    fun setStereoVolume(left: Float, right: Float) {
+        val l = left.coerceIn(0f, 1f)
+        val r = right.coerceIn(0f, 1f)
+        val exo = findExoPlayer() ?: return
+        try {
+            val two = exo.javaClass.methods.firstOrNull {
+                it.name == "setVolume" && it.parameterCount == 2
+            }
+            if (two != null) {
+                two.invoke(exo, l, r)
+                return
+            }
+        } catch (_: Throwable) {
+        }
+        try {
+            val one = exo.javaClass.methods.firstOrNull {
+                it.name == "setVolume" && it.parameterCount == 1
+            }
+            one?.invoke(exo, maxOf(l, r))
+        } catch (_: Throwable) {
+        }
+        applyAudioTrackBalance(exo, l, r)
+    }
+
+    private fun applyAudioTrackBalance(exo: Any, left: Float, right: Float) {
+        try {
+            val renderers = fieldValue(exo, "renderers") as? Array<*> ?: return
+            for (ren in renderers) {
+                if (ren == null) continue
+                val sink = fieldValue(ren, "audioSink") ?: fieldValue(ren, "sink")
+                val track = if (sink != null) {
+                    fieldValue(sink, "audioTrack") ?: fieldValue(sink, "track")
+                } else {
+                    null
+                }
+                if (track is android.media.AudioTrack) {
+                    @Suppress("DEPRECATION")
+                    track.setStereoVolume(left, right)
+                }
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     private fun playbackParameters(speed: Float, pitch: Float): Any? {
         val names = arrayOf(
             "androidx.media3.common.PlaybackParameters",

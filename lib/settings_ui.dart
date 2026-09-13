@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'android_bridge.dart';
 import 'about.dart';
@@ -67,7 +66,7 @@ class SettingsHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: const Text('Video Player 1.0.0_BETA'),
+              subtitle: const Text('Video Player 1.0.0 pre-Release'),
               onTap: () async {
                 if (!context.mounted) return;
                 await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
@@ -329,7 +328,7 @@ class _VideoSettingsState extends State<VideoSettings> {
           SwitchListTile(title: const Text('Gesture control'), value: s.gestureControl, onChanged: (v) => set(() => s.gestureControl = v)),
           SwitchListTile(
             title: const Text('Allow zoom inside video'),
-            subtitle: const Text('Pinch to zoom the picture. On by default.'),
+            subtitle: const Text('Pinch to zoom the picture.'),
             value: s.allowZoom,
             onChanged: (v) => set(() => s.allowZoom = v),
           ),

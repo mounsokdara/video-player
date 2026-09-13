@@ -97,6 +97,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         case 'play':
           unawaited(AndroidBridge.requestAudioFocus());
           c?.setVolume(1);
+          unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
           c?.play();
         case 'pause':
           c?.pause();
@@ -104,6 +105,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           c?.setVolume(0.2);
         case 'unduck':
           c?.setVolume(1);
+          unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
         case 'next':
           unawaited(PlaybackSession.skip(1));
         case 'prev':
@@ -137,6 +139,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     } catch (e, s) {
       error = '$e';
       CrashLog.record('LIBRARY', '$e', s);
+      if (mounted) showAllFilesFailed(context, 'Read');
     }
     _busy = false;
     if (mounted) setState(() => loading = false);
@@ -198,13 +201,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      if (!appSettings.backgroundPlay) {
+      if (appSettings.backgroundPlay) {
+        unawaited(PlaybackSession.keepBackgroundAlive());
+      } else {
         PlaybackSession.pauseForBackground();
         final c = PlaybackSession.controller;
         try {
           if (c != null && c.value.isPlaying) unawaited(c.pause());
         } catch (_) {}
       }
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(() async {
+        final had = library.allFiles;
+        library.allFiles = await AndroidBridge.hasAllFilesAccess();
+        if (library.allFiles && !had && mounted) await _boot(spinner: false);
+      }());
     }
   }
 
@@ -306,7 +317,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (items.isEmpty) return;
     final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${items.length} videos?', 'This cannot be undone.');
     if (ok != true) return;
-    await library.deleteVideos(items);
+    final done = await library.deleteVideos(items);
+    if (!done && mounted) showAllFilesFailed(context, 'Delete');
     setState(() {
       selected.clear();
       selecting = false;
@@ -549,28 +561,34 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         clipBehavior: Clip.none,
         children: [
           child,
-          if (PlaybackSession.active && appSettings.inAppMiniplayer && onTop)
-            MiniPlayerOverlay(
-              pad: pad,
-              navH: wide || tabs.length <= 1 ? 16.0 : 88.0,
-              onExpand: () {
-                final item = PlaybackSession.item;
-                final list = PlaybackSession.playlist;
-                if (item == null) return;
-                PlaybackSession.transferring = true;
-                PlaybackSession.keepAlive = false;
-                setState(() {});
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted) return;
-                  unawaited(_open(item, playlist: list));
-                });
-              },
-              onClose: () async {
-                await PlaybackSession.stop();
-                if (mounted) setState(() {});
-              },
-              onPrev: () => _sessionSkip(-1),
-              onNext: () => _sessionSkip(1),
+          if (PlaybackSession.active && appSettings.inAppMiniplayer)
+            Offstage(
+              offstage: !onTop,
+              child: IgnorePointer(
+                ignoring: !onTop,
+                child: MiniPlayerOverlay(
+                  pad: pad,
+                  navH: wide || tabs.length <= 1 ? 16.0 : 88.0,
+                  onExpand: () {
+                    final item = PlaybackSession.item;
+                    final list = PlaybackSession.playlist;
+                    if (item == null) return;
+                    PlaybackSession.transferring = true;
+                    PlaybackSession.keepAlive = false;
+                    setState(() {});
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      unawaited(_open(item, playlist: list));
+                    });
+                  },
+                  onClose: () async {
+                    await PlaybackSession.stop();
+                    if (mounted) setState(() {});
+                  },
+                  onPrev: () => _sessionSkip(-1),
+                  onNext: () => _sessionSkip(1),
+                ),
+              ),
             ),
         ],
       );
@@ -853,7 +871,7 @@ class VideosHub extends StatelessWidget {
                   : layout == LayoutMode.list
                       ? ListView.builder(
                           key: const ValueKey('video-list'),
-                          physics: const AlwaysScrollableScrollPhysics(),
+                          physics: const ClampingScrollPhysics(),
                           padding: EdgeInsets.only(bottom: 24 + pad.bottom),
                           itemCount: items.length,
                           itemBuilder: (_, i) {
@@ -870,7 +888,7 @@ class VideosHub extends StatelessWidget {
                         )
                       : GridView.builder(
                           key: const ValueKey('video-grid'),
-                          physics: const AlwaysScrollableScrollPhysics(),
+                          physics: const ClampingScrollPhysics(),
                           padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: _columns(context),
@@ -1089,6 +1107,12 @@ class FoldersHub extends StatelessWidget {
     }
 
     final ents = library.listDir(path);
+    if (library.lastIoFailed) {
+      library.lastIoFailed = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) showAllFilesFailed(context, 'Read');
+      });
+    }
     final files = ents.whereType<File>().toList();
     final fileIds = files.map((e) {
       for (final v in library.videos) {
@@ -1155,7 +1179,7 @@ class FoldersHub extends StatelessWidget {
             strokeWidth: 2.4,
             onRefresh: onRefresh,
             child: ListView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: const ClampingScrollPhysics(),
             padding: EdgeInsets.only(bottom: pad.bottom + 16),
             itemCount: ents.length + 1,
             itemBuilder: (_, i) {

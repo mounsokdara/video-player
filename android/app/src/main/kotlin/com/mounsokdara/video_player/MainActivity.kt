@@ -295,6 +295,12 @@ class MainActivity : FlutterActivity() {
                             equalizer.applyPlaybackParams(speed, pitchShift)
                             result.success(true)
                         }
+                        "setStereoVolume" -> {
+                            val left = (call.argument<Double>("left") ?: 1.0).toFloat()
+                            val right = (call.argument<Double>("right") ?: 1.0).toFloat()
+                            equalizer.setStereoVolume(left, right)
+                            result.success(true)
+                        }
                         "toast" -> {
                             Toast.makeText(this, call.argument<String>("msg") ?: "", Toast.LENGTH_SHORT).show()
                             result.success(true)
@@ -803,13 +809,17 @@ class MainActivity : FlutterActivity() {
                 if (hiddenOnly && !fileHidden) continue
                 if (!isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
+                val meta = fileVideoMeta(f.absolutePath)
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
                         "name" to f.name,
                         "size" to f.length(),
                         "modified" to f.lastModified(),
-                        "folder" to (f.parent ?: "")
+                        "folder" to (f.parent ?: ""),
+                        "durationMs" to meta.first,
+                        "width" to meta.second,
+                        "height" to meta.third
                     )
                 )
             }
@@ -835,6 +845,36 @@ class MainActivity : FlutterActivity() {
             low == "alarms" ||
             low == "ringtones" ||
             low == "notifications"
+    }
+
+    private fun fileVideoMeta(path: String): Triple<Long, Int, Int> {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(path)
+            var durationUs = 0L
+            var width = 0
+            var height = 0
+            for (i in 0 until extractor.trackCount) {
+                val fmt = extractor.getTrackFormat(i)
+                val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
+                if (fmt.containsKey(MediaFormat.KEY_DURATION)) {
+                    val d = fmt.getLong(MediaFormat.KEY_DURATION)
+                    if (d > durationUs) durationUs = d
+                }
+                if (mime.startsWith("video/")) {
+                    if (fmt.containsKey(MediaFormat.KEY_WIDTH)) width = fmt.getInteger(MediaFormat.KEY_WIDTH)
+                    if (fmt.containsKey(MediaFormat.KEY_HEIGHT)) height = fmt.getInteger(MediaFormat.KEY_HEIGHT)
+                }
+            }
+            return Triple(durationUs / 1000L, width, height)
+        } catch (_: Exception) {
+            return Triple(0L, 0, 0)
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     @Suppress("DEPRECATION")

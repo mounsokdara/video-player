@@ -269,6 +269,15 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> setStereoVolume(double left, double right) async {
+    try {
+      await _ch.invokeMethod('setStereoVolume', {
+        'left': left.clamp(0.0, 1.0),
+        'right': right.clamp(0.0, 1.0),
+      });
+    } catch (_) {}
+  }
+
   static Future<void> startBackground({
     required String title,
     String? artist,

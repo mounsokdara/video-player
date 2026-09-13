@@ -13,6 +13,7 @@ IconData playerActionIcon(String id) => switch (id) {
       'aspect' => Icons.aspect_ratio,
       'ab' => Icons.repeat,
       'eq' => Icons.equalizer,
+      'volume' => Icons.volume_up_outlined,
       'bookmark' => Icons.bookmark_outline,
       'brightness' => Icons.brightness_6_outlined,
       'rotate' => Icons.screen_rotation,
@@ -61,7 +62,7 @@ Future<void> showPlayerMoreSheet({
 }) {
   const sections = <String, List<String>>{
     'Playback': ['speed', 'lock', 'ab', 'skipBack', 'skipForward', 'playopt', 'decoder', 'timer', 'repeat'],
-    'Audio': ['background', 'eq'],
+    'Audio': ['background', 'eq', 'volume'],
     'Picture': ['screenshot', 'aspect', 'brightness', 'rotate', 'night', 'zoom', 'color', 'mirror', 'invert', 'subtitle'],
     'System': ['popup', 'navbar', 'cast'],
     'File': ['bookmark', 'share', 'properties', 'delete'],

@@ -75,6 +75,13 @@ class _VideoThumbState extends State<VideoThumb> {
   }
 }
 
+void showAllFilesFailed(BuildContext context, String action) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('Failed to $action. Make sure you have all file access Enabled')),
+  );
+}
+
 class ResumeBar extends StatelessWidget {
   const ResumeBar({super.key, required this.progress});
   final double progress;
@@ -342,7 +349,8 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
           if (!context.mounted) return;
           final name = await promptText(context, 'Rename', item.title);
           if (name != null && name.trim().isNotEmpty) {
-            await library.rename(item, name.trim());
+            final next = await library.rename(item, name.trim());
+            if (next == null && context.mounted) showAllFilesFailed(context, 'Rename');
             onChanged();
           }
         },
@@ -392,7 +400,8 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
           Navigator.pop(ctx);
           final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
           if (ok == true) {
-            await library.deleteVideos([item]);
+            final done = await library.deleteVideos([item]);
+            if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
             onChanged();
           }
         },
@@ -607,7 +616,8 @@ Future<void> showFolderEntryMenu(
           if (!context.mounted) return;
           final next = await promptText(context, 'Rename', name);
           if (next != null && next.trim().isNotEmpty) {
-            await AndroidBridge.renamePath(path, next.trim());
+            final dest = await AndroidBridge.renamePath(path, next.trim());
+            if (dest == null && context.mounted) showAllFilesFailed(context, 'Rename');
             onChanged();
           }
         },
@@ -637,7 +647,8 @@ Future<void> showFolderEntryMenu(
           Navigator.pop(ctx);
           final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
           if (ok == true) {
-            await library.deletePath(path);
+            final done = await library.deletePath(path);
+            if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
             onChanged();
           }
         },

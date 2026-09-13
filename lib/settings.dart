@@ -16,7 +16,7 @@ class AppSettings {
   bool rememberPlayback = true;
   bool confirmDelete = true;
   bool scanOnStart = true;
-  bool autoRefresh = false;
+  bool autoRefresh = true;
   bool showHiddenFolders = false;
   int thumbnailQuality = 2;
   bool vibrateOnLongPress = true;
@@ -118,6 +118,7 @@ class AppSettings {
     'aspect': 'Screen mode',
     'ab': 'A-B repeat',
     'eq': 'Equalizer',
+    'volume': 'Volume',
     'bookmark': 'Bookmark',
     'brightness': 'Brightness',
     'rotate': 'Rotate',
@@ -170,6 +171,8 @@ class AppSettings {
   int bassBoost = 0;
   bool surroundOn = false;
   int surround = 0;
+  double audioBalanceLeft = 1;
+  double audioBalanceRight = 1;
 
   Map<String, double> resumeMap = {};
   Map<String, double> speedMap = {};
@@ -203,7 +206,13 @@ class AppSettings {
     rememberPlayback = p.getBool('rememberPlayback') ?? true;
     confirmDelete = p.getBool('confirmDelete') ?? true;
     scanOnStart = p.getBool('scanOnStart') ?? true;
-    autoRefresh = p.getBool('autoRefresh') ?? false;
+    if (p.getBool('autoRefreshOnV1') != true) {
+      autoRefresh = true;
+      await p.setBool('autoRefresh', true);
+      await p.setBool('autoRefreshOnV1', true);
+    } else {
+      autoRefresh = p.getBool('autoRefresh') ?? true;
+    }
     showHiddenFolders = p.getBool('showHiddenFolders') ?? false;
     vibrateOnLongPress = p.getBool('vibrateOnLongPress') ?? true;
     thumbnailQuality = p.getInt('thumbnailQuality') ?? 2;
@@ -307,6 +316,8 @@ class AppSettings {
     bassBoost = (p.getInt('bassBoost') ?? 0).clamp(0, 1000);
     surroundOn = p.getBool('surroundOn') ?? false;
     surround = (p.getInt('surround') ?? 0).clamp(0, 1000);
+    audioBalanceLeft = (p.getDouble('audioBalanceLeft') ?? 1).clamp(0.0, 1.0).toDouble();
+    audioBalanceRight = (p.getDouble('audioBalanceRight') ?? 1).clamp(0.0, 1.0).toDouble();
     final bandsRaw = p.getString('eqBands');
     if (bandsRaw != null) {
       try {
@@ -420,6 +431,8 @@ class AppSettings {
     await p.setInt('bassBoost', bassBoost);
     await p.setBool('surroundOn', surroundOn);
     await p.setInt('surround', surround);
+    await p.setDouble('audioBalanceLeft', audioBalanceLeft);
+    await p.setDouble('audioBalanceRight', audioBalanceRight);
     await p.setString('resumeMap', jsonEncode(resumeMap));
     await p.setString('speedMap', jsonEncode(speedMap));
     await p.setStringList('bookmarks', bookmarks.toList());
