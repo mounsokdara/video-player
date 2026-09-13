@@ -60,6 +60,7 @@ object NativeConstants {
         const val APPLY_EQUALIZER = "applyEqualizer"
         const val APPLY_DECODER = "applyDecoder"
         const val SET_DECODER_MODE = "setDecoderMode"
+        const val CROP_DECODER_PAD = "cropDecoderPad"
         const val OPEN_CRASH_REPORT = "openCrashReport"
         const val DEBUG_LOG = "debugLog"
     }

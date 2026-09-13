@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'settings.dart';
@@ -158,5 +160,53 @@ class VideoPicture extends StatelessWidget {
       );
     }
     return player;
+  }
+}
+
+class DecoderPadCrop extends StatelessWidget {
+  const DecoderPadCrop({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth;
+      final h = box.maxHeight;
+      if (!w.isFinite || !h.isFinite || w < 2 || h < 2) {
+        return ClipRect(clipBehavior: Clip.hardEdge, child: child);
+      }
+      final minSide = math.min(w, h);
+      const scale = 1.1;
+      final bar = (minSide * 0.018).clamp(6.0, 22.0).toDouble();
+      return ClipRect(
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Transform.scale(
+              scale: scale,
+              filterQuality: FilterQuality.low,
+              child: child,
+            ),
+            Align(
+              alignment: Alignment.topCenter,
+              child: SizedBox(height: bar, width: double.infinity, child: const ColoredBox(color: Colors.black)),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(height: bar, width: double.infinity, child: const ColoredBox(color: Colors.black)),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(width: bar, height: double.infinity, child: const ColoredBox(color: Colors.black)),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(width: bar, height: double.infinity, child: const ColoredBox(color: Colors.black)),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
