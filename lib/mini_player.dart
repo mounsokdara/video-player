@@ -35,6 +35,9 @@ class MiniPlayerOverlay extends StatefulWidget {
 
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     with TickerProviderStateMixin {
+  static const double _kMaxFrameW = 960;
+  static const double _kMaxFrameH = 540;
+
   final GlobalKey _cardKey = GlobalKey();
 
   late final AnimationController _anim;
@@ -510,6 +513,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     } catch (_) {
       frame = const ColoredBox(color: Color(0xFF05060A));
     }
+
+    frame = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: _kMaxFrameW,
+          maxHeight: _kMaxFrameH,
+        ),
+        child: frame,
+      ),
+    );
 
     return Stack(
       clipBehavior: Clip.none,
