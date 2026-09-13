@@ -35,9 +35,6 @@ class MiniPlayerOverlay extends StatefulWidget {
 
 class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     with TickerProviderStateMixin {
-  static const double _kMaxFrameW = 960;
-  static const double _kMaxFrameH = 540;
-
   final GlobalKey _cardKey = GlobalKey();
 
   late final AnimationController _anim;
@@ -77,7 +74,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         if (_wAnim != null) _w = _wAnim!.value;
       });
     });
-    _restoreMem();
     _bind();
   }
 
@@ -85,16 +81,18 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bind();
-    final s = MediaQuery.sizeOf(context);
-    if (_lastScreen != null && _lastScreen != s) {
-      _onScreenChanged(s);
+    final newScreen = MediaQuery.sizeOf(context);
+    if (_lastScreen == null) {
+      _lastScreen = newScreen;
+    } else if (_lastScreen != newScreen) {
+      final old = _lastScreen!;
+      _lastScreen = newScreen;
+      _repositionForScreenChange(old, newScreen);
     }
-    _lastScreen = s;
   }
 
   @override
   void dispose() {
-    if (PlaybackSession.active || PlaybackSession.transferring) _saveMem();
     _anim.dispose();
     try {
       _ctrl?.removeListener(_onTick);
@@ -112,76 +110,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     _ctrl?.addListener(_onTick);
   }
 
-  void _restoreMem() {
-    _w = MiniMemory.w;
-    if (MiniMemory.dx != null && MiniMemory.dy != null) {
-      _pos = Offset(MiniMemory.dx!, MiniMemory.dy!);
-    }
-    _parked = MiniMemory.parked;
-    _parkSide = MiniMemory.parkSide;
-  }
-
-  void _saveMem() {
-    MiniMemory.w = _w;
-    MiniMemory.dx = _pos?.dx;
-    MiniMemory.dy = _pos?.dy;
-    MiniMemory.parked = _parked;
-    MiniMemory.parkSide = _parkSide;
-  }
-
   void _onTick() {
     if (mounted) setState(() {});
-  }
-
-  void _onScreenChanged(Size newSize) {
-    if (!mounted || _dismissed) return;
-    if (_gestureActive || _arrowDragging) return;
-    if (_anim.isAnimating) return;
-
-    final safe = MiniPhysics.safeZone(
-      newSize,
-      pad: widget.pad,
-      navH: widget.navH,
-    );
-    final video = _video;
-    final clampedW = MiniPhysics.clampW(_w, newSize);
-    final h = MiniPhysics.boxFor(clampedW, video).height;
-    final cur = _pos;
-
-    if (cur == null) {
-      if (clampedW != _w) {
-        setState(() => _w = clampedW);
-      }
-      return;
-    }
-
-    if (_parked) {
-      final side = _parkSide != 0 ? _parkSide : _sideFor(cur);
-      final maxY = math.max(safe.top, safe.bottom - h);
-      final targetY = cur.dy.clamp(safe.top, maxY).toDouble();
-      final targetX = side < 0 ? -clampedW : newSize.width;
-      setState(() {
-        _w = clampedW;
-        _pos = Offset(targetX, targetY);
-        _parked = true;
-        _parkSide = side;
-      });
-      _saveMem();
-      return;
-    }
-
-    final maxX = math.max(safe.left, safe.right - clampedW);
-    final maxY = math.max(safe.top, safe.bottom - h);
-    final targetX = cur.dx.clamp(safe.left, maxX).toDouble();
-    final targetY = cur.dy.clamp(safe.top, maxY).toDouble();
-
-    if (clampedW == _w && targetX == cur.dx && targetY == cur.dy) return;
-
-    setState(() {
-      _w = clampedW;
-      _pos = Offset(targetX, targetY);
-    });
-    _saveMem();
   }
 
   Size get _screen => MediaQuery.sizeOf(context);
@@ -228,6 +158,55 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     return (MiniGeom.arrowMaxW * (o / full))
         .clamp(0.0, MiniGeom.arrowMaxW)
         .toDouble();
+  }
+
+  void _repositionForScreenChange(Size oldSize, Size newSize) {
+    if (_dismissed) return;
+
+    if (_anim.isAnimating) {
+      _anim.stop();
+    }
+    _posAnim = null;
+    _wAnim = null;
+
+    final safe = MiniPhysics.safeZone(
+      newSize,
+      pad: widget.pad,
+      navH: widget.navH,
+    );
+    final video = MiniPhysics.videoSize();
+    final newW = MiniPhysics.clampW(_w, newSize);
+    final newH = MiniPhysics.boxFor(newW, video).height;
+
+    if (_pos == null) {
+      _w = newW;
+      _pos = MiniPhysics.defaultPos(newSize, newW, newH, safe);
+      return;
+    }
+
+    final current = _pos!;
+
+    if (_parked) {
+      final side = _parkSide != 0
+          ? _parkSide
+          : (current.dx + newW / 2 < newSize.width / 2 ? -1 : 1);
+      final targetX = side < 0 ? -newW : newSize.width;
+      final maxY = math.max(safe.top, safe.bottom - newH);
+      final targetY = current.dy.clamp(safe.top, maxY).toDouble();
+      _w = newW;
+      _parked = true;
+      _parkSide = side;
+      _pos = Offset(targetX, targetY);
+      return;
+    }
+
+    final maxX = math.max(safe.left, safe.right - newW);
+    final maxY = math.max(safe.top, safe.bottom - newH);
+    final x = current.dx.clamp(safe.left, maxX).toDouble();
+    final y = current.dy.clamp(safe.top, maxY).toDouble();
+
+    _w = newW;
+    _pos = Offset(x, y);
   }
 
   void _pauseForPark() {
@@ -456,14 +435,12 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         _parked = true;
         _parkSide = side;
       });
-      _saveMem();
     } else {
       to = MiniPhysics.edgeTarget(fromPos, settledW, settledH, safe);
       setState(() {
         _parked = false;
         _parkSide = 0;
       });
-      _saveMem();
     }
     final dist = (to - fromPos).distance;
     final ms = (220 + dist * 0.45).clamp(220, 700).round();
@@ -519,7 +496,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       if (!mounted) return;
       _pos = to;
       _w = toW;
-      _saveMem();
       onDone?.call();
       if (mounted) setState(() {});
     });
@@ -593,16 +569,6 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     } catch (_) {
       frame = const ColoredBox(color: Color(0xFF05060A));
     }
-
-    frame = Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: _kMaxFrameW,
-          maxHeight: _kMaxFrameH,
-        ),
-        child: frame,
-      ),
-    );
 
     return Stack(
       clipBehavior: Clip.none,
