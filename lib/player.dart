@@ -984,13 +984,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _hideDecoderPad(Widget child, double vw, double vh) {
-    if (vw <= 1 || vh <= 1) return ClipRect(child: child);
-    const alignment = 64.0;
-    final paddedW = (((vw + alignment - 1) / alignment).floor()) * alignment;
-    final paddedH = (((vh + alignment - 1) / alignment).floor()) * alignment;
-    final sx = paddedW / vw;
-    final sy = paddedH / vh;
-    final scale = math.max(sx, sy).clamp(1.0, 1.15).toDouble();
+    final sx = vw <= 1 ? 1.0 : (vw + 16) / vw;
+    final sy = vh <= 1 ? 1.0 : (vh + 16) / vh;
+    final scale = math.max(sx, sy).clamp(1.0, 1.06).toDouble();
     return ClipRect(
       child: Transform.scale(
         scale: scale,
