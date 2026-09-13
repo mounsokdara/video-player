@@ -303,8 +303,7 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                         "setDecoderMode" -> {
-                            decoder.setMode(call.argument<String>("mode") ?: "auto")
-                            result.success(true)
+                            result.success(decoder.setMode(call.argument<String>("mode") ?: "auto"))
                         }
                         "applyDecoder" -> {
                             result.success(decoder.apply())

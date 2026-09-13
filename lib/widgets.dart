@@ -93,7 +93,7 @@ class ResumeBar extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(2),
       child: LinearProgressIndicator(
-        value: progress.clamp(0, 1),
+        value: progress.clamp(0, 1).toDouble(),
         minHeight: 3,
         color: scheme.primary,
         backgroundColor: scheme.surfaceContainerHighest,
@@ -289,7 +289,7 @@ Future<T?> showAppSheet<T>({
           padding: EdgeInsets.only(left: pad.left, right: pad.right),
           child: DraggableScrollableSheet(
             expand: false,
-            initialChildSize: initial.clamp(0.38, 0.92),
+            initialChildSize: initial.clamp(0.38, 0.92).toDouble(),
             minChildSize: 0.28,
             maxChildSize: 0.95,
             builder: (_, sc) {

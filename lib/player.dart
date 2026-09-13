@@ -401,10 +401,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       if (!c.value.isInitialized) return;
       if (c.value.hasError) {
-        unawaited(CrashLog.breadcrumb('Source error ${item.path}: ${c.value.errorDescription}'));
+        final desc = c.value.errorDescription ?? '';
+        unawaited(CrashLog.breadcrumb('Source error ${item.path}: $desc'));
         if (!_endedLatch) {
           _endedLatch = true;
-          unawaited(_next());
+          if (!PlaybackSession.usingSoftware && PlaybackSession.isCodecError(desc)) {
+            unawaited(_openCurrent());
+          } else {
+            unawaited(_next());
+          }
         }
         return;
       }
@@ -768,7 +773,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   _queuePreview((next / dur).toDouble());
                   _flash(formatDuration(Duration(milliseconds: next.round())));
                 } else if (panKind == 'brightness') {
-                  brightness = (panBase - dy / size.height).clamp(0.0, 1.0);
+                  brightness = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
                   unawaited(ScreenBrightness().setApplicationScreenBrightness(brightness));
                   if (appSettings.rememberBrightness) {
                     appSettings.brightness = brightness;
@@ -776,7 +781,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   _flash('Brightness ${(brightness * 100).round()}%');
                   setState(() {});
                 } else if (panKind == 'volume') {
-                  volume = (panBase - dy / size.height).clamp(0.0, 1.0);
+                  volume = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
                   try {
                     VolumeController.instance.setVolume(volume);
                   } catch (_) {}
@@ -917,7 +922,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Widget _seekHud(VideoPlayerController? c, EdgeInsets pad) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
-    final frac = dur.inMilliseconds == 0 ? 0.0 : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0));
+    final frac = dur.inMilliseconds == 0 ? 0.0 : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0).toDouble());
     final shown = Duration(milliseconds: (frac * dur.inMilliseconds).round());
     return Positioned(
       left: 12,
@@ -978,8 +983,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     var vw = c.value.size.width;
     var vh = c.value.size.height;
     if (vw <= 1 || vh <= 1) {
-      vw = screen.width.clamp(1, 10000);
-      vh = screen.height.clamp(1, 10000);
+      vw = screen.width.clamp(1, 10000).toDouble();
+      vh = screen.height.clamp(1, 10000).toDouble();
     }
     if (screen.width < 2 || screen.height < 2) {
       return child;
@@ -1132,7 +1137,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     child: LayoutBuilder(builder: (ctx, box) {
                       final frac = dur.inMilliseconds == 0
                           ? 0.0
-                          : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0));
+                          : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0).toDouble());
                       Widget mark(double? sec, Color color) {
                         if (sec == null || dur.inMilliseconds <= 0) return const SizedBox.shrink();
                         final x = (sec * 1000 / dur.inMilliseconds).clamp(0.0, 1.0) * box.maxWidth;
@@ -1147,7 +1152,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         children: [
                           if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
                             Align(
-                              alignment: Alignment((frac * 2 - 1).clamp(-1.0, 1.0), 0),
+                              alignment: Alignment((frac * 2 - 1).clamp(-1.0, 1.0).toDouble(), 0),
                               child: Transform.translate(
                                 offset: const Offset(0, -6),
                                 child: IgnorePointer(

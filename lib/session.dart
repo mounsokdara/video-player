@@ -48,6 +48,8 @@ class PlaybackSession {
   static const _endSlop = Duration(milliseconds: 400);
   static const _replayAfter = Duration(seconds: 3);
 
+  static bool usingSoftware = false;
+
   static bool get active => keepAlive && controller != null && item != null;
 
   static final playerOptions = VideoPlayerOptions(
@@ -66,13 +68,22 @@ class PlaybackSession {
     return path;
   }
 
-  static Future<VideoPlayerController> openWithFallback(VideoItem next) async {
+  static Future<VideoPlayerController> openWithFallback(VideoItem next, {bool forceSoftware = false}) async {
     final path = await resolvePlayPath(next.path);
-    final preferSw = appSettings.decoder == DecoderMode.sw || !appSettings.hwPriority;
+    var width = next.width;
+    var height = next.height;
+    if (width <= 0 || height <= 0) {
+      try {
+        final info = await AndroidBridge.mediaInfo(path);
+        width = (info?['width'] as num?)?.toInt() ?? 0;
+        height = (info?['height'] as num?)?.toInt() ?? 0;
+      } catch (_) {}
+    }
+    final preferSw = forceSoftware || _preferSoftware(width, height);
     try {
       return await _openOnce(path, software: preferSw);
     } catch (e, s) {
-      if (preferSw || !_isCodecError('$e')) {
+      if (preferSw || !isCodecError('$e')) {
         CrashLog.record('PLAY', '$e', s);
         rethrow;
       }
@@ -85,7 +96,18 @@ class PlaybackSession {
     }
   }
 
-  static bool _isCodecError(String msg) {
+  static bool _preferSoftware(int width, int height) {
+    if (appSettings.decoder == DecoderMode.sw || !appSettings.hwPriority) return true;
+    return _awkwardSize(width, height);
+  }
+
+  static bool _awkwardSize(int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+    if (w < 64 || h < 64) return true;
+    return w % 16 != 0 || h % 16 != 0;
+  }
+
+  static bool isCodecError(String msg) {
     final m = msg.toLowerCase();
     return m.contains('mediacodec') ||
         m.contains('decoder') ||
@@ -95,15 +117,15 @@ class PlaybackSession {
   }
 
   static Future<VideoPlayerController> _openOnce(String path, {required bool software}) async {
-    await AndroidBridge.setDecoderMode(software ? 'sw' : appSettings.decoder.name);
+    usingSoftware = software;
+    final hooked = await AndroidBridge.setDecoderMode(software ? 'sw' : 'hw');
     final c = controllerFor(path);
     try {
-      if (software) {
+      if (software && !hooked) {
         final init = c.initialize();
-        var applied = await AndroidBridge.applyDecoder();
-        if (!applied) {
-          await Future<void>.delayed(const Duration(milliseconds: 40));
-          applied = await AndroidBridge.applyDecoder();
+        for (var i = 0; i < 8; i++) {
+          if (await AndroidBridge.applyDecoder()) break;
+          await Future<void>.delayed(const Duration(milliseconds: 25));
         }
         await init;
       } else {
@@ -161,10 +183,19 @@ class PlaybackSession {
 
   static Future<void> _onSourceError(String? desc) async {
     if (_busy || !keepAlive) return;
-    await CrashLog.breadcrumb('Source error ${item?.path}: ${desc ?? ''}');
+    final current = item;
+    final text = desc ?? '';
+    if (current != null && !usingSoftware && isCodecError(text)) {
+      await CrashLog.breadcrumb('Retry software decoder ${current.path}');
+      final list = playlist;
+      final at = index;
+      final ok = await swapTo(current, list: list, at: at, forceSoftware: true);
+      if (ok) return;
+    }
+    await CrashLog.breadcrumb('Source error ${item?.path}: $text');
     await skip(1, fromError: true);
     if (_failStreak >= playlist.length) {
-      CrashLog.record('PLAY', desc ?? 'Source error', null);
+      CrashLog.record('PLAY', text.isEmpty ? 'Source error' : text, null);
     }
   }
 
@@ -206,6 +237,7 @@ class PlaybackSession {
     sleepTimer = null;
     sleepLeft = null;
     MiniMemory.reset();
+    usingSoftware = false;
     final dying = controller;
     controller = null;
     item = null;
@@ -392,7 +424,7 @@ class PlaybackSession {
     }
   }
 
-  static Future<bool> swapTo(VideoItem next, {required List<VideoItem> list, required int at}) async {
+  static Future<bool> swapTo(VideoItem next, {required List<VideoItem> list, required int at, bool forceSoftware = false}) async {
     if (_busy) return false;
     _busy = true;
     _endedLatch = true;
@@ -400,7 +432,7 @@ class PlaybackSession {
     _unlisten();
     VideoPlayerController? c;
     try {
-      c = await openWithFallback(next);
+      c = await openWithFallback(next, forceSoftware: forceSoftware);
       await AndroidBridge.requestAudioFocus();
       await c.play();
       controller = c;

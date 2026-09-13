@@ -152,7 +152,7 @@ extension PlayerSheets on _PlayerPageState {
                 Slider(
                     min: 0.25,
                     max: 4,
-                    value: local.clamp(0.25, 4),
+                    value: local.clamp(0.25, 4).toDouble(),
                     onChanged: (v) {
                       ss(() {
                         custom = false;
@@ -175,7 +175,7 @@ extension PlayerSheets on _PlayerPageState {
                           if (n != null) {
                             ss(() {
                               custom = true;
-                              local = n.clamp(0.25, 8);
+                              local = n.clamp(0.25, 8).toDouble();
                             });
                           }
                         },
@@ -184,7 +184,7 @@ extension PlayerSheets on _PlayerPageState {
                           if (n != null) {
                             ss(() {
                               custom = true;
-                              local = n.clamp(0.25, 8);
+                              local = n.clamp(0.25, 8).toDouble();
                             });
                           }
                         },
@@ -214,7 +214,7 @@ extension PlayerSheets on _PlayerPageState {
                 FilledButton(
                   onPressed: () async {
                     final typed = double.tryParse(box.text);
-                    speed = (custom && typed != null) ? typed.clamp(0.25, 8) : local;
+                    speed = (custom && typed != null) ? typed.clamp(0.25, 8).toDouble() : local;
                     appSettings.speed = speed;
                     await _applySpeed();
                     await appSettings.save();
@@ -232,7 +232,7 @@ extension PlayerSheets on _PlayerPageState {
   }
 
   Future<void> _zoomSheet() async {
-    var local = (_zoomScale * 100).clamp(1, 1000);
+    var local = (_zoomScale * 100).clamp(1, 1000).toDouble();
     final box = TextEditingController(text: local.round().toString());
     await showModalBottomSheet<void>(
       context: context,
@@ -243,7 +243,7 @@ extension PlayerSheets on _PlayerPageState {
         final pad = SystemBars.rawOf(context);
         return StatefulBuilder(builder: (ctx, ss) {
           void apply(double pct) {
-            local = pct.clamp(1, 1000);
+            local = pct.clamp(1, 1000).toDouble();
             box.text = local.round().toString();
             setState(() {
               _zoomScale = local / 100;
@@ -484,7 +484,7 @@ extension PlayerSheets on _PlayerPageState {
   Widget _sl(String t, double v, double a, double b, ValueChanged<double> on) {
     return Row(children: [
       SizedBox(width: 92, child: Text(t)),
-      Expanded(child: Slider(min: a, max: b, value: v.clamp(a, b), onChanged: on)),
+      Expanded(child: Slider(min: a, max: b, value: v.clamp(a, b).toDouble(), onChanged: on)),
     ]);
   }
 

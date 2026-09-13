@@ -91,7 +91,7 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
             ThemeModePref.dark => ThemeMode.dark,
           },
           builder: (context, child) {
-            final scale = appSettings.uiScale.clamp(0.85, 1.35);
+            final scale = appSettings.uiScale.clamp(0.85, 1.35).toDouble();
             return MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 textScaler: TextScaler.linear(scale),

@@ -313,9 +313,9 @@ class AppSettings {
     eqEnabled = p.getBool('eqEnabled') ?? false;
     eqPreset = p.getString('eqPreset') ?? 'Flat';
     bassBoostOn = p.getBool('bassBoostOn') ?? false;
-    bassBoost = (p.getInt('bassBoost') ?? 0).clamp(0, 1000);
+    bassBoost = (p.getInt('bassBoost') ?? 0).clamp(0, 1000).toInt();
     surroundOn = p.getBool('surroundOn') ?? false;
-    surround = (p.getInt('surround') ?? 0).clamp(0, 1000);
+    surround = (p.getInt('surround') ?? 0).clamp(0, 1000).toInt();
     audioBalanceLeft = (p.getDouble('audioBalanceLeft') ?? 1).clamp(0.0, 1.0).toDouble();
     audioBalanceRight = (p.getDouble('audioBalanceRight') ?? 1).clamp(0.0, 1.0).toDouble();
     final bandsRaw = p.getString('eqBands');

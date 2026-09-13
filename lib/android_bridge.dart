@@ -269,10 +269,12 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<void> setDecoderMode(String mode) async {
+  static Future<bool> setDecoderMode(String mode) async {
     try {
-      await _ch.invokeMethod('setDecoderMode', {'mode': mode});
-    } catch (_) {}
+      return await _ch.invokeMethod<bool>('setDecoderMode', {'mode': mode}) ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<bool> applyDecoder() async {
@@ -286,8 +288,8 @@ class AndroidBridge {
   static Future<void> setStereoVolume(double left, double right) async {
     try {
       await _ch.invokeMethod('setStereoVolume', {
-        'left': left.clamp(0.0, 1.0),
-        'right': right.clamp(0.0, 1.0),
+        'left': left.clamp(0.0, 1.0).toDouble(),
+        'right': right.clamp(0.0, 1.0).toDouble(),
       });
     } catch (_) {}
   }

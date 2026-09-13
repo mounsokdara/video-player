@@ -551,7 +551,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
 
   double _bandDb(int i) {
     if (i < 0 || i >= appSettings.eqBands.length) return 0;
-    return (appSettings.eqBands[i] / 100).clamp(minDb, maxDb);
+    return (appSettings.eqBands[i] / 100).clamp(minDb, maxDb).toDouble();
   }
 
   @override
