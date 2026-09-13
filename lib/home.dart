@@ -762,6 +762,7 @@ class VideosHub extends StatelessWidget {
               ],
             ],
           ),
+          if (library.videos.isNotEmpty)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
@@ -821,60 +822,82 @@ class VideosHub extends StatelessWidget {
       },
       body: loading
           ? ListView(
+              key: const ValueKey('videos-loading'),
               physics: const AlwaysScrollableScrollPhysics(),
               children: const [SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))],
             )
-          : items.isEmpty
+          : library.videos.isEmpty
               ? CustomScrollView(
+                  key: const ValueKey('empty-library-scroll'),
                   physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [SliverFillRemaining(hasScrollBody: false, child: _EmptyLibrary(onRefresh: onRefresh))],
-                )
-              : layout == LayoutMode.list
-                  ? ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.only(bottom: 24 + pad.bottom),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) {
-                        final item = items[i];
-                        return VideoListTile(
-                          item: item,
-                          selected: selected.contains(item.id),
-                          selecting: selecting,
-                          onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                          onLongPress: () => onToggleSelect(item),
-                          onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
-                        );
-                      },
-                    )
-                  : GridView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: _columns(context),
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.82,
-                      ),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) {
-                        final item = items[i];
-                        return VideoGridCard(
-                          item: item,
-                          selected: selected.contains(item.id),
-                          selecting: selecting,
-                          onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                          onLongPress: () => onToggleSelect(item),
-                          onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
-                        );
-                      },
+                  slivers: [
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _EmptyLibrary(key: const ValueKey('empty-library'), onRefresh: onRefresh),
                     ),
+                  ],
+                )
+              : items.isEmpty
+                  ? CustomScrollView(
+                      key: const ValueKey('no-matches-scroll'),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: Text('No matching videos', style: TextStyle(color: scheme.onSurfaceVariant)),
+                          ),
+                        ),
+                      ],
+                    )
+                  : layout == LayoutMode.list
+                      ? ListView.builder(
+                          key: const ValueKey('video-list'),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.only(bottom: 24 + pad.bottom),
+                          itemCount: items.length,
+                          itemBuilder: (_, i) {
+                            final item = items[i];
+                            return VideoListTile(
+                              item: item,
+                              selected: selected.contains(item.id),
+                              selecting: selecting,
+                              onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
+                              onLongPress: () => onToggleSelect(item),
+                              onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
+                            );
+                          },
+                        )
+                      : GridView.builder(
+                          key: const ValueKey('video-grid'),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: _columns(context),
+                            mainAxisSpacing: 12,
+                            crossAxisSpacing: 12,
+                            childAspectRatio: 0.82,
+                          ),
+                          itemCount: items.length,
+                          itemBuilder: (_, i) {
+                            final item = items[i];
+                            return VideoGridCard(
+                              item: item,
+                              selected: selected.contains(item.id),
+                              selecting: selecting,
+                              onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
+                              onLongPress: () => onToggleSelect(item),
+                              onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
+                            );
+                          },
+                        ),
     ),
     );
   }
 }
 
 class _EmptyLibrary extends StatelessWidget {
-  const _EmptyLibrary({required this.onRefresh});
+  const _EmptyLibrary({super.key, required this.onRefresh});
   final Future<void> Function() onRefresh;
 
   @override

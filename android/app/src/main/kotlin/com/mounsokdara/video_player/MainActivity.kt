@@ -194,9 +194,17 @@ class MainActivity : FlutterActivity() {
                             val root = call.argument<String>("path")
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
                             val hidden = call.argument<Boolean>("includeHidden") ?: false
-                            val depth = if (hidden) 8 else 4
-                            val budget = if (hidden) 8000 else NativeConstants.SCAN_BUDGET
-                            result.success(scanVideos(File(root), depth, hidden, budget))
+                            val hiddenOnly = call.argument<Boolean>("hiddenOnly") ?: false
+                            val depth = if (hiddenOnly) 5 else 4
+                            val budget = NativeConstants.SCAN_BUDGET
+                            io.execute {
+                                try {
+                                    val data = scanVideos(File(root), depth, hidden, budget, hiddenOnly)
+                                    mainHandler.post { result.success(data) }
+                                } catch (t: Throwable) {
+                                    mainHandler.post { result.error("SCAN", t.message, null) }
+                                }
+                            }
                         }
                         "deletePath" -> {
                             val path = call.argument<String>("path")
@@ -760,22 +768,40 @@ class MainActivity : FlutterActivity() {
         return if (candidate.exists()) candidate.absolutePath else null
     }
 
-    private fun scanVideos(dir: File, depth: Int, hidden: Boolean, budget: Int = NativeConstants.SCAN_BUDGET): List<Map<String, Any?>> {
+    private fun scanVideos(
+        dir: File,
+        depth: Int,
+        hidden: Boolean,
+        budget: Int = NativeConstants.SCAN_BUDGET,
+        hiddenOnly: Boolean = false
+    ): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
-        scanVideosInto(dir, depth, hidden, out, intArrayOf(budget))
+        scanVideosInto(dir, depth, hidden, hiddenOnly, false, out, intArrayOf(budget))
         return out
     }
 
-    private fun scanVideosInto(dir: File, depth: Int, hidden: Boolean, out: ArrayList<Map<String, Any?>>, budget: IntArray) {
+    private fun scanVideosInto(
+        dir: File,
+        depth: Int,
+        hidden: Boolean,
+        hiddenOnly: Boolean,
+        insideHidden: Boolean,
+        out: ArrayList<Map<String, Any?>>,
+        budget: IntArray
+    ) {
         if (budget[0] <= 0 || depth < 0 || !dir.exists() || !dir.canRead()) return
         val files = dir.listFiles() ?: return
         for (f in files) {
             if (budget[0] <= 0) return
             if (f.isDirectory) {
                 if (shouldSkipDir(f, hidden)) continue
-                scanVideosInto(f, depth - 1, hidden, out, budget)
-            } else if (isVideoFile(f)) {
-                if (!hidden && f.name.startsWith(".")) continue
+                val childHidden = insideHidden || f.name.startsWith(".")
+                scanVideosInto(f, depth - 1, hidden, hiddenOnly, childHidden, out, budget)
+            } else {
+                val fileHidden = insideHidden || f.name.startsWith(".")
+                if (!hidden && fileHidden) continue
+                if (hiddenOnly && !fileHidden) continue
+                if (!isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
                 out.add(
                     mapOf(

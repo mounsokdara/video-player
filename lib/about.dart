@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import 'android_bridge.dart';
 import 'crash.dart';
 import 'developer_log.dart';
 import 'settings.dart';
@@ -111,6 +111,16 @@ class _AboutPageState extends State<AboutPage> {
               applicationName: AboutInfo.name,
               applicationVersion: version,
               applicationLegalese: '${AboutInfo.legalese}\nCreated by ${AboutInfo.author}.',
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.code),
+            title: const Text('Source on GitHub'),
+            subtitle: const Text('github.com/mounsokdara/video-player'),
+            onTap: () => launchUrl(
+              Uri.parse('https://github.com/mounsokdara/video-player'),
+              mode: LaunchMode.externalApplication,
             ),
           ),
           if (appSettings.developerEnabled) ...[

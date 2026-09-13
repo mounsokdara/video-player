@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'android_bridge.dart';
 import 'about.dart';
@@ -70,8 +69,6 @@ class SettingsHub extends StatelessWidget {
               title: const Text('About'),
               subtitle: const Text('Video Player 1.0.0_BETA'),
               onTap: () async {
-                final opened = await AndroidBridge.openAbout();
-                if (opened) return;
                 if (!context.mounted) return;
                 await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
                 onChanged();
@@ -170,7 +167,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             onChanged: (v) {
               set(() => s.showHiddenFolders = v);
               unawaited(() async {
-                await library.scan();
+                await library.applyHidden(v);
                 widget.onChanged();
               }());
             },
@@ -208,11 +205,6 @@ class _GeneralSettingsState extends State<GeneralSettings> {
             title: const Text('App permissions'),
             subtitle: const Text('Storage, notifications, display over other apps'),
             onTap: openAppSettings,
-          ),
-          ListTile(
-            title: const Text('Source on GitHub'),
-            subtitle: const Text('github.com/mounsokdara/video-player'),
-            onTap: () => launchUrl(Uri.parse('https://github.com/mounsokdara/video-player'), mode: LaunchMode.externalApplication),
           ),
         ],
       ),

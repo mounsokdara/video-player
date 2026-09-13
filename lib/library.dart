@@ -37,10 +37,6 @@ class LibraryService {
     permissionReady = pm.isAuth || pm.hasAccess;
 
     allFiles = await AndroidBridge.hasAllFilesAccess();
-    if (!allFiles) {
-      await Permission.manageExternalStorage.request();
-      allFiles = await AndroidBridge.hasAllFilesAccess();
-    }
     manageMedia = await AndroidBridge.canManageMedia();
   }
 
@@ -62,6 +58,31 @@ class LibraryService {
     _scanning = true;
     try {
       await _scanBody();
+    } finally {
+      _scanning = false;
+    }
+  }
+
+  Future<void> applyHidden(bool on) async {
+    settings.showHiddenFolders = on;
+    if (!on) {
+      videos.removeWhere((v) => _isHiddenPath(v.path));
+      _rebuildFolders();
+      return;
+    }
+    while (_scanning) {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+    _scanning = true;
+    try {
+      if (volumes.isEmpty) {
+        volumes
+          ..clear()
+          ..addAll(await AndroidBridge.listStorageVolumes());
+      }
+      final seen = videos.map((v) => v.path).toSet();
+      await _collectHidden(videos, seen);
+      _rebuildFolders();
     } finally {
       _scanning = false;
     }
@@ -149,31 +170,15 @@ class LibraryService {
 
     final nativeTargets = <StorageVolumeInfo>[
       ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
-      if (next.isEmpty || hidden) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
+      if (next.isEmpty) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
     ];
     for (final vol in nativeTargets) {
       if (vol.path.isEmpty) continue;
       final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: hidden);
-      for (final m in extra) {
-        final path = m['path'] as String? ?? '';
-        if (path.isEmpty || seen.contains(path)) continue;
-        if (!looksLikeVideo(path)) continue;
-        if (!hidden && _isHiddenPath(path)) continue;
-        seen.add(path);
-        final name = m['name'] as String? ?? p.basename(path);
-        next.add(
-          VideoItem(
-            id: path,
-            path: path,
-            title: name,
-            folder: m['folder'] as String? ?? p.dirname(path),
-            size: (m['size'] as num?)?.toInt() ?? 0,
-            modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
-            progress: settings.resumeMap[path] ?? 0,
-            bookmarked: settings.bookmarks.contains(path),
-          ),
-        );
-      }
+      _mergeNative(next, seen, extra);
+    }
+    if (hidden) {
+      await _collectHidden(next, seen);
     }
 
     videos
@@ -181,6 +186,37 @@ class LibraryService {
       ..addAll(next);
     _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k));
     _rebuildFolders();
+  }
+
+  Future<void> _collectHidden(List<VideoItem> into, Set<String> seen) async {
+    for (final vol in volumes) {
+      if (vol.path.isEmpty) continue;
+      final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: true, hiddenOnly: true);
+      _mergeNative(into, seen, extra);
+    }
+  }
+
+  void _mergeNative(List<VideoItem> into, Set<String> seen, List<Map<String, dynamic>> extra) {
+    for (final m in extra) {
+      final path = m['path'] as String? ?? '';
+      if (path.isEmpty || seen.contains(path)) continue;
+      if (!looksLikeVideo(path)) continue;
+      if (!settings.showHiddenFolders && _isHiddenPath(path)) continue;
+      seen.add(path);
+      final name = m['name'] as String? ?? p.basename(path);
+      into.add(
+        VideoItem(
+          id: path,
+          path: path,
+          title: name,
+          folder: m['folder'] as String? ?? p.dirname(path),
+          size: (m['size'] as num?)?.toInt() ?? 0,
+          modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
+          progress: settings.resumeMap[path] ?? 0,
+          bookmarked: settings.bookmarks.contains(path),
+        ),
+      );
+    }
   }
 
   String? _assetPath(AssetEntity a) {

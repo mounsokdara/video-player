@@ -73,11 +73,12 @@ class AndroidBridge {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> listVideoFiles(String path, {bool includeHidden = false}) async {
+  static Future<List<Map<String, dynamic>>> listVideoFiles(String path, {bool includeHidden = false, bool hiddenOnly = false}) async {
     try {
       final raw = await _ch.invokeMethod<List<dynamic>>('listVideoFiles', {
         'path': path,
         'includeHidden': includeHidden,
+        'hiddenOnly': hiddenOnly,
       }) ?? [];
       return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
@@ -425,14 +426,6 @@ class AndroidBridge {
     try {
       await _ch.invokeMethod('openCrashReport', {'report': report});
     } catch (_) {}
-  }
-
-  static Future<bool> openAbout() async {
-    try {
-      return await _ch.invokeMethod<bool>('openAbout') ?? false;
-    } catch (_) {
-      return false;
-    }
   }
 
   static Future<void> debugLog(String line) async {

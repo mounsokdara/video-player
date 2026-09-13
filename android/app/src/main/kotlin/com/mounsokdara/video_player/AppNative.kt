@@ -4,10 +4,6 @@ import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
-/**
- * Wires Flutter channels onto focused native controllers.
- * MainActivity stays the Flutter host; this class does not own playback UI.
- */
 class AppNative(
     private val activity: FlutterActivity,
     val systemBars: SystemBarController,
@@ -55,11 +51,6 @@ class AppNative(
                 val intent = Intent(activity, CrashReportActivity::class.java)
                 call.argument<String>("report")?.let { intent.putExtra(CrashReportActivity.EXTRA_REPORT, it) }
                 activity.startActivity(intent)
-                result.success(true)
-                return true
-            }
-            NativeConstants.Method.OPEN_ABOUT -> {
-                activity.startActivity(Intent(activity, AboutActivity::class.java))
                 result.success(true)
                 return true
             }
