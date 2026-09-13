@@ -553,9 +553,25 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     Widget frame;
     try {
       if (c != null && c.value.isInitialized) {
+        final vw = c.value.size.width.clamp(1, 4096).toDouble();
+        final vh = c.value.size.height.clamp(1, 4096).toDouble();
         frame = VideoPicture(
           looks: PictureLooks.current(),
-          child: VideoPlayer(c),
+          child: ClipRect(
+            child: FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: vw,
+                height: vh,
+                child: Transform.scale(
+                  scale: 1.03,
+                  filterQuality: FilterQuality.low,
+                  child: VideoPlayer(c),
+                ),
+              ),
+            ),
+          ),
         );
       } else {
         frame = ColoredBox(

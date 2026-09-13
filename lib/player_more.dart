@@ -108,7 +108,6 @@ Future<void> showPlayerMoreSheet({
                       ListTile(
                         leading: Icon(Icons.dashboard_customize_outlined, color: scheme.onSurface),
                         title: Text('Organize quick actions', style: TextStyle(color: scheme.onSurface)),
-                        subtitle: Text('Everything in More lives in this catalog', style: TextStyle(color: scheme.onSurfaceVariant)),
                         onTap: () async {
                           Navigator.pop(ctx);
                           await onOrganize();

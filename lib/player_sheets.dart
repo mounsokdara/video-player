@@ -370,11 +370,10 @@ extension PlayerSheets on _PlayerPageState {
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
-        Widget item(AspectMode m, String t, String s) => RadioListTile<AspectMode>(
+        Widget item(AspectMode m, String t) => RadioListTile<AspectMode>(
               value: m,
               groupValue: aspect,
               title: Text(t),
-              subtitle: Text(s),
               onChanged: (v) {
                 setState(() => aspect = v!);
                 if (appSettings.rememberAspect) {
@@ -389,16 +388,16 @@ extension PlayerSheets on _PlayerPageState {
             shrinkWrap: true,
             children: [
               const ListTile(title: Text('Screen mode', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-              item(AspectMode.fit, 'Fit', 'Contain the full frame'),
-              item(AspectMode.zoom, 'Zoomed full screen', 'Cover the display, crop overflow'),
-              item(AspectMode.original, 'Original size', '1:1 video pixels on this screen'),
-              item(AspectMode.stretch, 'Stretch', 'Fill without preserving ratio'),
-              item(AspectMode.ratio16_9, '16:9', 'Force 16:9'),
-              item(AspectMode.ratio4_3, '4:3', 'Force 4:3'),
-              item(AspectMode.ratio21_9, '21:9', 'Force 21:9'),
-              item(AspectMode.ratio2_35, '2.35:1', 'Cinema'),
-              item(AspectMode.ratio1_1, '1:1', 'Square'),
-              item(AspectMode.ratio9_16, '9:16', 'Portrait'),
+              item(AspectMode.fit, 'Fit'),
+              item(AspectMode.zoom, 'Zoomed full screen'),
+              item(AspectMode.original, 'Original size'),
+              item(AspectMode.stretch, 'Stretch'),
+              item(AspectMode.ratio16_9, '16:9'),
+              item(AspectMode.ratio4_3, '4:3'),
+              item(AspectMode.ratio21_9, '21:9'),
+              item(AspectMode.ratio2_35, '2.35:1'),
+              item(AspectMode.ratio1_1, '1:1'),
+              item(AspectMode.ratio9_16, '9:16'),
             ],
           ),
         );

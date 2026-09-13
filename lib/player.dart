@@ -802,16 +802,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               },
               child: ColoredBox(
                 color: Colors.black,
-                child: () {
-                  try {
-                    if (ready && c != null && c.value.isInitialized) {
-                      final w = size.width <= 0 ? 1.0 : size.width;
-                      final h = size.height <= 0 ? 1.0 : size.height;
-                      return _video(c, Size(w, h));
-                    }
-                  } catch (_) {}
-                  return const Center(child: CircularProgressIndicator());
-                }(),
+                child: ClipRect(
+                  child: () {
+                    try {
+                      if (ready && c != null && c.value.isInitialized) {
+                        final w = size.width <= 0 ? 1.0 : size.width;
+                        final h = size.height <= 0 ? 1.0 : size.height;
+                        return _video(c, Size(w, h));
+                      }
+                    } catch (_) {}
+                    return const Center(child: CircularProgressIndicator());
+                  }(),
+                ),
               ),
             ),
             PlayerRippleLayer(
@@ -971,10 +973,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         child: player,
       );
     }
-    return Center(
-      child: VideoPicture(
-        looks: PictureLooks.current(invert: invert, mirror: mirror, night: night),
-        child: player,
+    return ClipRect(
+      child: Center(
+        child: VideoPicture(
+          looks: PictureLooks.current(invert: invert, mirror: mirror, night: night),
+          child: player,
+        ),
+      ),
+    );
+  }
+
+  Widget _hideDecoderPad(Widget child, double vw, double vh) {
+    final sx = vw <= 1 ? 1.0 : (vw + 16) / vw;
+    final sy = vh <= 1 ? 1.0 : (vh + 16) / vh;
+    final scale = math.max(sx, sy).clamp(1.0, 1.06).toDouble();
+    return ClipRect(
+      child: Transform.scale(
+        scale: scale,
+        filterQuality: FilterQuality.low,
+        child: child,
       ),
     );
   }
@@ -987,36 +1004,47 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       vh = screen.height.clamp(1, 10000).toDouble();
     }
     if (screen.width < 2 || screen.height < 2) {
-      return child;
+      return ClipRect(child: child);
     }
+    child = _hideDecoderPad(child, vw, vh);
     switch (aspect) {
       case AspectMode.fit:
-        return FittedBox(fit: BoxFit.contain, child: SizedBox(width: vw, height: vh, child: child));
+        return FittedBox(
+          fit: BoxFit.contain,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(width: vw, height: vh, child: child),
+        );
       case AspectMode.zoom:
-        return FittedBox(fit: BoxFit.cover, child: SizedBox(width: vw, height: vh, child: child));
+        return FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(width: vw, height: vh, child: child),
+        );
       case AspectMode.stretch:
-        return SizedBox(width: screen.width, height: screen.height, child: child);
+        return ClipRect(child: SizedBox(width: screen.width, height: screen.height, child: child));
       case AspectMode.original:
         final scale = math.min(1.0, math.min(screen.width / vw, screen.height / vh));
         return Center(
-          child: SizedBox(
-            width: vw * scale,
-            height: vh * scale,
-            child: child,
+          child: ClipRect(
+            child: SizedBox(
+              width: vw * scale,
+              height: vh * scale,
+              child: child,
+            ),
           ),
         );
       case AspectMode.ratio16_9:
-        return AspectRatio(aspectRatio: 16 / 9, child: child);
+        return Center(child: AspectRatio(aspectRatio: 16 / 9, child: ClipRect(child: child)));
       case AspectMode.ratio4_3:
-        return AspectRatio(aspectRatio: 4 / 3, child: child);
+        return Center(child: AspectRatio(aspectRatio: 4 / 3, child: ClipRect(child: child)));
       case AspectMode.ratio21_9:
-        return AspectRatio(aspectRatio: 21 / 9, child: child);
+        return Center(child: AspectRatio(aspectRatio: 21 / 9, child: ClipRect(child: child)));
       case AspectMode.ratio1_1:
-        return AspectRatio(aspectRatio: 1, child: child);
+        return Center(child: AspectRatio(aspectRatio: 1, child: ClipRect(child: child)));
       case AspectMode.ratio2_35:
-        return AspectRatio(aspectRatio: 2.35, child: child);
+        return Center(child: AspectRatio(aspectRatio: 2.35, child: ClipRect(child: child)));
       case AspectMode.ratio9_16:
-        return AspectRatio(aspectRatio: 9 / 16, child: child);
+        return Center(child: AspectRatio(aspectRatio: 9 / 16, child: ClipRect(child: child)));
     }
   }
 

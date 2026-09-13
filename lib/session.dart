@@ -103,8 +103,7 @@ class PlaybackSession {
 
   static bool _awkwardSize(int w, int h) {
     if (w <= 0 || h <= 0) return false;
-    if (w < 64 || h < 64) return true;
-    return w % 16 != 0 || h % 16 != 0;
+    return w < 64 || h < 64;
   }
 
   static bool isCodecError(String msg) {

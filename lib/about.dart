@@ -85,8 +85,6 @@ class _AboutPageState extends State<AboutPage> {
           ),
           const SizedBox(height: 16),
           Text(AboutInfo.name, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 4),
-          Text(AboutInfo.legalese, style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 20),
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -97,15 +95,14 @@ class _AboutPageState extends State<AboutPage> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.tag),
-            title: const Text('Build version'),
-            subtitle: Text('$version · ${AboutInfo.displayVersion}'),
+            title: const Text('Version'),
+            subtitle: const Text(AboutInfo.displayVersion),
             onTap: _onVersionTap,
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.balance_outlined),
             title: const Text('Open source licenses'),
-            subtitle: const Text('Flutter, Dart, ExoPlayer, AndroidX, Kotlin'),
             onTap: () => showLicensePage(
               context: context,
               applicationName: AboutInfo.name,
