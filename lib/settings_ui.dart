@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'android_bridge.dart';
 import 'about.dart';
@@ -202,7 +203,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
           ),
           ListTile(
             title: const Text('App permissions'),
-            subtitle: const Text('Storage, notifications, display over other apps'),
+            subtitle: const Text('Open system settings for this app'),
             onTap: openAppSettings,
           ),
         ],
