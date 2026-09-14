@@ -555,6 +555,10 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       if (c != null && c.value.isInitialized) {
         final vw = c.value.size.width.clamp(1, 4096).toDouble();
         final vh = c.value.size.height.clamp(1, 4096).toDouble();
+        var pad = PlaybackSession.videoPad;
+        if (pad.visW < 2 || pad.visH < 2) {
+          pad = VideoPad.resolve(size: Size(vw, vh));
+        }
         frame = VideoPicture(
           looks: PictureLooks.current(),
           child: ClipRect(
@@ -564,11 +568,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
               child: SizedBox(
                 width: vw,
                 height: vh,
-                child: Transform.scale(
-                  scale: 1.03,
-                  filterQuality: FilterQuality.low,
-                  child: VideoPlayer(c),
-                ),
+                child: DecoderPadClip(pad: pad, child: VideoPlayer(c)),
               ),
             ),
           ),

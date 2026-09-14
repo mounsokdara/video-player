@@ -753,13 +753,12 @@ class VideosHub extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pad = MediaQuery.viewPaddingOf(context);
-    return RefreshIndicator(
+    return LibraryRefresh(
       displacement: 40,
       edgeOffset: pad.top + kToolbarHeight,
-      strokeWidth: 2.4,
-      notificationPredicate: (n) => n.depth <= 1,
       onRefresh: onRefresh,
       child: NestedScrollView(
+      physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
       headerSliverBuilder: (context, inner) {
         return [
           SliverAppBar(
@@ -841,13 +840,13 @@ class VideosHub extends StatelessWidget {
       body: loading
           ? ListView(
               key: const ValueKey('videos-loading'),
-              physics: const AlwaysScrollableScrollPhysics(),
+              physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
               children: const [SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))],
             )
           : library.videos.isEmpty
               ? CustomScrollView(
                   key: const ValueKey('empty-library-scroll'),
-                  physics: const AlwaysScrollableScrollPhysics(),
+                  physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
                   slivers: [
                     SliverFillRemaining(
                       hasScrollBody: false,
@@ -858,7 +857,7 @@ class VideosHub extends StatelessWidget {
               : items.isEmpty
                   ? CustomScrollView(
                       key: const ValueKey('no-matches-scroll'),
-                      physics: const AlwaysScrollableScrollPhysics(),
+                      physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
                       slivers: [
                         SliverFillRemaining(
                           hasScrollBody: false,
@@ -1016,13 +1015,11 @@ class FoldersHub extends StatelessWidget {
     final roots = library.volumes;
     final path = folderPath;
     if (path == null) {
-      return RefreshIndicator(
+      return LibraryRefresh(
         displacement: 52,
-        strokeWidth: 2.4,
-        notificationPredicate: (n) => n.depth <= 1,
         onRefresh: onRefresh,
         child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
+        physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
         slivers: [
           SliverAppBar(
             pinned: true,
@@ -1167,13 +1164,12 @@ class FoldersHub extends StatelessWidget {
             ),
           ),
         Expanded(
-          child: RefreshIndicator(
+          child: LibraryRefresh(
             displacement: 40,
             edgeOffset: 8,
-            strokeWidth: 2.4,
             onRefresh: onRefresh,
             child: ListView.builder(
-            physics: const ClampingScrollPhysics(),
+            physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
             padding: EdgeInsets.only(bottom: pad.bottom + 16),
             itemCount: ents.length + 1,
             itemBuilder: (_, i) {

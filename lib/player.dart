@@ -376,6 +376,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_applyEq());
       _applyRotation();
       if (mounted && gen == _playerGen) setState(() => ready = true);
+      unawaited(PlaybackSession.loadPad(c).then((_) {
+        if (mounted && gen == _playerGen) setState(() {});
+      }));
       _armHide();
     } catch (e, s) {
       await CrashLog.breadcrumb('Open failed ${item.path}: $e');
@@ -849,7 +852,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   child: _HudChip(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))),
                 ),
               ),
-            if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
+            if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview && !(showUi && !locked))
               Positioned(
                 left: 0,
                 right: 0,
@@ -960,7 +963,26 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return const SizedBox.expand();
     }
     Widget player = VideoPlayer(key: ValueKey(_playerGen), c);
-    player = _fit(player, c, screen);
+    var vw = c.value.size.width;
+    var vh = c.value.size.height;
+    if (vw <= 1 || vh <= 1) {
+      vw = screen.width.clamp(1, 10000).toDouble();
+      vh = screen.height.clamp(1, 10000).toDouble();
+    }
+    var pad = PlaybackSession.videoPad;
+    if (pad.visW < 2 || pad.visH < 2) {
+      pad = VideoPad.resolve(size: Size(vw, vh));
+    } else if ((pad.visW - vw).abs() > 1 || (pad.visH - vh).abs() > 1) {
+      pad = VideoPad.resolve(size: Size(vw, vh), native: {
+        'codedW': pad.codedW,
+        'codedH': pad.codedH,
+        'sarNum': pad.sarNum,
+        'sarDen': pad.sarDen,
+        'cropL': pad.cropL,
+        'cropT': pad.cropT,
+      });
+    }
+    player = VlcSurface(pad: pad, screen: screen, mode: aspect, child: player);
     final w = screen.width <= 0 ? 1.0 : screen.width;
     final h = screen.height <= 0 ? 1.0 : screen.height;
     player = SizedBox(width: w, height: h, child: player);
@@ -981,71 +1003,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         ),
       ),
     );
-  }
-
-  Widget _hideDecoderPad(Widget child, double vw, double vh) {
-    final sx = vw <= 1 ? 1.0 : (vw + 16) / vw;
-    final sy = vh <= 1 ? 1.0 : (vh + 16) / vh;
-    final scale = math.max(sx, sy).clamp(1.0, 1.06).toDouble();
-    return ClipRect(
-      child: Transform.scale(
-        scale: scale,
-        filterQuality: FilterQuality.low,
-        child: child,
-      ),
-    );
-  }
-
-  Widget _fit(Widget child, VideoPlayerController c, Size screen) {
-    var vw = c.value.size.width;
-    var vh = c.value.size.height;
-    if (vw <= 1 || vh <= 1) {
-      vw = screen.width.clamp(1, 10000).toDouble();
-      vh = screen.height.clamp(1, 10000).toDouble();
-    }
-    if (screen.width < 2 || screen.height < 2) {
-      return ClipRect(child: child);
-    }
-    child = _hideDecoderPad(child, vw, vh);
-    switch (aspect) {
-      case AspectMode.fit:
-        return FittedBox(
-          fit: BoxFit.contain,
-          clipBehavior: Clip.hardEdge,
-          child: SizedBox(width: vw, height: vh, child: child),
-        );
-      case AspectMode.zoom:
-        return FittedBox(
-          fit: BoxFit.cover,
-          clipBehavior: Clip.hardEdge,
-          child: SizedBox(width: vw, height: vh, child: child),
-        );
-      case AspectMode.stretch:
-        return ClipRect(child: SizedBox(width: screen.width, height: screen.height, child: child));
-      case AspectMode.original:
-        final scale = math.min(1.0, math.min(screen.width / vw, screen.height / vh));
-        return Center(
-          child: ClipRect(
-            child: SizedBox(
-              width: vw * scale,
-              height: vh * scale,
-              child: child,
-            ),
-          ),
-        );
-      case AspectMode.ratio16_9:
-        return Center(child: AspectRatio(aspectRatio: 16 / 9, child: ClipRect(child: child)));
-      case AspectMode.ratio4_3:
-        return Center(child: AspectRatio(aspectRatio: 4 / 3, child: ClipRect(child: child)));
-      case AspectMode.ratio21_9:
-        return Center(child: AspectRatio(aspectRatio: 21 / 9, child: ClipRect(child: child)));
-      case AspectMode.ratio1_1:
-        return Center(child: AspectRatio(aspectRatio: 1, child: ClipRect(child: child)));
-      case AspectMode.ratio2_35:
-        return Center(child: AspectRatio(aspectRatio: 2.35, child: ClipRect(child: child)));
-      case AspectMode.ratio9_16:
-        return Center(child: AspectRatio(aspectRatio: 9 / 16, child: ClipRect(child: child)));
-    }
   }
 
   Widget _titleBtn(String id) {

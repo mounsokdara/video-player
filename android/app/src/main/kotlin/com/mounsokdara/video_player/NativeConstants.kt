@@ -27,14 +27,21 @@ object NativeConstants {
     val TEN_BAND_HZ = intArrayOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
     val VIDEO_EXT = setOf(
-        "mp4", "mkv", "webm", "avi", "mov", "m4v", "3gp", "flv", "wmv",
-        "mpeg", "mpg", "m2ts", "mts", "vob", "f4v", "ogv"
+        "mp4", "mkv", "webm", "avi", "mov", "m4v", "3gp", "3gpp", "3g2", "3gp2",
+        "flv", "wmv", "asf", "mpeg", "mpg", "mpe", "m1v", "m2v", "mpv", "mp2v",
+        "m2ts", "mts", "m2t", "ts", "tts", "vob", "f4v", "ogv", "ogm", "ogx",
+        "rm", "rmvb", "divx", "xvid", "tod", "vro", "nsv", "nuv", "rec", "wtv",
+        "amv", "dv", "mxf", "gxf", "h264", "h265", "hevc", "264", "265", "qt",
+        "mp4v", "mpeg1", "mpeg2", "mpeg4"
     )
-    val TEXT_EXT = setOf(
-        "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "txt", "md", "css",
+    val SKIP_EXT = setOf(
+        "tsx", "js", "jsx", "mjs", "cjs", "json", "txt", "md", "css",
         "html", "htm", "xml", "svg", "map", "yml", "yaml", "py", "java",
         "kt", "dart", "c", "h", "cpp", "go", "rs", "sh", "log", "csv",
-        "toml", "ini", "cfg", "d.ts"
+        "toml", "ini", "cfg",
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "ico", "tif", "tiff",
+        "mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "opus", "oga", "aiff",
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "apk", "zip", "rar", "7z"
     )
 
     object Orient {
@@ -60,6 +67,7 @@ object NativeConstants {
         const val APPLY_EQUALIZER = "applyEqualizer"
         const val APPLY_DECODER = "applyDecoder"
         const val SET_DECODER_MODE = "setDecoderMode"
+        const val VIDEO_LAYOUT = "videoLayout"
         const val OPEN_CRASH_REPORT = "openCrashReport"
         const val DEBUG_LOG = "debugLog"
     }

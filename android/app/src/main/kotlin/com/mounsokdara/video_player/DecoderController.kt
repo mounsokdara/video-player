@@ -1,12 +1,15 @@
 package com.mounsokdara.video_player
 
 import android.content.Context
+import android.media.MediaFormat
 import android.view.Surface
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Modifier
 import java.lang.reflect.Proxy
+import kotlin.math.abs
+import kotlin.math.max
 
 class DecoderController(
     private val activity: FlutterActivity,
@@ -87,6 +90,119 @@ class DecoderController(
         } catch (t: Throwable) {
             writeCrash("applyDecoder: ${t.message}\n${android.util.Log.getStackTraceString(t)}")
             false
+        }
+    }
+
+    fun layout(): Map<String, Any> {
+        val out = HashMap<String, Any>()
+        try {
+            val found = findWrapper() ?: return out
+            val exo = found.second
+            var visW = 0
+            var visH = 0
+            var codedW = 0
+            var codedH = 0
+            var sarNum = 1
+            var sarDen = 1
+            var cropL = 0
+            var cropT = 0
+            var cropR = -1
+            var cropB = -1
+
+            invokeNoArg(exo, "getVideoSize")?.let { vs ->
+                visW = numberField(vs, "width")
+                visH = numberField(vs, "height")
+                val sar = floatField(vs, "pixelWidthHeightRatio")
+                if (sar > 0f && abs(sar - 1f) > 0.001f) {
+                    sarNum = (sar * 1000f).toInt().coerceAtLeast(1)
+                    sarDen = 1000
+                }
+            }
+            invokeNoArg(exo, "getVideoFormat")?.let { fmt ->
+                if (visW <= 0) visW = numberField(fmt, "width")
+                if (visH <= 0) visH = numberField(fmt, "height")
+            }
+
+            val count = (invokeNoArg(exo, "getRendererCount") as? Number)?.toInt() ?: 0
+            for (i in 0 until count) {
+                val type = try {
+                    (exo.javaClass.getMethod("getRendererType", Int::class.javaPrimitiveType)
+                        .invoke(exo, i) as? Number)?.toInt()
+                } catch (_: Throwable) {
+                    null
+                } ?: continue
+                if (type != 2) continue
+                val renderer = try {
+                    exo.javaClass.getMethod("getRenderer", Int::class.javaPrimitiveType).invoke(exo, i)
+                } catch (_: Throwable) {
+                    null
+                } ?: continue
+                val format = codecOutputFormat(renderer) ?: continue
+                fun gi(key: String): Int? {
+                    return if (format.containsKey(key)) format.getInteger(key) else null
+                }
+                gi("crop-left")?.let { cropL = it }
+                gi("crop-top")?.let { cropT = it }
+                gi("crop-right")?.let { cropR = it }
+                gi("crop-bottom")?.let { cropB = it }
+                gi(MediaFormat.KEY_WIDTH)?.let { codedW = max(codedW, it) }
+                gi(MediaFormat.KEY_HEIGHT)?.let { codedH = max(codedH, it) }
+                gi("stride")?.let { if (it > codedW) codedW = it }
+                gi("slice-height")?.let { if (it > codedH) codedH = it }
+            }
+
+            if (cropR >= cropL && cropB >= cropT) {
+                val cw = cropR - cropL + 1
+                val ch = cropB - cropT + 1
+                if (cw > 0 && ch > 0) {
+                    visW = cw
+                    visH = ch
+                }
+                if (codedW < cropR + 1) codedW = cropR + 1
+                if (codedH < cropB + 1) codedH = cropB + 1
+            }
+            if (codedW < visW) codedW = visW
+            if (codedH < visH) codedH = visH
+            if (visW > 0 && visH > 0) {
+                out["visW"] = visW
+                out["visH"] = visH
+                out["codedW"] = codedW
+                out["codedH"] = codedH
+                out["cropL"] = cropL
+                out["cropT"] = cropT
+                out["sarNum"] = sarNum
+                out["sarDen"] = sarDen
+            }
+            breadcrumb("layout vis=${visW}x${visH} coded=${codedW}x${codedH} sar=$sarNum:$sarDen")
+        } catch (t: Throwable) {
+            breadcrumb("layout: ${t.message}")
+        }
+        return out
+    }
+
+    private fun codecOutputFormat(renderer: Any): MediaFormat? {
+        val codec = fieldValue(renderer, "codec") ?: return null
+        invokeNoArg(codec, "getOutputFormat")?.let { if (it is MediaFormat) return it }
+        fieldValue(codec, "outputFormat")?.let { if (it is MediaFormat) return it }
+        fieldValue(renderer, "codecOutputMediaFormat")?.let { if (it is MediaFormat) return it }
+        return null
+    }
+
+    private fun numberField(obj: Any, name: String): Int {
+        return try {
+            val v = findField(obj, name)?.get(obj)
+            (v as? Number)?.toInt() ?: 0
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
+    private fun floatField(obj: Any, name: String): Float {
+        return try {
+            val v = findField(obj, name)?.get(obj)
+            (v as? Number)?.toFloat() ?: 1f
+        } catch (_: Throwable) {
+            1f
         }
     }
 

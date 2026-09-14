@@ -82,6 +82,36 @@ void showAllFilesFailed(BuildContext context, String action) {
   );
 }
 
+class LibraryRefresh extends StatelessWidget {
+  const LibraryRefresh({
+    super.key,
+    required this.onRefresh,
+    required this.child,
+    this.edgeOffset = 0,
+    this.displacement = 40,
+  });
+
+  final Future<void> Function() onRefresh;
+  final Widget child;
+  final double edgeOffset;
+  final double displacement;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return RefreshIndicator(
+      color: scheme.primary,
+      backgroundColor: scheme.surfaceContainerHigh,
+      displacement: displacement,
+      edgeOffset: edgeOffset,
+      strokeWidth: 2.4,
+      notificationPredicate: (n) => n.depth <= 1,
+      onRefresh: onRefresh,
+      child: child,
+    );
+  }
+}
+
 class ResumeBar extends StatelessWidget {
   const ResumeBar({super.key, required this.progress});
   final double progress;

@@ -285,6 +285,14 @@ class AndroidBridge {
     }
   }
 
+  static Future<Map<String, dynamic>?> videoLayout() async {
+    try {
+      final raw = await _ch.invokeMethod('videoLayout');
+      if (raw is Map) return Map<String, dynamic>.from(raw);
+    } catch (_) {}
+    return null;
+  }
+
   static Future<void> setStereoVolume(double left, double right) async {
     try {
       await _ch.invokeMethod('setStereoVolume', {

@@ -308,6 +308,9 @@ class MainActivity : FlutterActivity() {
                         "applyDecoder" -> {
                             result.success(decoder.apply())
                         }
+                        "videoLayout" -> {
+                            result.success(decoder.layout())
+                        }
                         "setStereoVolume" -> {
                             val left = (call.argument<Double>("left") ?: 1.0).toFloat()
                             val right = (call.argument<Double>("right") ?: 1.0).toFloat()
@@ -638,8 +641,8 @@ class MainActivity : FlutterActivity() {
             val file = File(path)
             if (file.exists()) retriever.setDataSource(path) else retriever.setDataSource(this, Uri.parse(path))
             fun meta(key: Int) = retriever.extractMetadata(key)
-            val width = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val height = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            var width = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            var height = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val duration = meta(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             val bitrate = meta(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
             val mime = meta(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
@@ -659,6 +662,7 @@ class MainActivity : FlutterActivity() {
             map["mime"] = mime
             map["fps"] = fps
             map["frameCount"] = frames
+            mergeExtractor(path, map)
         } catch (_: Exception) {
         } finally {
             try {
@@ -667,6 +671,50 @@ class MainActivity : FlutterActivity() {
             }
         }
         return map
+    }
+
+    private fun mergeExtractor(path: String, map: HashMap<String, Any?>) {
+        val extractor = MediaExtractor()
+        try {
+            if (path.startsWith("content:")) extractor.setDataSource(this, Uri.parse(path), null)
+            else extractor.setDataSource(path)
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/")) continue
+                fun gi(key: String) = if (format.containsKey(key)) format.getInteger(key) else null
+                val w = gi(MediaFormat.KEY_WIDTH)
+                val h = gi(MediaFormat.KEY_HEIGHT)
+                if ((map["width"] as? Int ?: 0) <= 0 && w != null) map["width"] = w
+                if ((map["height"] as? Int ?: 0) <= 0 && h != null) map["height"] = h
+                val cropL = gi("crop-left") ?: 0
+                val cropT = gi("crop-top") ?: 0
+                val cropR = gi("crop-right")
+                val cropB = gi("crop-bottom")
+                var codedW = w ?: (map["width"] as? Int ?: 0)
+                var codedH = h ?: (map["height"] as? Int ?: 0)
+                if (cropR != null && cropR >= cropL) codedW = maxOf(codedW, cropR + 1)
+                if (cropB != null && cropB >= cropT) codedH = maxOf(codedH, cropB + 1)
+                map["codedW"] = codedW
+                map["codedH"] = codedH
+                if (Build.VERSION.SDK_INT >= 29) {
+                    val sarW = gi("sar-width")
+                    val sarH = gi("sar-height")
+                    if (sarW != null && sarH != null && sarW > 0 && sarH > 0) {
+                        map["sarNum"] = sarW
+                        map["sarDen"] = sarH
+                    }
+                }
+                map["codec"] = mime
+                break
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun handleIncoming(intent: Intent?) {
@@ -1499,12 +1547,17 @@ class MainActivity : FlutterActivity() {
         }
 
         fun isVideoFile(f: File): Boolean {
+            if (!f.isFile || f.length() <= 0L) return false
             val name = f.name.lowercase()
             if (name.endsWith(".d.ts")) return false
             val ext = f.extension.lowercase()
             if (ext == "ts") return isMpegTs(f)
-            if (ext in NativeConstants.TEXT_EXT) return false
-            return ext in NativeConstants.VIDEO_EXT
+            if (ext in NativeConstants.VIDEO_EXT) return true
+            if (ext in NativeConstants.SKIP_EXT) return false
+            if (isNonVideoMagic(f)) return false
+            if (hasVideoMagic(f)) return true
+            if (f.length() < 8192L) return false
+            return hasVideoTrack(f)
         }
 
         private fun isMpegTs(f: File): Boolean {
@@ -1513,6 +1566,75 @@ class MainActivity : FlutterActivity() {
                 f.inputStream().use { it.read() == 0x47 }
             } catch (_: Exception) {
                 false
+            }
+        }
+
+        private fun isNonVideoMagic(f: File): Boolean {
+            return try {
+                f.inputStream().use { ins ->
+                    val b = ByteArray(12)
+                    val n = ins.read(b)
+                    if (n < 3) return true
+                    if (b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() && b[2] == 0xFF.toByte()) return true
+                    if (n >= 8 && b[0] == 0x89.toByte() && b[1] == 0x50.toByte() && b[2] == 0x4E.toByte() && b[3] == 0x47.toByte()) return true
+                    if (b[0] == 0x47.toByte() && b[1] == 0x49.toByte() && b[2] == 0x46.toByte()) return true
+                    if (n >= 4 && b[0] == 0x25.toByte() && b[1] == 0x50.toByte() && b[2] == 0x44.toByte() && b[3] == 0x46.toByte()) return true
+                    if (n >= 4 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte() && b[2] == 0x03.toByte() && b[3] == 0x04.toByte()) return true
+                    if (n >= 4 && b[0] == 0x7F.toByte() && b[1] == 0x45.toByte() && b[2] == 0x4C.toByte() && b[3] == 0x46.toByte()) return true
+                    if (n >= 12 && b[0] == 0x52.toByte() && b[1] == 0x49.toByte() && b[2] == 0x46.toByte() && b[3] == 0x46.toByte()) {
+                        val kind = String(b, 8, 4, Charsets.US_ASCII)
+                        if (kind == "WAVE" || kind == "WEBP") return true
+                    }
+                    if (n >= 3 && b[0] == 0x49.toByte() && b[1] == 0x44.toByte() && b[2] == 0x33.toByte()) return true
+                    if (n >= 4 && b[0] == 0x66.toByte() && b[1] == 0x4C.toByte() && b[2] == 0x61.toByte() && b[3] == 0x43.toByte()) return true
+                    if (n >= 4 && b[0] == 0x4F.toByte() && b[1] == 0x67.toByte() && b[2] == 0x67.toByte() && b[3] == 0x53.toByte()) return true
+                    false
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun hasVideoMagic(f: File): Boolean {
+            return try {
+                f.inputStream().use { ins ->
+                    val b = ByteArray(16)
+                    val n = ins.read(b)
+                    if (n < 4) return false
+                    if (n >= 8 && b[4] == 0x66.toByte() && b[5] == 0x74.toByte() && b[6] == 0x79.toByte() && b[7] == 0x70.toByte()) return true
+                    if (b[0] == 0x1A.toByte() && b[1] == 0x45.toByte() && b[2] == 0xDF.toByte() && b[3] == 0xA3.toByte()) return true
+                    if (n >= 12 && b[0] == 0x52.toByte() && b[1] == 0x49.toByte() && b[2] == 0x46.toByte() && b[3] == 0x46.toByte()) {
+                        val kind = String(b, 8, 4, Charsets.US_ASCII)
+                        if (kind == "AVI " || kind == "AVIX") return true
+                    }
+                    if (b[0] == 0x46.toByte() && b[1] == 0x4C.toByte() && b[2] == 0x56.toByte()) return true
+                    if (b[0] == 0.toByte() && b[1] == 0.toByte() && b[2] == 1.toByte() &&
+                        (b[3] == 0xBA.toByte() || b[3] == 0xB3.toByte())) return true
+                    if (n >= 8 && b[0] == 0x30.toByte() && b[1] == 0x26.toByte() && b[2] == 0xB2.toByte() && b[3] == 0x75.toByte()) return true
+                    if (b[0] == 0x47.toByte() && f.length() >= 188L) return isMpegTs(f)
+                    false
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun hasVideoTrack(f: File): Boolean {
+            val extractor = MediaExtractor()
+            return try {
+                extractor.setDataSource(f.absolutePath)
+                for (i in 0 until extractor.trackCount) {
+                    val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("video/")) return true
+                }
+                false
+            } catch (_: Exception) {
+                false
+            } finally {
+                try {
+                    extractor.release()
+                } catch (_: Exception) {
+                }
             }
         }
     }

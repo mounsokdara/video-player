@@ -432,19 +432,56 @@ const videoExtensions = {
   '.mov',
   '.m4v',
   '.3gp',
+  '.3gpp',
+  '.3g2',
+  '.3gp2',
   '.flv',
   '.wmv',
+  '.asf',
   '.mpeg',
   '.mpg',
+  '.mpe',
+  '.m1v',
+  '.m2v',
+  '.mpv',
+  '.mp2v',
   '.m2ts',
   '.mts',
+  '.m2t',
   '.vob',
   '.f4v',
   '.ogv',
+  '.ogm',
+  '.ogx',
+  '.rm',
+  '.rmvb',
+  '.divx',
+  '.xvid',
+  '.tod',
+  '.vro',
+  '.nsv',
+  '.nuv',
+  '.rec',
+  '.wtv',
+  '.amv',
+  '.dv',
+  '.mxf',
+  '.gxf',
+  '.h264',
+  '.h265',
+  '.hevc',
+  '.264',
+  '.265',
+  '.qt',
+  '.mp4v',
+  '.mpeg1',
+  '.mpeg2',
+  '.mpeg4',
+  '.ts',
+  '.tts',
 };
 
-const textExtensions = {
-  '.ts',
+const skipExtensions = {
   '.tsx',
   '.js',
   '.jsx',
@@ -475,6 +512,38 @@ const textExtensions = {
   '.csv',
   '.toml',
   '.ini',
+  '.cfg',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.heic',
+  '.heif',
+  '.ico',
+  '.tif',
+  '.tiff',
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.ogg',
+  '.m4a',
+  '.aac',
+  '.wma',
+  '.opus',
+  '.oga',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.apk',
+  '.zip',
+  '.rar',
+  '.7z',
 };
 
 bool looksLikeVideo(String path, {String? mime}) {
@@ -486,20 +555,47 @@ bool looksLikeVideo(String path, {String? mime}) {
   }
   final name = p.basename(path).toLowerCase();
   if (name.endsWith('.d.ts')) return false;
+  try {
+    final f = File(path);
+    if (f.existsSync() && f.lengthSync() <= 0) return false;
+  } catch (_) {}
   final ext = p.extension(name).toLowerCase();
   final m = (mime ?? '').toLowerCase();
-  if (m.startsWith('text/')) return false;
-  if (m.contains('javascript') || m.contains('json') || m.contains('typescript')) return false;
   if (m.startsWith('video/')) {
-    if (ext == '.tsx' || ext == '.jsx') return false;
     if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
       return _isMpegTsFile(path);
     }
     return true;
   }
+  if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('text/')) return false;
   if (ext == '.ts') return _isMpegTsFile(path);
-  if (textExtensions.contains(ext)) return false;
-  return videoExtensions.contains(ext);
+  if (videoExtensions.contains(ext)) return true;
+  if (skipExtensions.contains(ext)) return false;
+  return _hasVideoMagic(path);
+}
+
+bool _hasVideoMagic(String path) {
+  try {
+    final f = File(path);
+    if (!f.existsSync() || f.lengthSync() < 4) return false;
+    final raf = f.openSync();
+    final b = raf.readSync(16);
+    raf.closeSync();
+    if (b.length < 4) return false;
+    if (b.length >= 8 && b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 && b[7] == 0x70) return true;
+    if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return true;
+    if (b.length >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46) {
+      final kind = String.fromCharCodes(b.sublist(8, 12));
+      if (kind == 'AVI ' || kind == 'AVIX') return true;
+    }
+    if (b[0] == 0x46 && b[1] == 0x4C && b[2] == 0x56) return true;
+    if (b[0] == 0 && b[1] == 0 && b[2] == 1 && (b[3] == 0xBA || b[3] == 0xB3)) return true;
+    if (b.length >= 8 && b[0] == 0x30 && b[1] == 0x26 && b[2] == 0xB2 && b[3] == 0x75) return true;
+    if (b[0] == 0x47) return _isMpegTsFile(path);
+    return false;
+  } catch (_) {
+    return false;
+  }
 }
 
 bool _isMpegTsFile(String path) {

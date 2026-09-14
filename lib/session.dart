@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
@@ -8,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import 'android_bridge.dart';
 import 'crash.dart';
 import 'models.dart';
+import 'player_picture.dart';
 import 'settings.dart';
 
 class MiniMemory {
@@ -49,6 +51,7 @@ class PlaybackSession {
   static const _replayAfter = Duration(seconds: 3);
 
   static bool usingSoftware = false;
+  static VideoPad videoPad = VideoPad.none;
 
   static bool get active => keepAlive && controller != null && item != null;
 
@@ -103,7 +106,9 @@ class PlaybackSession {
 
   static bool _awkwardSize(int w, int h) {
     if (w <= 0 || h <= 0) return false;
-    return w < 64 || h < 64;
+    if (w < 64 || h < 64) return true;
+    if (w.isOdd || h.isOdd) return true;
+    return false;
   }
 
   static bool isCodecError(String msg) {
@@ -133,12 +138,32 @@ class PlaybackSession {
       if (c.value.hasError) {
         throw StateError(c.value.errorDescription ?? 'Source error');
       }
+      await loadPad(c);
       return c;
     } catch (e) {
       try {
         await c.dispose();
       } catch (_) {}
       rethrow;
+    }
+  }
+
+  static Future<void> loadPad(VideoPlayerController c) async {
+    Size size;
+    try {
+      size = c.value.size;
+    } catch (_) {
+      size = Size.zero;
+    }
+    for (var i = 0; i < 6; i++) {
+      final map = await AndroidBridge.videoLayout();
+      try {
+        size = c.value.size;
+      } catch (_) {}
+      videoPad = VideoPad.resolve(size: size, native: map);
+      if (map != null && ((map['visW'] as num?)?.toDouble() ?? 0) >= 2) break;
+      if (i == 5) break;
+      await Future<void>.delayed(Duration(milliseconds: 40 * (i + 1)));
     }
   }
 
@@ -237,6 +262,7 @@ class PlaybackSession {
     sleepLeft = null;
     MiniMemory.reset();
     usingSoftware = false;
+    videoPad = VideoPad.none;
     final dying = controller;
     controller = null;
     item = null;
