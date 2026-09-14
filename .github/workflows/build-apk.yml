@@ -42,7 +42,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            Speed now drives video and audio together. Pitch shift chipmunks; off keeps tone.
-            Hidden videos get thumbnails. Library refreshes when files are added, changed, or deleted.
+            Background play keeps audio going after you leave the app.
+            More uses the default Material 3 ripple.
 
             Uninstall the previous APK before installing this one.

@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -25,6 +27,7 @@ class PlaybackService : Service() {
     private var playing: Boolean = true
     private var positionMs: Int = 0
     private var durationMs: Int = 0
+    private var wakeLock: PowerManager.WakeLock? = null
     private val ticker = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -40,26 +43,31 @@ class PlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW).apply {
                     description = getString(R.string.playback_channel_desc)
                     setSound(null, null)
+                    setShowBadge(false)
                 }
             )
         }
+        acquireWake()
         session = MediaSessionCompat(this, "video_player").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    MainActivity.emitMedia("play")
                     playing = true
+                    acquireWake()
+                    MainActivity.emitMedia("play")
                     notifyNow()
                 }
 
                 override fun onPause() {
-                    MainActivity.emitMedia("pause")
                     playing = false
+                    releaseWake()
+                    MainActivity.emitMedia("pause")
                     notifyNow()
                 }
 
@@ -78,41 +86,56 @@ class PlaybackService : Service() {
                 }
 
                 override fun onStop() {
-                    MainActivity.emitMedia("pause")
                     playing = false
+                    MainActivity.emitMedia("pause")
                     stopSelf()
                 }
             })
+            setPlaybackToLocal(AudioManager.STREAM_MUSIC)
             isActive = true
         }
+        startInForeground()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        isRunning = true
+        acquireWake()
         when (intent?.action) {
             ACTION_PLAY -> {
-                MainActivity.emitMedia("play")
                 playing = true
+                acquireWake()
+                MainActivity.emitMedia("play")
             }
             ACTION_PAUSE -> {
-                MainActivity.emitMedia("pause")
                 playing = false
+                releaseWake()
+                MainActivity.emitMedia("pause")
             }
             ACTION_NEXT -> MainActivity.emitMedia("next")
             ACTION_PREV -> MainActivity.emitMedia("prev")
             ACTION_STOP -> {
+                playing = false
                 stopTicker()
+                releaseWake()
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
                 intent?.getStringExtra("title")?.let { title = it }
                 intent?.getStringExtra("artist")?.let { artist = it }
-                playing = intent?.getBooleanExtra("playing", playing) ?: playing
-                positionMs = intent?.getIntExtra("positionMs", positionMs) ?: positionMs
-                durationMs = intent?.getIntExtra("durationMs", durationMs) ?: durationMs
+                if (intent?.hasExtra("playing") == true) {
+                    playing = intent.getBooleanExtra("playing", playing)
+                }
+                if (intent?.hasExtra("positionMs") == true) {
+                    positionMs = intent.getIntExtra("positionMs", positionMs)
+                }
+                if (intent?.hasExtra("durationMs") == true) {
+                    durationMs = intent.getIntExtra("durationMs", durationMs)
+                }
             }
         }
-        notifyNow()
+        if (playing) acquireWake() else releaseWake()
+        startInForeground()
         return START_STICKY
     }
 
@@ -134,7 +157,7 @@ class PlaybackService : Service() {
             .build()
     }
 
-    private fun notifyNow() {
+    private fun startInForeground() {
         session?.setMetadata(
             MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
@@ -147,7 +170,29 @@ class PlaybackService : Service() {
         session?.setPlaybackState(buildState())
         stopTicker()
         if (playing) ticker.postDelayed(tickRunnable, 500)
+        val notification = buildNotification()
+        try {
+            ServiceCompat.startForeground(
+                this,
+                42,
+                notification,
+                if (Build.VERSION.SDK_INT >= 29)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                else 0
+            )
+        } catch (_: Throwable) {
+            try {
+                startForeground(42, notification)
+            } catch (_: Throwable) {
+            }
+        }
+    }
 
+    private fun notifyNow() {
+        startInForeground()
+    }
+
+    private fun buildNotification(): Notification {
         val launch = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -163,7 +208,7 @@ class PlaybackService : Service() {
             action(1, android.R.drawable.ic_media_pause, "Pause", ACTION_PAUSE)
         else
             action(1, android.R.drawable.ic_media_play, "Play", ACTION_PLAY)
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL)
+        return NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle(title)
             .setContentText(if (playing) artist else "Paused")
             .setSmallIcon(R.drawable.ic_stat_play)
@@ -172,6 +217,7 @@ class PlaybackService : Service() {
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .addAction(action(2, android.R.drawable.ic_media_previous, "Previous", ACTION_PREV))
             .addAction(playPause)
             .addAction(action(3, android.R.drawable.ic_media_next, "Next", ACTION_NEXT))
@@ -181,14 +227,27 @@ class PlaybackService : Service() {
                     .setShowActionsInCompactView(0, 1, 2)
             )
             .build()
-        ServiceCompat.startForeground(
-            this,
-            42,
-            notification,
-            if (Build.VERSION.SDK_INT >= 29)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            else 0
-        )
+    }
+
+    private fun acquireWake() {
+        try {
+            if (wakeLock?.isHeld == true) return
+            if (wakeLock == null) {
+                val pm = getSystemService(POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "videoplayer:playback").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            wakeLock?.acquire(6 * 60 * 60 * 1000L)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun releaseWake() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Throwable) {
+        }
     }
 
     private fun stopTicker() {
@@ -196,12 +255,18 @@ class PlaybackService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (playing) return
+        if (playing) {
+            acquireWake()
+            startInForeground()
+            return
+        }
         stopSelf()
     }
 
     override fun onDestroy() {
+        isRunning = false
         stopTicker()
+        releaseWake()
         session?.isActive = false
         session?.release()
         session = null
@@ -223,5 +288,7 @@ class PlaybackService : Service() {
         const val ACTION_NEXT = "app.videoplayer.NEXT"
         const val ACTION_PREV = "app.videoplayer.PREV"
         const val ACTION_STOP = "app.videoplayer.STOP"
+        @Volatile
+        var isRunning: Boolean = false
     }
 }

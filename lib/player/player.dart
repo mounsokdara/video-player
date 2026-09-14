@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:vibration/vibration.dart';
@@ -178,11 +179,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (e['type'] == 'media') {
         switch (e['action']) {
           case 'play':
+            PlaybackSession.userPaused = false;
+            PlaybackSession.holdingAudio = PlaybackSession.inBackground && appSettings.backgroundPlay;
             unawaited(AndroidBridge.requestAudioFocus());
             vc?.setVolume(1);
             unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
-            vc?.play();
+            unawaited(vc?.forcePlay() ?? Future<void>.value());
           case 'pause':
+            PlaybackSession.userPaused = true;
+            PlaybackSession.holdingAudio = false;
             vc?.pause();
           case 'duck':
             vc?.setVolume(0.2);
@@ -203,19 +208,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
       _persistProgress();
-      if (!appSettings.backgroundPlay) {
-        vc?.pause();
-        AndroidBridge.stopBackground();
-      } else {
-        _syncBackground();
-        unawaited(vc?.setVideoEnabled(false) ?? Future<void>.value());
-      }
+      unawaited(PlaybackSession.enterBackground(
+        engine: vc,
+        title: item.title,
+        artist: item.folderName,
+      ));
     } else if (state == AppLifecycleState.resumed) {
-      unawaited(vc?.setVideoEnabled(true) ?? Future<void>.value());
+      unawaited(PlaybackSession.leaveBackground(engine: vc));
       _applySystemUi();
-      if (appSettings.backgroundPlay) _syncBackground();
+      if (appSettings.backgroundPlay) unawaited(_syncBackground());
     }
   }
 
@@ -296,15 +301,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
     final c = vc;
+    final playing = !PlaybackSession.userPaused &&
+        (PlaybackSession.holdingAudio || (c?.wantPlay ?? false) || (c?.value.isPlaying ?? false));
     await AndroidBridge.startBackground(
       title: item.title,
       artist: item.folderName,
-      playing: c?.value.isPlaying ?? false,
+      playing: playing,
       positionMs: c?.value.position.inMilliseconds ?? 0,
       durationMs: c?.value.duration.inMilliseconds ?? 0,
     );
     await AndroidBridge.updateBackground(
-      playing: c?.value.isPlaying ?? false,
+      playing: playing,
       positionMs: c?.value.position.inMilliseconds ?? 0,
       durationMs: c?.value.duration.inMilliseconds ?? 0,
       title: item.title,
@@ -434,6 +441,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
       final playing = c.value.isPlaying;
       final nowTick = DateTime.now();
+      if (PlaybackSession.holdingAudio &&
+          !PlaybackSession.userPaused &&
+          !playing &&
+          !c.value.completed &&
+          c.wantPlay) {
+        unawaited(c.forcePlay());
+      }
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
@@ -1429,6 +1443,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Future<void> _toggleBackground(bool on) async {
     appSettings.backgroundPlay = on;
     await appSettings.save();
+    try {
+      await Permission.notification.request();
+    } catch (_) {}
+    if (on) {
+      PlaybackSession.userPaused = false;
+      unawaited(AndroidBridge.requestAudioFocus());
+    }
     await _syncBackground();
     setState(() {});
     _flash(on ? 'Background play on' : 'Background play off');

@@ -43,6 +43,10 @@ class PlaybackSession {
   static bool _busy = false;
   static int _failStreak = 0;
   static VoidCallback? _hook;
+  static bool inBackground = false;
+  static bool holdingAudio = false;
+  static bool userPaused = false;
+  static bool _enteringBg = false;
 
   static const _endSlop = Duration(milliseconds: 400);
   static const _replayAfter = Duration(seconds: 3);
@@ -186,6 +190,9 @@ class PlaybackSession {
     _endedLatch = false;
     _busy = false;
     _failStreak = 0;
+    inBackground = false;
+    holdingAudio = false;
+    userPaused = false;
     sleepTimer?.cancel();
     sleepTimer = null;
     sleepLeft = null;
@@ -257,15 +264,92 @@ class PlaybackSession {
     } catch (_) {}
   }
 
+  static Future<void> enterBackground({
+    PlaybackEngine? engine,
+    String? title,
+    String? artist,
+  }) async {
+    final c = engine ?? controller;
+    final next = item;
+    final name = title ?? next?.title ?? 'Video Player';
+    final sub = artist ?? next?.folderName ?? 'Video Player';
+    if (c == null) return;
+    if (_enteringBg) {
+      if (appSettings.backgroundPlay && holdingAudio && !userPaused) {
+        unawaited(c.forcePlay());
+      }
+      return;
+    }
+    _enteringBg = true;
+    try {
+      inBackground = true;
+      if (!appSettings.backgroundPlay) {
+        holdingAudio = false;
+        try {
+          if (c.value.isPlaying || c.wantPlay) await c.pause();
+        } catch (_) {}
+        await AndroidBridge.stopBackground();
+        return;
+      }
+
+      if (userPaused) {
+        holdingAudio = false;
+        await AndroidBridge.startBackground(
+          title: name,
+          artist: sub,
+          playing: false,
+          positionMs: c.value.position.inMilliseconds,
+          durationMs: c.value.duration.inMilliseconds,
+        );
+        return;
+      }
+
+      holdingAudio = c.wantPlay || c.value.isPlaying || holdingAudio;
+      await AndroidBridge.requestAudioFocus();
+      await AndroidBridge.startBackground(
+        title: name,
+        artist: sub,
+        playing: holdingAudio,
+        positionMs: c.value.position.inMilliseconds,
+        durationMs: c.value.duration.inMilliseconds,
+      );
+      try {
+        await c.setAudioOnly(true);
+      } catch (_) {}
+      if (holdingAudio) {
+        await c.forcePlay();
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        if (holdingAudio && !userPaused) await c.forcePlay();
+      }
+    } finally {
+      _enteringBg = false;
+    }
+  }
+
+  static Future<void> leaveBackground({PlaybackEngine? engine}) async {
+    inBackground = false;
+    holdingAudio = false;
+    final c = engine ?? controller;
+    if (c == null) return;
+    try {
+      await c.setAudioOnly(false);
+    } catch (_) {}
+    if (appSettings.backgroundPlay && !userPaused && c.wantPlay) {
+      try {
+        await c.play();
+      } catch (_) {}
+    }
+  }
+
   static Future<void> keepBackgroundAlive() async {
-    if (!appSettings.backgroundPlay || !active) return;
     final c = controller;
     final next = item;
-    if (c == null || next == null) return;
+    if (!appSettings.backgroundPlay || c == null) return;
+    final playing = !userPaused && (holdingAudio || c.wantPlay || c.value.isPlaying);
     await AndroidBridge.startBackground(
-      title: next.title,
-      artist: next.folderName,
-      playing: c.value.isPlaying,
+      title: next?.title ?? 'Video Player',
+      artist: next?.folderName ?? 'Video Player',
+      playing: playing,
       positionMs: c.value.position.inMilliseconds,
       durationMs: c.value.duration.inMilliseconds,
     );
@@ -287,11 +371,20 @@ class PlaybackSession {
       surround: appSettings.surround,
     );
     await AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight);
+    if (inBackground && appSettings.backgroundPlay) {
+      try {
+        await c.setAudioOnly(true);
+      } catch (_) {}
+      if (!userPaused) {
+        holdingAudio = true;
+        await c.forcePlay();
+      }
+    }
     if (appSettings.backgroundPlay) {
       await AndroidBridge.startBackground(
         title: next.title,
         artist: next.folderName,
-        playing: c.value.isPlaying,
+        playing: !userPaused && (holdingAudio || c.wantPlay || c.value.isPlaying),
         positionMs: c.value.position.inMilliseconds,
         durationMs: c.value.duration.inMilliseconds,
       );

@@ -29,9 +29,6 @@ class AppTheme {
     return ThemeData(
       colorScheme: scheme,
       brightness: brightness,
-      splashFactory: InkRipple.splashFactory,
-      splashColor: scheme.primary.withValues(alpha: 0.14),
-      highlightColor: scheme.primary.withValues(alpha: 0.08),
       appBarTheme: AppBarThemeData(
         centerTitle: false,
         scrolledUnderElevation: 0,

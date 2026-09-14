@@ -328,9 +328,19 @@ class MainActivity : FlutterActivity() {
                                 putExtra("durationMs", durationMs)
                             }
                             try {
-                                if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+                                if (PlaybackService.isRunning) {
+                                    startService(intent)
+                                } else if (Build.VERSION.SDK_INT >= 26) {
+                                    startForegroundService(intent)
+                                } else {
+                                    startService(intent)
+                                }
                             } catch (t: Throwable) {
-                                NativeCrashLog.write(this, "startBackground: ${t.message}\n${Log.getStackTraceString(t)}")
+                                try {
+                                    startService(intent)
+                                } catch (t2: Throwable) {
+                                    NativeCrashLog.write(this, "startBackground: ${t2.message}\n${Log.getStackTraceString(t2)}")
+                                }
                             }
                             result.success(true)
                         }

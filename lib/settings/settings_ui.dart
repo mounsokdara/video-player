@@ -311,7 +311,25 @@ class _VideoSettingsState extends State<VideoSettings> {
             value: s.alwaysHideNavBar,
             onChanged: (v) => set(() => s.alwaysHideNavBar = v),
           ),
-          SwitchListTile(title: const Text('Background play'), subtitle: const Text('Keeps audio going with a music-style notification'), value: s.backgroundPlay, onChanged: (v) => set(() => s.backgroundPlay = v)),
+          SwitchListTile(
+            title: const Text('Background play'),
+            subtitle: const Text('Keeps audio going with a music-style notification when you leave the app'),
+            value: s.backgroundPlay,
+            onChanged: (v) {
+              set(() => s.backgroundPlay = v);
+              unawaited(() async {
+                if (v) {
+                  try {
+                    await Permission.notification.request();
+                  } catch (_) {}
+                  await PlaybackSession.keepBackgroundAlive();
+                } else {
+                  PlaybackSession.holdingAudio = false;
+                  await AndroidBridge.stopBackground();
+                }
+              }());
+            },
+          ),
           SwitchListTile(title: const Text('Remember background play'), subtitle: const Text('Keep the option on for every video'), value: s.rememberBackgroundPlay, onChanged: (v) => set(() => s.rememberBackgroundPlay = v)),
           SwitchListTile(title: const Text('Remember aspect ratio'), value: s.rememberAspect, onChanged: (v) => set(() => s.rememberAspect = v)),
           SwitchListTile(title: const Text('Resume'), subtitle: const Text('Continue from where you stopped'), value: s.resumePlayback, onChanged: (v) => set(() => s.resumePlayback = v)),

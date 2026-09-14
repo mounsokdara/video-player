@@ -77,17 +77,7 @@ Future<void> showPlayerMoreSheet({
       barrierColor: Colors.black54,
       builder: (ctx) {
         final pad = SystemBars.rawOf(context);
-        return Theme(
-          data: Theme.of(ctx).copyWith(
-            splashFactory: InkRipple.splashFactory,
-            splashColor: scheme.primary.withValues(alpha: 0.16),
-            highlightColor: scheme.primary.withValues(alpha: 0.08),
-            listTileTheme: ListTileTheme.of(ctx).copyWith(
-              tileColor: Colors.transparent,
-              selectedTileColor: scheme.primary.withValues(alpha: 0.08),
-            ),
-          ),
-          child: DraggableScrollableSheet(
+        return DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.86,
             builder: (_, sc) {
@@ -180,7 +170,6 @@ Future<void> showPlayerMoreSheet({
                 );
               });
             },
-          ),
         );
       },
     ),

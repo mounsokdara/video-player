@@ -14,7 +14,7 @@ Uninstall any older build before installing this one.
 - Library auto-refresh when files are added, changed, or deleted
 - Mini player snaps to **16:9** (landscape) or **9:16** (portrait)
 - Speed changes video and audio together; pitch shift is optional
-- Gestures, background notification, ten-band equalizer
+- Gestures, background audio with a notification, ten-band equalizer
 - HLS streams and local files through libmpv
 
 ## Build

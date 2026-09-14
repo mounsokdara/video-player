@@ -97,11 +97,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       final c = PlaybackSession.controller;
       switch (action) {
         case 'play':
+          PlaybackSession.userPaused = false;
+          PlaybackSession.holdingAudio = PlaybackSession.inBackground && appSettings.backgroundPlay;
           unawaited(AndroidBridge.requestAudioFocus());
           c?.setVolume(1);
           unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
-          c?.play();
+          unawaited(c?.forcePlay() ?? Future<void>.value());
         case 'pause':
+          PlaybackSession.userPaused = true;
+          PlaybackSession.holdingAudio = false;
           c?.pause();
         case 'duck':
           c?.setVolume(0.2);
@@ -209,19 +213,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      if (appSettings.backgroundPlay) {
-        unawaited(PlaybackSession.keepBackgroundAlive());
-        unawaited(PlaybackSession.controller?.setVideoEnabled(false) ?? Future<void>.value());
-      } else {
-        PlaybackSession.pauseForBackground();
-        final c = PlaybackSession.controller;
-        try {
-          if (c != null && c.value.isPlaying) unawaited(c.pause());
-        } catch (_) {}
-      }
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      unawaited(PlaybackSession.enterBackground());
     } else if (state == AppLifecycleState.resumed) {
-      unawaited(PlaybackSession.controller?.setVideoEnabled(true) ?? Future<void>.value());
+      unawaited(PlaybackSession.leaveBackground());
       unawaited(() async {
         final had = library.allFiles;
         library.allFiles = await AndroidBridge.hasAllFilesAccess();
