@@ -353,6 +353,18 @@ class AndroidBridge {
     }
   }
 
+  static Future<Uint8List?> thumbnailBytes(String path, {int size = 240}) async {
+    try {
+      final raw = await _ch.invokeMethod('thumbnailBytes', {
+        'path': path,
+        'size': size,
+      });
+      if (raw is Uint8List) return raw;
+      if (raw is List<int>) return Uint8List.fromList(raw);
+    } catch (_) {}
+    return null;
+  }
+
   static Future<Uint8List?> previewFrame({required String path, required int positionMs}) async {
     try {
       final raw = await _ch.invokeMethod('previewFrame', {

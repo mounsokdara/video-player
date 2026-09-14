@@ -42,7 +42,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            Playback is libmpv via media_kit. Mini player locks to 16:9 or 9:16.
-            Hidden files show duration and dimensions. Console Clear wipes debug and crash logs.
+            Speed now drives video and audio together. Pitch shift chipmunks; off keeps tone.
+            Hidden videos get thumbnails. Library refreshes when files are added, changed, or deleted.
 
             Uninstall the previous APK before installing this one.

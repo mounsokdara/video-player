@@ -77,8 +77,16 @@ Future<void> showPlayerMoreSheet({
       barrierColor: Colors.black54,
       builder: (ctx) {
         final pad = SystemBars.rawOf(context);
-        return Material(
-          color: scheme.surface,
+        return Theme(
+          data: Theme.of(ctx).copyWith(
+            splashFactory: InkRipple.splashFactory,
+            splashColor: scheme.primary.withValues(alpha: 0.16),
+            highlightColor: scheme.primary.withValues(alpha: 0.08),
+            listTileTheme: ListTileTheme.of(ctx).copyWith(
+              tileColor: Colors.transparent,
+              selectedTileColor: scheme.primary.withValues(alpha: 0.08),
+            ),
+          ),
           child: DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.86,
@@ -96,7 +104,7 @@ Future<void> showPlayerMoreSheet({
                       _ => false,
                     };
                 final seen = <String>{};
-                return ColoredBox(
+                return Material(
                   color: scheme.surface,
                   child: ListView(
                     controller: sc,

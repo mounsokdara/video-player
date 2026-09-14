@@ -11,7 +11,9 @@ Uninstall any older build before installing this one.
 ## Features
 
 - Library of videos on internal storage, SD cards, and USB drives, including hidden files
+- Library auto-refresh when files are added, changed, or deleted
 - Mini player snaps to **16:9** (landscape) or **9:16** (portrait)
+- Speed changes video and audio together; pitch shift is optional
 - Gestures, background notification, ten-band equalizer
 - HLS streams and local files through libmpv
 

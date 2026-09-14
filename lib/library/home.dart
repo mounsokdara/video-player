@@ -41,6 +41,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   final searchCtrl = TextEditingController();
   String filter = 'all';
   Timer? refreshTimer;
+  Timer? libraryDebounce;
   StreamSubscription<Map<String, dynamic>>? events;
 
   String? folderPath;
@@ -53,7 +54,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _boot();
     events = AndroidBridge.events().listen(_onEvent);
-    refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    refreshTimer = Timer.periodic(const Duration(seconds: 90), (_) {
       if (!mounted || !appSettings.autoRefresh) return;
       _refresh();
     });
@@ -64,6 +65,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     refreshTimer?.cancel();
+    libraryDebounce?.cancel();
     events?.cancel();
     PlaybackSession.onMutated = null;
     try {
@@ -87,10 +89,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (path != null) _openPath(path);
     } else if (type == 'media') {
       final action = e['action'] as String? ?? '';
-      if (!PlaybackSession.active) {
-        if (action == 'refresh') _boot();
+      if (action == 'refresh') {
+        _onLibraryChanged();
         return;
       }
+      if (!PlaybackSession.active) return;
       final c = PlaybackSession.controller;
       switch (action) {
         case 'play':
@@ -112,11 +115,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         case 'seek':
           final ms = e['positionMs'];
           if (ms is num) unawaited(c?.seekTo(Duration(milliseconds: ms.round())) ?? Future<void>.value());
-        case 'refresh':
-          unawaited(_boot());
       }
       if (mounted) setState(() {});
     }
+  }
+
+  void _onLibraryChanged() {
+    if (!mounted || !appSettings.autoRefresh) return;
+    libraryDebounce?.cancel();
+    libraryDebounce = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted || !appSettings.autoRefresh) return;
+      unawaited(_refresh());
+    });
   }
 
   bool _busy = false;
@@ -202,6 +212,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       if (appSettings.backgroundPlay) {
         unawaited(PlaybackSession.keepBackgroundAlive());
+        unawaited(PlaybackSession.controller?.setVideoEnabled(false) ?? Future<void>.value());
       } else {
         PlaybackSession.pauseForBackground();
         final c = PlaybackSession.controller;
@@ -210,6 +221,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         } catch (_) {}
       }
     } else if (state == AppLifecycleState.resumed) {
+      unawaited(PlaybackSession.controller?.setVideoEnabled(true) ?? Future<void>.value());
       unawaited(() async {
         final had = library.allFiles;
         library.allFiles = await AndroidBridge.hasAllFilesAccess();

@@ -13,6 +13,7 @@ object NativeConstants {
     const val PREVIEW_W = 180
     const val PREVIEW_H = 102
     const val SCAN_BUDGET = 2500
+    const val HIDDEN_SCAN_BUDGET = 4000
     const val INDEXED_CAP = 5000
     const val JPEG_QUALITY = 95
     const val PREVIEW_JPEG_QUALITY = 40

@@ -36,32 +36,90 @@ class PlaybackEngine extends ChangeNotifier {
   final _subs = <StreamSubscription<dynamic>>[];
   EngineValue value = const EngineValue();
   bool _closed = false;
+  String? _hwdec;
+  Future<void>? _inFlight;
+  double _rate = 1;
+  bool _pitchShift = false;
+
+  bool get hasPlayer => _player != null && !_closed;
 
   Future<void> open(String path, {required String hwdec}) async {
-    await _release();
+    await _queue(() => _openBody(path, hwdec: hwdec));
+  }
+
+  Future<void> _queue(Future<void> Function() job) async {
+    while (_inFlight != null) {
+      try {
+        await _inFlight;
+      } catch (_) {}
+    }
+    final gate = Completer<void>();
+    _inFlight = gate.future;
+    try {
+      await job();
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      if (identical(_inFlight, gate.future)) _inFlight = null;
+    }
+  }
+
+  Future<void> _openBody(String path, {required String hwdec}) async {
     _closed = false;
-    final hw = hwdec != 'no';
-    final player = Player(
-      configuration: const PlayerConfiguration(
-        pitch: true,
-        title: 'Video Player',
-      ),
-    );
-    _player = player;
-    video = VideoController(
-      player,
-      configuration: VideoControllerConfiguration(
-        enableHardwareAcceleration: hw,
-      ),
-    );
-    _bind(player);
+    final wantHw = hwdec != 'no';
+    final hadHw = _hwdec != null && _hwdec != 'no';
+    if (_player != null && wantHw != hadHw) {
+      await _disposePlayer();
+    }
+    value = const EngineValue();
+    notifyListeners();
+    if (_player == null) {
+      final player = Player(
+        configuration: const PlayerConfiguration(
+          pitch: false,
+          title: 'Video Player',
+        ),
+      );
+      _player = player;
+      video = VideoController(
+        player,
+        configuration: VideoControllerConfiguration(
+          enableHardwareAcceleration: wantHw,
+          hwdec: hwdec,
+        ),
+      );
+      _bind(player);
+    }
+    final player = _player!;
+    _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
+    await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
+    await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (value.hasError) {
       throw StateError(value.errorDescription ?? 'Source error');
     }
+  }
+
+  Future<void> applyTempo({required double rate, required bool pitchShift}) async {
+    _rate = rate.clamp(0.25, 8.0).toDouble();
+    _pitchShift = pitchShift;
+    final player = _player;
+    if (player == null) return;
+    await _applyPitchCorrection(player, pitchShift);
+    try {
+      await player.setRate(_rate);
+    } catch (_) {}
+  }
+
+  Future<void> _applyPitchCorrection(Player player, bool pitchShift) async {
+    try {
+      final platform = player.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty('audio-pitch-correction', pitchShift ? 'no' : 'yes');
+      }
+    } catch (_) {}
   }
 
   Future<void> _applyHwdec(Player player, String hwdec) async {
@@ -74,6 +132,9 @@ class PlaybackEngine extends ChangeNotifier {
         } catch (_) {}
         try {
           await platform.setProperty('video-sync', 'audio');
+        } catch (_) {}
+        try {
+          await platform.setProperty('vd-lavc-dr', 'no');
         } catch (_) {}
         return;
       }
@@ -181,6 +242,15 @@ class PlaybackEngine extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setVideoEnabled(bool on) async {
+    try {
+      final platform = _player?.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty('vid', on ? 'auto' : 'no');
+      }
+    } catch (_) {}
+  }
+
   Future<void> play() async {
     await _player?.play();
   }
@@ -198,7 +268,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> setPlaybackSpeed(double r) async {
-    await _player?.setRate(r);
+    await applyTempo(rate: r, pitchShift: _pitchShift);
   }
 
   Future<void> setLooping(bool on) async {
@@ -208,7 +278,7 @@ class PlaybackEngine extends ChangeNotifier {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await _release();
+    await _disposePlayer();
     super.dispose();
   }
 
@@ -217,7 +287,7 @@ class PlaybackEngine extends ChangeNotifier {
     unawaited(close());
   }
 
-  Future<void> _release() async {
+  Future<void> _disposePlayer() async {
     for (final s in _subs) {
       try {
         await s.cancel();
@@ -227,31 +297,79 @@ class PlaybackEngine extends ChangeNotifier {
     final p = _player;
     _player = null;
     video = null;
+    _hwdec = null;
     value = const EngineValue();
+    notifyListeners();
     if (p == null) return;
+    try {
+      await p.pause();
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 60));
     try {
       await p.stop();
     } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 40));
     try {
       await p.dispose();
     } catch (_) {}
   }
 }
 
-class AppVideo extends StatelessWidget {
+class AppVideo extends StatefulWidget {
   const AppVideo({super.key, required this.engine, this.fit = BoxFit.fill});
   final PlaybackEngine engine;
   final BoxFit fit;
 
   @override
+  State<AppVideo> createState() => _AppVideoState();
+}
+
+class _AppVideoState extends State<AppVideo> {
+  VideoController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = widget.engine.video;
+    widget.engine.addListener(_onEngine);
+  }
+
+  @override
+  void didUpdateWidget(covariant AppVideo oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.engine, widget.engine)) {
+      oldWidget.engine.removeListener(_onEngine);
+      widget.engine.addListener(_onEngine);
+      final next = widget.engine.video;
+      if (!identical(next, _controller)) {
+        _controller = next;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.engine.removeListener(_onEngine);
+    super.dispose();
+  }
+
+  void _onEngine() {
+    final next = widget.engine.video;
+    if (!identical(next, _controller) && mounted) {
+      setState(() => _controller = next);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final c = engine.video;
+    final c = _controller;
     if (c == null) return const ColoredBox(color: Colors.black);
     return Video(
       controller: c,
       fill: Colors.black,
-      fit: fit,
+      fit: widget.fit,
       controls: NoVideoControls,
     );
   }
 }
+

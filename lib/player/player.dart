@@ -210,8 +210,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         AndroidBridge.stopBackground();
       } else {
         _syncBackground();
+        unawaited(vc?.setVideoEnabled(false) ?? Future<void>.value());
       }
     } else if (state == AppLifecycleState.resumed) {
+      unawaited(vc?.setVideoEnabled(true) ?? Future<void>.value());
       _applySystemUi();
       if (appSettings.backgroundPlay) _syncBackground();
     }
@@ -282,11 +284,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Future<void> _applySpeed() async {
     final rate = speeding ? 2.0 : speed;
     try {
-      await vc?.setPlaybackSpeed(rate);
+      await vc?.applyTempo(rate: rate, pitchShift: appSettings.pitchShift);
     } catch (e, s) {
       CrashLog.record('SPEED', '$e', s);
     }
-    await AndroidBridge.setPlaybackParams(speed: rate, pitchShift: appSettings.pitchShift);
   }
 
   Future<void> _syncBackground() async {
@@ -322,9 +323,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openCurrent() async {
-    final old = vc;
     final gen = ++_playerGen;
-    vc = null;
     ready = false;
     _endedLatch = false;
     _scrub = null;
@@ -335,39 +334,53 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _showZoomHud = false;
     _pts.clear();
     if (mounted) setState(() {});
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || gen != _playerGen) return;
-    try {
-      old?.removeListener(_tick);
-      await old?.close();
-    } catch (_) {}
-    PlaybackEngine? c;
+    final existing = vc;
+    PlaybackEngine? opened;
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
-      c = await PlaybackSession.openWithFallback(item);
-      if (!mounted || gen != _playerGen) {
+      late final PlaybackEngine engine;
+      if (existing != null && existing.hasPlayer) {
+        engine = existing;
         try {
-          await c.close();
-        } catch (_) {}
+          await engine.open(item.path, hwdec: PlaybackSession.hwdecName());
+        } catch (_) {
+          await engine.open(item.path, hwdec: 'no');
+        }
+      } else {
+        engine = await PlaybackSession.openWithFallback(item);
+        opened = engine;
+        if (!mounted || gen != _playerGen) {
+          try {
+            await engine.close();
+          } catch (_) {}
+          return;
+        }
+        engine.addListener(_tick);
+      }
+      if (!mounted || gen != _playerGen) {
+        if (opened != null) {
+          try {
+            await opened.close();
+          } catch (_) {}
+        }
         return;
       }
       if (appSettings.resumePlayback) {
         final p = appSettings.resumeMap[item.path] ?? item.progress;
-        final dur = c.value.duration;
+        final dur = engine.value.duration;
         if (p > 0 && p < 0.97 && dur.inMilliseconds > 0) {
-          await c.seekTo(Duration(milliseconds: (dur.inMilliseconds * p).round()));
+          await engine.seekTo(Duration(milliseconds: (dur.inMilliseconds * p).round()));
         }
       }
-      c.addListener(_tick);
-      await c.setLooping(appSettings.playMode == PlayMode.repeatOne);
-      if (c.value.hasError) {
-        throw StateError(c.value.errorDescription ?? 'Player failed to start');
+      await engine.setLooping(appSettings.playMode == PlayMode.repeatOne);
+      if (engine.value.hasError) {
+        throw StateError(engine.value.errorDescription ?? 'Player failed to start');
       }
-      vc = c;
+      vc = engine;
       _openFails = 0;
       _endedLatch = false;
       await AndroidBridge.requestAudioFocus();
-      await c.play();
+      await engine.play();
       _lastPlaying = true;
       _syncPip();
       unawaited(_syncBackground());
@@ -379,10 +392,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _armHide();
     } catch (e, s) {
       await CrashLog.breadcrumb('Open failed ${item.path}: $e');
-      try {
-        await c?.close();
-      } catch (_) {}
-      if (gen == _playerGen) vc = null;
+      if (opened != null) {
+        try {
+          await opened.close();
+        } catch (_) {}
+        if (gen == _playerGen) vc = null;
+      }
       if (mounted) setState(() => ready = false);
       if (mounted && gen == _playerGen) {
         _openFails++;
@@ -803,7 +818,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 child: ClipRect(
                   child: () {
                     try {
-                      if (ready && c != null && c.value.isInitialized) {
+                      if (c != null && c.video != null) {
                         final w = size.width <= 0 ? 1.0 : size.width;
                         final h = size.height <= 0 ? 1.0 : size.height;
                         return _video(c, Size(w, h));
@@ -951,13 +966,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Widget _video(PlaybackEngine c, Size screen) {
     if (_handedOff) return const ColoredBox(color: Colors.black);
     try {
-      if (!c.value.isInitialized) {
+      if (!c.hasPlayer || c.video == null) {
         return const SizedBox.expand(child: Center(child: CircularProgressIndicator()));
       }
     } catch (_) {
       return const SizedBox.expand();
     }
-    Widget player = AppVideo(key: ValueKey(_playerGen), engine: c);
+    Widget player = AppVideo(engine: c);
     var vw = c.value.size.width;
     var vh = c.value.size.height;
     if (vw <= 1 || vh <= 1) {

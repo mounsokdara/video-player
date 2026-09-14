@@ -49,12 +49,14 @@ class PlaybackSession {
 
   static bool get active => keepAlive && controller != null && item != null;
 
+  static String hwdecName({bool forceSoftware = false}) => _hwdec(forceSoftware: forceSoftware);
+
   static String _hwdec({bool forceSoftware = false}) {
     if (forceSoftware || appSettings.decoder == DecoderMode.sw || !appSettings.hwPriority) {
       return 'no';
     }
-    if (appSettings.decoder == DecoderMode.hw) return 'mediacodec';
-    return 'auto';
+    if (appSettings.decoder == DecoderMode.hw) return 'mediacodec-copy';
+    return 'auto-copy';
   }
 
   static Future<PlaybackEngine> openWithFallback(VideoItem next, {bool forceSoftware = false}) async {
@@ -193,10 +195,10 @@ class PlaybackSession {
     item = null;
     playlist = [];
     onMutated?.call();
-    await Future<void>.delayed(Duration.zero);
     try {
       await dying?.pause();
     } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     try {
       await dying?.close();
     } catch (_) {}
@@ -274,9 +276,8 @@ class PlaybackSession {
       await c.setLooping(appSettings.playMode == PlayMode.repeatOne);
     } catch (_) {}
     try {
-      await c.setPlaybackSpeed(speed);
+      await c.applyTempo(rate: speed, pitchShift: appSettings.pitchShift);
     } catch (_) {}
-    await AndroidBridge.setPlaybackParams(speed: speed, pitchShift: appSettings.pitchShift);
     await AndroidBridge.applyEqualizer(
       enabled: appSettings.eqEnabled,
       bands: appSettings.eqBands,
@@ -378,14 +379,26 @@ class PlaybackSession {
     if (_busy) return false;
     _busy = true;
     _endedLatch = true;
-    final old = controller;
+    final existing = controller;
     _unlisten();
-    PlaybackEngine? c;
+    PlaybackEngine? created;
     try {
-      c = await openWithFallback(next, forceSoftware: forceSoftware);
+      late final PlaybackEngine engine;
+      if (existing != null && existing.hasPlayer) {
+        engine = existing;
+        try {
+          await engine.open(next.path, hwdec: _hwdec(forceSoftware: forceSoftware));
+        } catch (_) {
+          if (forceSoftware || _hwdec(forceSoftware: forceSoftware) == 'no') rethrow;
+          await engine.open(next.path, hwdec: 'no');
+        }
+      } else {
+        engine = await openWithFallback(next, forceSoftware: forceSoftware);
+        created = engine;
+      }
       await AndroidBridge.requestAudioFocus();
-      await c.play();
-      controller = c;
+      await engine.play();
+      controller = engine;
       item = next;
       playlist = List<VideoItem>.from(list);
       index = at;
@@ -395,20 +408,18 @@ class PlaybackSession {
       _listen();
       onMutated?.call();
       await AndroidBridge.preparePreview(next.path);
-      await applyOutput(c, next);
-      await Future<void>.delayed(Duration.zero);
-      try {
-        await old?.close();
-      } catch (_) {}
+      await applyOutput(engine, next);
       return true;
     } catch (e, s) {
       CrashLog.record('PLAY', '$e', s);
-      try {
-        await c?.close();
-      } catch (_) {}
-      controller = old;
-      keepAlive = old != null;
-      if (old != null) _listen();
+      if (created != null) {
+        try {
+          await created.close();
+        } catch (_) {}
+      }
+      controller = existing;
+      keepAlive = existing != null;
+      if (existing != null) _listen();
       return false;
     } finally {
       _busy = false;

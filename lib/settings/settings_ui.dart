@@ -11,6 +11,7 @@ import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
 import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/playback/session.dart';
 import 'package:video_player_app/core/widgets.dart';
 
 class SettingsHub extends StatelessWidget {
@@ -155,7 +156,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
           SwitchListTile(title: const Text('Scan library on start'), value: s.scanOnStart, onChanged: (v) => set(() => s.scanOnStart = v)),
           SwitchListTile(
             title: const Text('Auto refresh'),
-            subtitle: const Text('Rescan storage while the library is open'),
+            subtitle: const Text('Refresh when videos are added, changed, or deleted'),
             value: s.autoRefresh,
             onChanged: (v) => set(() => s.autoRefresh = v),
           ),
@@ -319,7 +320,13 @@ class _VideoSettingsState extends State<VideoSettings> {
             title: const Text('Pitch shift'),
             subtitle: const Text('When on, pitch follows speed. When off, speed changes without chipmunk audio.'),
             value: s.pitchShift,
-            onChanged: (v) => set(() => s.pitchShift = v),
+            onChanged: (v) {
+              set(() => s.pitchShift = v);
+              final c = PlaybackSession.controller;
+              if (c != null) {
+                unawaited(c.applyTempo(rate: PlaybackSession.speed, pitchShift: v));
+              }
+            },
           ),
           SwitchListTile(title: const Text('Remember brightness'), subtitle: const Text('Off follows system brightness'), value: s.rememberBrightness, onChanged: (v) => set(() => s.rememberBrightness = v)),
           SwitchListTile(title: const Text('Long press to play at 2×'), value: s.longPress2x, onChanged: (v) => set(() => s.longPress2x = v)),

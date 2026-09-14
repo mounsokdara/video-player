@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity() {
     private lateinit var audioFocus: AudioFocusController
     private lateinit var equalizer: EqualizerController
     private lateinit var appNative: AppNative
+    private var libraryWatcher: LibraryWatcher? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         systemBars = SystemBarController(this)
@@ -95,6 +96,8 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
         equalizer.release()
+        libraryWatcher?.stop()
+        libraryWatcher = null
         bindPreview(null)
         audioFocus.release()
         super.onDestroy()
@@ -147,6 +150,7 @@ class MainActivity : FlutterActivity() {
                     eventSink = events
                     eventsSink = events
                     pendingOpen?.let { emit(mapOf("type" to "open", "path" to it)) }
+                    startLibraryWatcher()
                 }
 
                 override fun onCancel(arguments: Any?) {
@@ -189,17 +193,21 @@ class MainActivity : FlutterActivity() {
                             }
                             result.success(true)
                         }
-                        "listStorageVolumes" -> result.success(listVolumes())
+                        "listStorageVolumes" -> {
+                            val volumes = listVolumes()
+                            startLibraryWatcher(volumes)
+                            result.success(volumes)
+                        }
                         "listVideoFiles" -> {
                             val root = call.argument<String>("path")
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
                             val hidden = call.argument<Boolean>("includeHidden") ?: false
                             val hiddenOnly = call.argument<Boolean>("hiddenOnly") ?: false
-                            val depth = if (hiddenOnly) 5 else 4
-                            val budget = NativeConstants.SCAN_BUDGET
+                            val depth = if (hiddenOnly) 8 else 4
+                            val budget = if (hiddenOnly) NativeConstants.HIDDEN_SCAN_BUDGET else NativeConstants.SCAN_BUDGET
                             io.execute {
                                 try {
-                                    val data = scanVideos(File(root), depth, hidden, budget, hiddenOnly)
+                                    val data = LibraryScanner.scan(File(root), depth, hidden, budget, hiddenOnly)
                                     mainHandler.post { result.success(data) }
                                 } catch (t: Throwable) {
                                     mainHandler.post { result.error("SCAN", t.message, null) }
@@ -357,6 +365,15 @@ class MainActivity : FlutterActivity() {
                             val positionMs = call.argument<Int>("positionMs") ?: 0
                             io.execute {
                                 val bytes = previewJpeg(path, positionMs.toLong())
+                                mainHandler.post { result.success(bytes) }
+                            }
+                        }
+                        "thumbnailBytes" -> {
+                            val path = call.argument<String>("path")
+                                ?: return@setMethodCallHandler result.error("ARG", "path", null)
+                            val size = call.argument<Int>("size") ?: 240
+                            io.execute {
+                                val bytes = LibraryScanner.thumbnailJpeg(path, size)
                                 mainHandler.post { result.success(bytes) }
                             }
                         }
@@ -819,139 +836,22 @@ class MainActivity : FlutterActivity() {
         return if (candidate.exists()) candidate.absolutePath else null
     }
 
-    private fun scanVideos(
-        dir: File,
-        depth: Int,
-        hidden: Boolean,
-        budget: Int = NativeConstants.SCAN_BUDGET,
-        hiddenOnly: Boolean = false
-    ): List<Map<String, Any?>> {
-        val out = ArrayList<Map<String, Any?>>()
-        scanVideosInto(dir, depth, hidden, hiddenOnly, false, out, intArrayOf(budget))
-        return out
-    }
-
-    private fun scanVideosInto(
-        dir: File,
-        depth: Int,
-        hidden: Boolean,
-        hiddenOnly: Boolean,
-        insideHidden: Boolean,
-        out: ArrayList<Map<String, Any?>>,
-        budget: IntArray
-    ) {
-        if (budget[0] <= 0 || depth < 0 || !dir.exists() || !dir.canRead()) return
-        val files = dir.listFiles() ?: return
-        for (f in files) {
-            if (budget[0] <= 0) return
-            if (f.isDirectory) {
-                if (shouldSkipDir(f, hidden)) continue
-                val childHidden = insideHidden || f.name.startsWith(".")
-                scanVideosInto(f, depth - 1, hidden, hiddenOnly, childHidden, out, budget)
-            } else {
-                val fileHidden = insideHidden || f.name.startsWith(".")
-                if (!hidden && fileHidden) continue
-                if (hiddenOnly && !fileHidden) continue
-                if (!isVideoFile(f)) continue
-                budget[0] = budget[0] - 1
-                val meta = probeMeta(f.absolutePath)
-                out.add(
-                    mapOf(
-                        "path" to f.absolutePath,
-                        "name" to f.name,
-                        "size" to f.length(),
-                        "modified" to f.lastModified(),
-                        "folder" to (f.parent ?: ""),
-                        "durationMs" to (meta["durationMs"] ?: 0L),
-                        "width" to (meta["width"] ?: 0),
-                        "height" to (meta["height"] ?: 0),
-                        "mime" to meta["mime"]
-                    )
-                )
-            }
-        }
-    }
-
-
-    private fun probeMeta(path: String): Map<String, Any?> {
-        val out = HashMap<String, Any?>()
-        out["durationMs"] = 0L
-        out["width"] = 0
-        out["height"] = 0
-        out["mime"] = null
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(path)
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                if (!mime.startsWith("video/")) continue
-                out["mime"] = mime
-                if (format.containsKey(MediaFormat.KEY_WIDTH)) {
-                    out["width"] = format.getInteger(MediaFormat.KEY_WIDTH)
-                }
-                if (format.containsKey(MediaFormat.KEY_HEIGHT)) {
-                    out["height"] = format.getInteger(MediaFormat.KEY_HEIGHT)
-                }
-                if (format.containsKey(MediaFormat.KEY_DURATION)) {
-                    out["durationMs"] = format.getLong(MediaFormat.KEY_DURATION) / 1000L
-                }
-                break
-            }
+    private fun startLibraryWatcher(volumeMaps: List<Map<String, Any?>>? = null) {
+        val maps = volumeMaps ?: try {
+            listVolumes()
         } catch (_: Exception) {
-        } finally {
+            emptyList()
+        }
+        val roots = maps.mapNotNull { (it["path"] as? String)?.takeIf { p -> p.isNotEmpty() }?.let { p -> File(p) } }
+        val watcher = libraryWatcher ?: LibraryWatcher(this) {
+            emitMedia("refresh")
+        }.also { libraryWatcher = it }
+        io.execute {
             try {
-                extractor.release()
+                watcher.start(roots)
             } catch (_: Exception) {
             }
         }
-        val dur = out["durationMs"] as? Long ?: 0L
-        val w = out["width"] as? Int ?: 0
-        if (dur > 0L && w > 0) return out
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(path)
-            if (w <= 0) {
-                out["width"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            }
-            if ((out["height"] as? Int ?: 0) <= 0) {
-                out["height"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            }
-            if (dur <= 0L) {
-                out["durationMs"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            }
-            if (out["mime"] == null) {
-                out["mime"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-            }
-        } catch (_: Exception) {
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
-        }
-        return out
-    }
-
-    private fun shouldSkipDir(f: File, hidden: Boolean): Boolean {
-        val n = f.name
-        if (!hidden && n.startsWith(".")) return true
-        val low = n.lowercase()
-        return low == "android" ||
-            low == "lost.dir" ||
-            low == "thumbnails" ||
-            low == ".thumbnails" ||
-            low == "obb" ||
-            low == "data" ||
-            low == "cache" ||
-            low == "code_cache" ||
-            low == "no_backup" ||
-            low == "node_modules" ||
-            low == ".git" ||
-            low == ".trashed" ||
-            low == "alarms" ||
-            low == "ringtones" ||
-            low == "notifications"
     }
 
     @Suppress("DEPRECATION")

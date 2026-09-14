@@ -22,6 +22,7 @@ class LibraryService {
 
   bool _scanning = false;
   final Map<String, Uint8List?> _thumbs = {};
+  final Map<String, DateTime> _thumbMiss = {};
   String? clipPath;
   bool clipCut = false;
 
@@ -184,7 +185,8 @@ class LibraryService {
     videos
       ..clear()
       ..addAll(next);
-    _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k));
+    _thumbs.removeWhere((k, _) => videos.every((v) => v.id != k && !k.startsWith('${v.id}:')));
+    _thumbMiss.removeWhere((k, _) => videos.every((v) => v.id != k && !k.startsWith('${v.id}:')));
     _rebuildFolders();
   }
 
@@ -295,7 +297,12 @@ class LibraryService {
   int get totalBytes => videos.fold(0, (a, b) => a + b.size);
 
   Future<Uint8List?> thumbnailFor(VideoItem item, {int size = 240}) async {
-    if (_thumbs.containsKey(item.id)) return _thumbs[item.id];
+    final key = '${item.id}:${item.modified.millisecondsSinceEpoch}:${item.size}';
+    if (_thumbs.containsKey(key)) return _thumbs[key];
+    final missed = _thumbMiss[key];
+    if (missed != null && DateTime.now().difference(missed) < const Duration(seconds: 20)) {
+      return null;
+    }
     Uint8List? data;
     if (item.assetId != null) {
       try {
@@ -305,7 +312,17 @@ class LibraryService {
         }
       } catch (_) {}
     }
-    _thumbs[item.id] = data;
+    if (data == null || data.isEmpty) {
+      try {
+        data = await AndroidBridge.thumbnailBytes(item.path, size: size);
+      } catch (_) {}
+    }
+    if (data == null || data.isEmpty) {
+      _thumbMiss[key] = DateTime.now();
+      return null;
+    }
+    _thumbs[key] = data;
+    _thumbMiss.remove(key);
     return data;
   }
 
