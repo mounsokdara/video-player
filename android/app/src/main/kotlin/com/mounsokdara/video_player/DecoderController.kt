@@ -40,28 +40,6 @@ class DecoderController(
         return hooked
     }
 
-    fun cropPad() {
-        val exo = findWrapper()?.second ?: return
-        applyCrop(exo)
-    }
-
-    private fun applyCrop(exo: Any) {
-        try {
-            val mode = try {
-                Class.forName("androidx.media3.common.C")
-                    .getField("VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING")
-                    .getInt(null)
-            } catch (_: Throwable) {
-                2
-            }
-            exo.javaClass.getMethod("setVideoScalingMode", Int::class.javaPrimitiveType)
-                .invoke(exo, mode)
-            breadcrumb("cropPad mode=$mode")
-        } catch (t: Throwable) {
-            breadcrumb("cropPad: ${t.message}")
-        }
-    }
-
     fun apply(): Boolean {
         val found = findWrapper() ?: return false
         val wrapper = found.first
@@ -105,7 +83,6 @@ class DecoderController(
             } catch (_: Throwable) {
             }
             breadcrumb("decoder applied software=$software")
-            applyCrop(neu)
             true
         } catch (t: Throwable) {
             writeCrash("applyDecoder: ${t.message}\n${android.util.Log.getStackTraceString(t)}")

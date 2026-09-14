@@ -960,10 +960,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return const SizedBox.expand();
     }
     Widget player = VideoPlayer(key: ValueKey(_playerGen), c);
-    player = ClipRect(
-      clipBehavior: Clip.hardEdge,
-      child: _fit(player, c, screen),
-    );
+    player = _fit(player, c, screen);
     final w = screen.width <= 0 ? 1.0 : screen.width;
     final h = screen.height <= 0 ? 1.0 : screen.height;
     player = SizedBox(width: w, height: h, child: player);
@@ -986,6 +983,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
+  Widget _hideDecoderPad(Widget child, double vw, double vh) {
+    final sx = vw <= 1 ? 1.0 : (vw + 16) / vw;
+    final sy = vh <= 1 ? 1.0 : (vh + 16) / vh;
+    final scale = math.max(sx, sy).clamp(1.0, 1.06).toDouble();
+    return ClipRect(
+      child: Transform.scale(
+        scale: scale,
+        filterQuality: FilterQuality.low,
+        child: child,
+      ),
+    );
+  }
+
   Widget _fit(Widget child, VideoPlayerController c, Size screen) {
     var vw = c.value.size.width;
     var vh = c.value.size.height;
@@ -996,45 +1006,45 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (screen.width < 2 || screen.height < 2) {
       return ClipRect(child: child);
     }
-    Widget boxed() => SizedBox(
-          width: vw,
-          height: vh,
-          child: DecoderPadCrop(child: child),
-        );
+    child = _hideDecoderPad(child, vw, vh);
     switch (aspect) {
       case AspectMode.fit:
-        return FittedBox(fit: BoxFit.contain, clipBehavior: Clip.hardEdge, child: boxed());
-      case AspectMode.zoom:
-        return FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: boxed());
-      case AspectMode.stretch:
-        return ClipRect(
-          child: SizedBox(
-            width: screen.width,
-            height: screen.height,
-            child: DecoderPadCrop(child: child),
-          ),
+        return FittedBox(
+          fit: BoxFit.contain,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(width: vw, height: vh, child: child),
         );
+      case AspectMode.zoom:
+        return FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(width: vw, height: vh, child: child),
+        );
+      case AspectMode.stretch:
+        return ClipRect(child: SizedBox(width: screen.width, height: screen.height, child: child));
       case AspectMode.original:
         final scale = math.min(1.0, math.min(screen.width / vw, screen.height / vh));
         return Center(
-          child: SizedBox(
-            width: vw * scale,
-            height: vh * scale,
-            child: DecoderPadCrop(child: child),
+          child: ClipRect(
+            child: SizedBox(
+              width: vw * scale,
+              height: vh * scale,
+              child: child,
+            ),
           ),
         );
       case AspectMode.ratio16_9:
-        return Center(child: AspectRatio(aspectRatio: 16 / 9, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 16 / 9, child: ClipRect(child: child)));
       case AspectMode.ratio4_3:
-        return Center(child: AspectRatio(aspectRatio: 4 / 3, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 4 / 3, child: ClipRect(child: child)));
       case AspectMode.ratio21_9:
-        return Center(child: AspectRatio(aspectRatio: 21 / 9, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 21 / 9, child: ClipRect(child: child)));
       case AspectMode.ratio1_1:
-        return Center(child: AspectRatio(aspectRatio: 1, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 1, child: ClipRect(child: child)));
       case AspectMode.ratio2_35:
-        return Center(child: AspectRatio(aspectRatio: 2.35, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 2.35, child: ClipRect(child: child)));
       case AspectMode.ratio9_16:
-        return Center(child: AspectRatio(aspectRatio: 9 / 16, child: DecoderPadCrop(child: child)));
+        return Center(child: AspectRatio(aspectRatio: 9 / 16, child: ClipRect(child: child)));
     }
   }
 

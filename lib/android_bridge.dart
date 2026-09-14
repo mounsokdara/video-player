@@ -285,12 +285,6 @@ class AndroidBridge {
     }
   }
 
-  static Future<void> cropDecoderPad() async {
-    try {
-      await _ch.invokeMethod('cropDecoderPad');
-    } catch (_) {}
-  }
-
   static Future<void> setStereoVolume(double left, double right) async {
     try {
       await _ch.invokeMethod('setStereoVolume', {

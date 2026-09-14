@@ -308,10 +308,6 @@ class MainActivity : FlutterActivity() {
                         "applyDecoder" -> {
                             result.success(decoder.apply())
                         }
-                        "cropDecoderPad" -> {
-                            decoder.cropPad()
-                            result.success(true)
-                        }
                         "setStereoVolume" -> {
                             val left = (call.argument<Double>("left") ?: 1.0).toFloat()
                             val right = (call.argument<Double>("right") ?: 1.0).toFloat()

@@ -133,7 +133,6 @@ class PlaybackSession {
       if (c.value.hasError) {
         throw StateError(c.value.errorDescription ?? 'Source error');
       }
-      await AndroidBridge.cropDecoderPad();
       return c;
     } catch (e) {
       try {

@@ -564,7 +564,11 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
               child: SizedBox(
                 width: vw,
                 height: vh,
-                child: DecoderPadCrop(child: VideoPlayer(c)),
+                child: Transform.scale(
+                  scale: 1.03,
+                  filterQuality: FilterQuality.low,
+                  child: VideoPlayer(c),
+                ),
               ),
             ),
           ),
