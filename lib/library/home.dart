@@ -4,21 +4,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
-import 'package:video_player/video_player.dart';
 
-import 'android_bridge.dart';
-import 'crash.dart';
-import 'insets.dart';
-import 'library.dart';
-import 'main.dart';
-import 'mini_player.dart';
-import 'models.dart';
-import 'player.dart';
-import 'player_route.dart';
-import 'session.dart';
-import 'settings.dart';
-import 'settings_ui.dart';
-import 'widgets.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/library.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/mini/mini_player.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/player/player.dart';
+import 'package:video_player_app/player/player_route.dart';
+import 'package:video_player_app/playback/session.dart';
+import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/settings/settings_ui.dart';
+import 'package:video_player_app/core/widgets.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.onSettingsChanged});
@@ -862,7 +861,7 @@ class VideosHub extends StatelessWidget {
                         SliverFillRemaining(
                           hasScrollBody: false,
                           child: Center(
-                            child: Text('No matching videos', style: TextStyle(color: scheme.onSurfaceVariant)),
+                            child: Text('No video found', style: TextStyle(color: scheme.onSurfaceVariant)),
                           ),
                         ),
                       ],

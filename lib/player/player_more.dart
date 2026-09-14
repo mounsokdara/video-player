@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'insets.dart';
-import 'main.dart';
-import 'models.dart';
-import 'settings.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 IconData playerActionIcon(String id) => switch (id) {
       'speed' => Icons.speed,

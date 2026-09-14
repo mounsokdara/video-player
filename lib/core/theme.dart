@@ -1,7 +1,7 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
-import 'settings.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class AppTheme {
   static ThemeData build({

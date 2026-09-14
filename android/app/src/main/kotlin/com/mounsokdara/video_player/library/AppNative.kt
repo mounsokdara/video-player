@@ -59,6 +59,12 @@ class AppNative(
                 result.success(true)
                 return true
             }
+            NativeConstants.Method.CLEAR_LOGS -> {
+                DeveloperLog.append(activity, "__clear__")
+                NativeCrashLog.clear(activity)
+                result.success(true)
+                return true
+            }
             else -> return false
         }
     }

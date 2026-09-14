@@ -3,21 +3,23 @@ import 'dart:async';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 
-import 'crash.dart';
-import 'home.dart';
-import 'insets.dart';
-import 'library.dart';
-import 'models.dart';
-import 'settings.dart';
-import 'theme.dart';
+import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/library/home.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/library.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/core/theme.dart';
 
-export 'settings.dart';
+export 'package:video_player_app/settings/settings.dart';
 
 final library = LibraryService(appSettings);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   await runZonedGuarded(() async {
     FlutterError.onError = (details) {
       CrashLog.record('FLUTTER', details.exceptionAsString(), details.stack);

@@ -2,14 +2,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'session.dart';
+import 'package:video_player_app/playback/session.dart';
 
 class MiniGeom {
   MiniGeom._();
   static const defW = 216.0;
   static const minW = 140.0;
   static const maxW = 520.0;
-  static const fallbackAr = 216 / 122;
+  static const fallbackAr = 16 / 9;
   static const barH = 44.0;
   static const safeInset = 16.0;
   static const arrowMaxW = 28.0;
@@ -36,7 +36,8 @@ class MiniPhysics {
 
   static double aspect(Size video) {
     if (video.width <= 0 || video.height <= 0) return MiniGeom.fallbackAr;
-    return video.width / video.height;
+    if (video.height >= video.width) return 9 / 16;
+    return 16 / 9;
   }
 
   static Size boxFor(double w, Size video) {

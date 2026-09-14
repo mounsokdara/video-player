@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'android_bridge.dart';
-import 'developer_log.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/core/developer_log.dart';
 
 final appNavigator = GlobalKey<NavigatorState>();
 
@@ -75,6 +75,17 @@ class CrashLog {
         record('LAST_LAUNCH', native.trim(), null);
       }
     } catch (_) {}
+  }
+
+  static Future<void> clear() async {
+    reports.clear();
+    lastAction = '';
+    _lastFingerprint = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('lastAction');
+    } catch (_) {}
+    await AndroidBridge.clearLogs();
   }
 
   static Future<void> breadcrumb(String action) async {

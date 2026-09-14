@@ -1,37 +1,19 @@
-# Video Player for android
+# Video Player
 
-A Material 3 open source Media video player 
+Material 3 local video player for Android. Playback uses [media_kit](https://pub.dev/packages/media_kit) (libmpv).
 
-This app under development it's may have alot bugs
+**v1.0.0 pre-Release** · `com.mounsokdara.video_player`
+
+[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.0_pre-Release/com.mounsokdara.video_player.apk)
+
+Uninstall any older build before installing this one.
 
 ## Features
 
-- Library of all videos on the device (Videos / Folders / Settings)
-- Hide individual library tabs from Settings > General; hidden ones stay reachable from the Videos / Folders 3-dot menu
-- Gesture playback: D-pad double-tap skip with accumulating seconds, center double-tap play/pause, 2× long-press
-- Previous, play, and next stay centered; lock on the left and screen mode on the right
-- YouTube-style mini player: pinch to scale, swipe off-screen to a thin edge handle (pauses while hidden), drag down to close
-- Brightness only while the player is open; leaving the video restores the system brightness
-- Equalizer attaches to the playing video's audio session
-- Does not mix with other apps: audio focus is requested like MediaPlayer (pause on loss, duck on transient duck, no self-pause)
-- Playlist modes: order, loop all, repeat one, shuffle, no autoplay
-- Aspect modes including fit, zoom, stretch, original pixel size, and forced ratios
-- Quick actions: screenshot, background play, speed (reorder and check from player More)
-- Background play uses a music-style notification with play / pause / next / previous and a seek bar
-- Open a video from another file manager; the app also appears in the system picker Open from sidebar
-- Screenshot the current frame to `DCIM/Screenshots`
-- Ten-band equalizer with presets, on/off on the player top bar, bass boost, and surround
-- Pitch shift (or time-stretch when off)
-- Color correction toggle + sliders
-- Always hide navigation bar, or show system bars only while the controller is visible
-- Properties include frame rate
-- Auto-refresh library toggle and pull-to-refresh on Videos / Folders
-- Settings persist (equalizer, tabs, resume, zoom, playback)
-- Deletes and renames need all-files access; failures tell you to enable it
-- Skips plain text and TypeScript files (`.ts` only if it is MPEG-TS)
-- PIP (system picture-in-picture) off by default and only while a video is actually playing
-- Mini player keeps a 0–1 dock scale so pinch-resize stays on screen
-- Wide / large-DPI layout (navigation rail on tablets)
+- Library of videos on internal storage, SD cards, and USB drives, including hidden files
+- Mini player snaps to **16:9** (landscape) or **9:16** (portrait)
+- Gestures, background notification, ten-band equalizer
+- HLS streams and local files through libmpv
 
 ## Build
 
@@ -40,23 +22,12 @@ flutter pub get
 flutter build apk --release
 ```
 
-The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
-
-Package ID: `com.mounsokdara.video_player`
-
 CI on `main` publishes the APK to GitHub Releases.
 
 ## Permissions
 
-The app requests:
-
-- **All-files access** (`MANAGE_EXTERNAL_STORAGE`) as the single storage prompt
-- USB host (OTG) and removable volumes
-- Notifications / foreground media playback for background play
-- Picture-in-picture
-
-On first launch, grant **All files access** in system settings. If a delete, rename, or read fails, the app tells you to enable it.
+On first launch, grant **All files access**. Deletes, renames, and hidden-folder scans need it.
 
 ## License
 
-Personal project. Source: this repository.
+Personal project.

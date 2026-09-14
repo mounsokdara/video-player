@@ -5,9 +5,9 @@ import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
-import 'android_bridge.dart';
-import 'models.dart';
-import 'settings.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class LibraryService {
   LibraryService(this.settings);
@@ -212,6 +212,10 @@ class LibraryService {
           folder: m['folder'] as String? ?? p.dirname(path),
           size: (m['size'] as num?)?.toInt() ?? 0,
           modified: DateTime.fromMillisecondsSinceEpoch((m['modified'] as num?)?.toInt() ?? 0),
+          duration: Duration(milliseconds: (m['durationMs'] as num?)?.toInt() ?? 0),
+          width: (m['width'] as num?)?.toInt() ?? 0,
+          height: (m['height'] as num?)?.toInt() ?? 0,
+          mime: m['mime'] as String?,
           progress: settings.resumeMap[path] ?? 0,
           bookmarked: settings.bookmarks.contains(path),
         ),

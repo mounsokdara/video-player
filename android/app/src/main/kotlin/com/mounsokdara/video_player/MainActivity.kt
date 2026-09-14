@@ -63,7 +63,6 @@ class MainActivity : FlutterActivity() {
     private lateinit var systemBars: SystemBarController
     private lateinit var audioFocus: AudioFocusController
     private lateinit var equalizer: EqualizerController
-    private lateinit var decoder: DecoderController
     private lateinit var appNative: AppNative
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,12 +71,6 @@ class MainActivity : FlutterActivity() {
             this,
             { flutterEngine },
             mainHandler,
-            { NativeCrashLog.breadcrumb(this, it) },
-            { NativeCrashLog.write(this, it) }
-        )
-        decoder = DecoderController(
-            this,
-            { flutterEngine },
             { NativeCrashLog.breadcrumb(this, it) },
             { NativeCrashLog.write(this, it) }
         )
@@ -301,15 +294,6 @@ class MainActivity : FlutterActivity() {
                             val pitchShift = call.argument<Boolean>("pitchShift") ?: false
                             equalizer.applyPlaybackParams(speed, pitchShift)
                             result.success(true)
-                        }
-                        "setDecoderMode" -> {
-                            result.success(decoder.setMode(call.argument<String>("mode") ?: "auto"))
-                        }
-                        "applyDecoder" -> {
-                            result.success(decoder.apply())
-                        }
-                        "videoLayout" -> {
-                            result.success(decoder.layout())
                         }
                         "setStereoVolume" -> {
                             val left = (call.argument<Double>("left") ?: 1.0).toFloat()
@@ -870,17 +854,83 @@ class MainActivity : FlutterActivity() {
                 if (hiddenOnly && !fileHidden) continue
                 if (!isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
+                val meta = probeMeta(f.absolutePath)
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
                         "name" to f.name,
                         "size" to f.length(),
                         "modified" to f.lastModified(),
-                        "folder" to (f.parent ?: "")
+                        "folder" to (f.parent ?: ""),
+                        "durationMs" to (meta["durationMs"] ?: 0L),
+                        "width" to (meta["width"] ?: 0),
+                        "height" to (meta["height"] ?: 0),
+                        "mime" to meta["mime"]
                     )
                 )
             }
         }
+    }
+
+
+    private fun probeMeta(path: String): Map<String, Any?> {
+        val out = HashMap<String, Any?>()
+        out["durationMs"] = 0L
+        out["width"] = 0
+        out["height"] = 0
+        out["mime"] = null
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(path)
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/")) continue
+                out["mime"] = mime
+                if (format.containsKey(MediaFormat.KEY_WIDTH)) {
+                    out["width"] = format.getInteger(MediaFormat.KEY_WIDTH)
+                }
+                if (format.containsKey(MediaFormat.KEY_HEIGHT)) {
+                    out["height"] = format.getInteger(MediaFormat.KEY_HEIGHT)
+                }
+                if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                    out["durationMs"] = format.getLong(MediaFormat.KEY_DURATION) / 1000L
+                }
+                break
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+        val dur = out["durationMs"] as? Long ?: 0L
+        val w = out["width"] as? Int ?: 0
+        if (dur > 0L && w > 0) return out
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(path)
+            if (w <= 0) {
+                out["width"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            }
+            if ((out["height"] as? Int ?: 0) <= 0) {
+                out["height"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            }
+            if (dur <= 0L) {
+                out["durationMs"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            }
+            if (out["mime"] == null) {
+                out["mime"] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+        return out
     }
 
     private fun shouldSkipDir(f: File, hidden: Boolean): Boolean {

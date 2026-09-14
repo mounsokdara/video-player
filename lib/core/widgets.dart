@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'android_bridge.dart';
-import 'insets.dart';
-import 'library.dart';
-import 'main.dart';
-import 'models.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/library.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/core/models.dart';
 
 class VideoThumb extends StatefulWidget {
   const VideoThumb({super.key, required this.item, this.radius = 12});

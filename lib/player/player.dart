@@ -9,24 +9,24 @@ import 'package:flutter/services.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:vibration/vibration.dart';
-import 'package:video_player/video_player.dart';
+import 'package:video_player_app/playback/engine.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import 'android_bridge.dart';
-import 'crash.dart';
-import 'hud.dart';
-import 'insets.dart';
-import 'library.dart';
-import 'main.dart';
-import 'models.dart';
-import 'player_fx.dart';
-import 'player_more.dart';
-import 'player_picture.dart';
-import 'settings.dart';
-import 'settings_ui.dart';
-import 'session.dart';
-import 'widgets.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/player/hud.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/library.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/player/player_fx.dart';
+import 'package:video_player_app/player/player_more.dart';
+import 'package:video_player_app/player/player_picture.dart';
+import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/settings/settings_ui.dart';
+import 'package:video_player_app/playback/session.dart';
+import 'package:video_player_app/core/widgets.dart';
 
 part 'player_gestures.dart';
 part 'player_sheets.dart';
@@ -43,7 +43,7 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   late int index;
-  VideoPlayerController? vc;
+  PlaybackEngine? vc;
   bool ready = false;
   bool showUi = true;
   bool locked = false;
@@ -339,15 +339,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (!mounted || gen != _playerGen) return;
     try {
       old?.removeListener(_tick);
-      await old?.dispose();
+      await old?.close();
     } catch (_) {}
-    VideoPlayerController? c;
+    PlaybackEngine? c;
     try {
       await CrashLog.breadcrumb('Open video ${item.path}');
       c = await PlaybackSession.openWithFallback(item);
       if (!mounted || gen != _playerGen) {
         try {
-          await c.dispose();
+          await c.close();
         } catch (_) {}
         return;
       }
@@ -376,14 +376,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_applyEq());
       _applyRotation();
       if (mounted && gen == _playerGen) setState(() => ready = true);
-      unawaited(PlaybackSession.loadPad(c).then((_) {
-        if (mounted && gen == _playerGen) setState(() {});
-      }));
       _armHide();
     } catch (e, s) {
       await CrashLog.breadcrumb('Open failed ${item.path}: $e');
       try {
-        await c?.dispose();
+        await c?.close();
       } catch (_) {}
       if (gen == _playerGen) vc = null;
       if (mounted) setState(() => ready = false);
@@ -408,11 +405,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         unawaited(CrashLog.breadcrumb('Source error ${item.path}: $desc'));
         if (!_endedLatch) {
           _endedLatch = true;
-          if (!PlaybackSession.usingSoftware && PlaybackSession.isCodecError(desc)) {
-            unawaited(_openCurrent());
-          } else {
-            unawaited(_next());
-          }
+          unawaited(_next());
         }
         return;
       }
@@ -590,7 +583,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         final dying = vc;
         vc = null;
         try {
-          dying?.dispose();
+          dying?.close();
         } catch (_) {}
         unawaited(AndroidBridge.stopBackground());
         unawaited(AndroidBridge.abandonAudioFocus());
@@ -624,7 +617,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         final dying = vc;
         vc = null;
         try {
-          dying?.dispose();
+          dying?.close();
         } catch (_) {}
         unawaited(AndroidBridge.stopBackground());
         unawaited(AndroidBridge.abandonAudioFocus());
@@ -924,7 +917,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       ),
     );
   }
-  Widget _seekHud(VideoPlayerController? c, EdgeInsets pad) {
+  Widget _seekHud(PlaybackEngine? c, EdgeInsets pad) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
     final frac = dur.inMilliseconds == 0 ? 0.0 : ((_scrub ?? (pos.inMilliseconds / dur.inMilliseconds)).clamp(0.0, 1.0).toDouble());
@@ -953,7 +946,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       ),
     );
   }
-  Widget _video(VideoPlayerController c, Size screen) {
+  Widget _video(PlaybackEngine c, Size screen) {
     if (_handedOff) return const ColoredBox(color: Colors.black);
     try {
       if (!c.value.isInitialized) {
@@ -962,27 +955,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } catch (_) {
       return const SizedBox.expand();
     }
-    Widget player = VideoPlayer(key: ValueKey(_playerGen), c);
+    Widget player = AppVideo(key: ValueKey(_playerGen), engine: c);
     var vw = c.value.size.width;
     var vh = c.value.size.height;
     if (vw <= 1 || vh <= 1) {
       vw = screen.width.clamp(1, 10000).toDouble();
       vh = screen.height.clamp(1, 10000).toDouble();
     }
-    var pad = PlaybackSession.videoPad;
-    if (pad.visW < 2 || pad.visH < 2) {
-      pad = VideoPad.resolve(size: Size(vw, vh));
-    } else if ((pad.visW - vw).abs() > 1 || (pad.visH - vh).abs() > 1) {
-      pad = VideoPad.resolve(size: Size(vw, vh), native: {
-        'codedW': pad.codedW,
-        'codedH': pad.codedH,
-        'sarNum': pad.sarNum,
-        'sarDen': pad.sarDen,
-        'cropL': pad.cropL,
-        'cropT': pad.cropT,
-      });
-    }
-    player = VlcSurface(pad: pad, screen: screen, mode: aspect, child: player);
+    player = VlcFit(visW: vw, visH: vh, screen: screen, mode: aspect, child: player);
     final w = screen.width <= 0 ? 1.0 : screen.width;
     final h = screen.height <= 0 ? 1.0 : screen.height;
     player = SizedBox(width: w, height: h, child: player);
@@ -1046,7 +1026,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  List<Widget> _chrome(VideoPlayerController? c, Size size) {
+  List<Widget> _chrome(PlaybackEngine? c, Size size) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
     final playing = c?.value.isPlaying ?? false;

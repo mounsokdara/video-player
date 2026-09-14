@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
-import 'models.dart';
+import 'package:video_player_app/core/models.dart';
 
 class AndroidBridge {
   AndroidBridge._();
@@ -269,30 +269,6 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<bool> setDecoderMode(String mode) async {
-    try {
-      return await _ch.invokeMethod<bool>('setDecoderMode', {'mode': mode}) ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<bool> applyDecoder() async {
-    try {
-      return await _ch.invokeMethod<bool>('applyDecoder') ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<Map<String, dynamic>?> videoLayout() async {
-    try {
-      final raw = await _ch.invokeMethod('videoLayout');
-      if (raw is Map) return Map<String, dynamic>.from(raw);
-    } catch (_) {}
-    return null;
-  }
-
   static Future<void> setStereoVolume(double left, double right) async {
     try {
       await _ch.invokeMethod('setStereoVolume', {
@@ -464,6 +440,12 @@ class AndroidBridge {
   static Future<void> debugLog(String line) async {
     try {
       await _ch.invokeMethod('debugLog', {'line': line});
+    } catch (_) {}
+  }
+
+  static Future<void> clearLogs() async {
+    try {
+      await _ch.invokeMethod('clearLogs');
     } catch (_) {}
   }
 

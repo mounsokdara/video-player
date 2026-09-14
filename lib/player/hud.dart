@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import 'main.dart';
-import 'settings.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class HudFab {
   HudFab({required this.id, required this.x, required this.y, this.size = 56});

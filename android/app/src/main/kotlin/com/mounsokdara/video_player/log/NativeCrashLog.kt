@@ -27,6 +27,25 @@ object NativeCrashLog {
         return if (out.isEmpty()) "No crash captured." else out
     }
 
+    fun clear(context: Context) {
+        try {
+            File(context.filesDir, NativeConstants.FILE_CRASH).delete()
+        } catch (_: Exception) {
+        }
+        try {
+            File(context.filesDir, NativeConstants.FILE_ACTION).writeText("")
+        } catch (_: Exception) {
+        }
+        try {
+            File(context.filesDir, NativeConstants.FILE_DIRTY).delete()
+        } catch (_: Exception) {
+        }
+        try {
+            File(context.filesDir, NativeConstants.FILE_DEBUG).writeText("")
+        } catch (_: Exception) {
+        }
+    }
+
     fun write(context: Context, text: String) {
         try {
             File(context.filesDir, NativeConstants.FILE_CRASH).writeText(

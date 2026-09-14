@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'models.dart';
-import 'settings.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class PictureLooks {
   const PictureLooks({
@@ -164,101 +164,19 @@ class VideoPicture extends StatelessWidget {
   }
 }
 
-class VideoPad {
-  const VideoPad({
+
+class VlcFit extends StatelessWidget {
+  const VlcFit({
+    super.key,
     required this.visW,
     required this.visH,
-    required this.codedW,
-    required this.codedH,
-    this.sarNum = 1,
-    this.sarDen = 1,
-    this.cropL = 0,
-    this.cropT = 0,
-  });
-
-  final double visW;
-  final double visH;
-  final double codedW;
-  final double codedH;
-  final double sarNum;
-  final double sarDen;
-  final double cropL;
-  final double cropT;
-
-  static const none = VideoPad(visW: 0, visH: 0, codedW: 0, codedH: 0);
-
-  bool get hasPad => codedW > visW + 0.5 || codedH > visH + 0.5;
-
-  static double _align16(double v) {
-    if (v <= 1) return v;
-    return ((v + 15) ~/ 16) * 16.0;
-  }
-
-  factory VideoPad.resolve({required Size size, Map<String, dynamic>? native}) {
-    var visW = size.width;
-    var visH = size.height;
-    var codedW = visW;
-    var codedH = visH;
-    var sarNum = 1.0;
-    var sarDen = 1.0;
-    var cropL = 0.0;
-    var cropT = 0.0;
-    final n = native;
-    if (n != null) {
-      final nVisW = (n['visW'] as num?)?.toDouble() ?? 0;
-      final nVisH = (n['visH'] as num?)?.toDouble() ?? 0;
-      final nCodedW = (n['codedW'] as num?)?.toDouble() ?? 0;
-      final nCodedH = (n['codedH'] as num?)?.toDouble() ?? 0;
-      if (visW < 2 && nVisW >= 2) visW = nVisW;
-      if (visH < 2 && nVisH >= 2) visH = nVisH;
-      if (nCodedW > codedW) codedW = nCodedW;
-      if (nCodedH > codedH) codedH = nCodedH;
-      final sn = (n['sarNum'] as num?)?.toDouble();
-      final sd = (n['sarDen'] as num?)?.toDouble();
-      if (sn != null && sd != null && sn > 0 && sd > 0) {
-        sarNum = sn;
-        sarDen = sd;
-      }
-      cropL = (n['cropL'] as num?)?.toDouble() ?? 0;
-      cropT = (n['cropT'] as num?)?.toDouble() ?? 0;
-      if (cropL < 0) cropL = 0;
-      if (cropT < 0) cropT = 0;
-    }
-    if (visW < 2) visW = 1;
-    if (visH < 2) visH = 1;
-    if (codedW < visW) codedW = visW;
-    if (codedH < visH) codedH = visH;
-    if (codedW <= visW && visW > 1 && visW % 16 != 0) {
-      codedW = _align16(visW);
-    }
-    if (codedH <= visH && visH > 1 && visH % 16 != 0) {
-      codedH = _align16(visH);
-    }
-    if (cropL > codedW - visW) cropL = math.max(0, codedW - visW);
-    if (cropT > codedH - visH) cropT = math.max(0, codedH - visH);
-    return VideoPad(
-      visW: visW,
-      visH: visH,
-      codedW: codedW,
-      codedH: codedH,
-      sarNum: sarNum,
-      sarDen: sarDen,
-      cropL: cropL,
-      cropT: cropT,
-    );
-  }
-}
-
-class VlcSurface extends StatelessWidget {
-  const VlcSurface({
-    super.key,
-    required this.pad,
     required this.screen,
     required this.mode,
     required this.child,
   });
 
-  final VideoPad pad;
+  final double visW;
+  final double visH;
   final Size screen;
   final AspectMode mode;
   final Widget child;
@@ -268,17 +186,11 @@ class VlcSurface extends StatelessWidget {
     final sw = screen.width;
     final sh = screen.height;
     if (sw < 2 || sh < 2) return ClipRect(child: child);
-    final visW = math.max(pad.visW, 1.0);
-    final visH = math.max(pad.visH, 1.0);
-    final codedW = math.max(pad.codedW, visW);
-    final codedH = math.max(pad.codedH, visH);
+    final vw = math.max(visW, 1.0);
+    final vh = math.max(visH, 1.0);
     var dw = sw;
     var dh = sh;
-    var vw = visW;
-    if (pad.sarDen != 0 && pad.sarNum != pad.sarDen) {
-      vw = visW * pad.sarNum / pad.sarDen;
-    }
-    var ar = vw / visH;
+    var ar = vw / vh;
     final dar = dw / dh;
     switch (mode) {
       case AspectMode.fit:
@@ -296,7 +208,7 @@ class VlcSurface extends StatelessWidget {
       case AspectMode.stretch:
         break;
       case AspectMode.original:
-        dh = visH;
+        dh = vh;
         dw = vw;
       case AspectMode.ratio16_9:
         ar = 16 / 9;
@@ -341,77 +253,14 @@ class VlcSurface extends StatelessWidget {
           dw = dh * ar;
         }
     }
-    final surfaceW = dw * codedW / visW;
-    final surfaceH = dh * codedH / visH;
-    final shiftX = dw * pad.cropL / visW;
-    final shiftY = dh * pad.cropT / visH;
-    Widget painted = child;
-    if (shiftX > 0.5 || shiftY > 0.5) {
-      painted = Transform.translate(offset: Offset(-shiftX, -shiftY), child: painted);
-    }
-    Widget video;
-    if (codedW > visW + 0.5 || codedH > visH + 0.5) {
-      video = SizedBox(
-        width: dw,
-        height: dh,
-        child: ClipRect(
-          clipBehavior: Clip.hardEdge,
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            minWidth: surfaceW,
-            maxWidth: surfaceW,
-            minHeight: surfaceH,
-            maxHeight: surfaceH,
-            child: SizedBox(width: surfaceW, height: surfaceH, child: painted),
-          ),
-        ),
-      );
-    } else {
-      video = SizedBox(width: dw, height: dh, child: painted);
-    }
     return ClipRect(
       clipBehavior: Clip.hardEdge,
       child: SizedBox(
         width: sw,
         height: sh,
-        child: Center(child: video),
-      ),
-    );
-  }
-}
-
-class DecoderPadClip extends StatelessWidget {
-  const DecoderPadClip({
-    super.key,
-    required this.pad,
-    required this.child,
-  });
-
-  final VideoPad pad;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final visW = math.max(pad.visW, 1.0);
-    final visH = math.max(pad.visH, 1.0);
-    final codedW = math.max(pad.codedW, visW);
-    final codedH = math.max(pad.codedH, visH);
-    if (codedW <= visW + 0.5 && codedH <= visH + 0.5) {
-      return child;
-    }
-    Widget painted = child;
-    if (pad.cropL > 0.5 || pad.cropT > 0.5) {
-      painted = Transform.translate(offset: Offset(-pad.cropL, -pad.cropT), child: painted);
-    }
-    return ClipRect(
-      clipBehavior: Clip.hardEdge,
-      child: OverflowBox(
-        alignment: Alignment.topLeft,
-        minWidth: codedW,
-        maxWidth: codedW,
-        minHeight: codedH,
-        maxHeight: codedH,
-        child: SizedBox(width: codedW, height: codedH, child: painted),
+        child: Center(
+          child: SizedBox(width: dw, height: dh, child: child),
+        ),
       ),
     );
   }

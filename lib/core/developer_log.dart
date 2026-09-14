@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'android_bridge.dart';
-import 'settings.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class DeveloperLog {
   DeveloperLog._();
@@ -23,6 +23,6 @@ class DeveloperLog {
 
   static void clear() {
     lines.clear();
-    unawaited(AndroidBridge.debugLog('__clear__'));
+    unawaited(AndroidBridge.clearLogs());
   }
 }

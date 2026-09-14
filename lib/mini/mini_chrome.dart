@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'mini_geom.dart';
+import 'package:video_player_app/mini/mini_geom.dart';
 
 class MiniStickyArrow extends StatelessWidget {
   const MiniStickyArrow({

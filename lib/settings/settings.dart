@@ -3,7 +3,7 @@ import 'dart:ui';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'models.dart';
+import 'package:video_player_app/core/models.dart';
 
 final appSettings = AppSettings();
 

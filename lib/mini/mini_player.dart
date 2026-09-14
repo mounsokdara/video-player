@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:video_player_app/playback/engine.dart';
 
-import 'android_bridge.dart';
-import 'mini_chrome.dart';
-import 'mini_geom.dart';
-import 'player_picture.dart';
-import 'session.dart';
-import 'settings.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/mini/mini_chrome.dart';
+import 'package:video_player_app/mini/mini_geom.dart';
+import 'package:video_player_app/player/player_picture.dart';
+import 'package:video_player_app/playback/session.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class MiniPlayerOverlay extends StatefulWidget {
   const MiniPlayerOverlay({
@@ -62,7 +62,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   Offset _parentOrigin = Offset.zero;
   Offset _anchorInWidget = Offset.zero;
 
-  VideoPlayerController? _ctrl;
+  PlaybackEngine? _ctrl;
 
   @override
   void initState() {
@@ -553,23 +553,13 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     Widget frame;
     try {
       if (c != null && c.value.isInitialized) {
-        final vw = c.value.size.width.clamp(1, 4096).toDouble();
-        final vh = c.value.size.height.clamp(1, 4096).toDouble();
-        var pad = PlaybackSession.videoPad;
-        if (pad.visW < 2 || pad.visH < 2) {
-          pad = VideoPad.resolve(size: Size(vw, vh));
-        }
         frame = VideoPicture(
           looks: PictureLooks.current(),
           child: ClipRect(
             child: FittedBox(
               fit: BoxFit.cover,
               clipBehavior: Clip.hardEdge,
-              child: SizedBox(
-                width: vw,
-                height: vh,
-                child: DecoderPadClip(pad: pad, child: VideoPlayer(c)),
-              ),
+              child: AppVideo(engine: c),
             ),
           ),
         );

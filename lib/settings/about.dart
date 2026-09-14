@@ -5,9 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'crash.dart';
-import 'developer_log.dart';
-import 'settings.dart';
+import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/core/developer_log.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class AboutInfo {
   AboutInfo._();
@@ -189,10 +189,11 @@ class _DeveloperConsolePageState extends State<DeveloperConsolePage> {
             icon: const Icon(Icons.copy),
           ),
           IconButton(
-            tooltip: 'Clear debug',
-            onPressed: () {
+            tooltip: 'Clear',
+            onPressed: () async {
               DeveloperLog.clear();
-              setState(() {});
+              await CrashLog.clear();
+              if (mounted) setState(() {});
             },
             icon: const Icon(Icons.delete_outline),
           ),

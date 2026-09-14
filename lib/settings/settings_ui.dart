@@ -3,15 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'android_bridge.dart';
-import 'about.dart';
-import 'crash.dart';
-import 'hud.dart';
-import 'insets.dart';
-import 'main.dart';
-import 'models.dart';
-import 'settings.dart';
-import 'widgets.dart';
+import 'package:video_player_app/native/android_bridge.dart';
+import 'package:video_player_app/settings/about.dart';
+import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/player/hud.dart';
+import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/main.dart';
+import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/core/widgets.dart';
 
 class SettingsHub extends StatelessWidget {
   const SettingsHub({super.key, required this.onChanged});

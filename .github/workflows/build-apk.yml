@@ -37,7 +37,12 @@ jobs:
           tag_name: v1.0.0_pre-Release
           name: Video Player v1.0.0 pre-Release
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
-          generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: true
           make_latest: true
+          generate_release_notes: false
+          body: |
+            Playback is libmpv via media_kit. Mini player locks to 16:9 or 9:16.
+            Hidden files show duration and dimensions. Console Clear wipes debug and crash logs.
+
+            Uninstall the previous APK before installing this one.

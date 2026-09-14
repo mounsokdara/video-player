@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'android_bridge.dart';
+import 'package:video_player_app/native/android_bridge.dart';
 
 class SystemBars {
   static int popupCount = 0;
