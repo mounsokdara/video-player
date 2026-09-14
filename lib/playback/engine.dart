@@ -239,8 +239,9 @@ class PlaybackEngine extends ChangeNotifier {
 }
 
 class AppVideo extends StatelessWidget {
-  const AppVideo({super.key, required this.engine});
+  const AppVideo({super.key, required this.engine, this.fit = BoxFit.fill});
   final PlaybackEngine engine;
+  final BoxFit fit;
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +250,7 @@ class AppVideo extends StatelessWidget {
     return Video(
       controller: c,
       fill: Colors.black,
-      fit: BoxFit.fill,
+      fit: fit,
       controls: NoVideoControls,
     );
   }

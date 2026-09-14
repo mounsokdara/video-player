@@ -429,8 +429,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         unawaited(_syncBackground());
       }
       if (!_endedLatch &&
-          c.value.position >= c.value.duration - const Duration(milliseconds: 400) &&
-          !c.value.isPlaying) {
+          (c.value.completed ||
+              (c.value.duration > Duration.zero &&
+                  c.value.position >= c.value.duration - const Duration(milliseconds: 400) &&
+                  !c.value.isPlaying))) {
         _endedLatch = true;
         _onEnded();
       }
@@ -1347,6 +1349,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         };
         await appSettings.save();
         _flash('${appSettings.decoder.name.toUpperCase()} decoder');
+        unawaited(_openCurrent());
       case 'screenshot':
         _screenshot();
       case 'zoom':

@@ -555,12 +555,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       if (c != null && c.value.isInitialized) {
         frame = VideoPicture(
           looks: PictureLooks.current(),
-          child: ClipRect(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              clipBehavior: Clip.hardEdge,
-              child: AppVideo(engine: c),
-            ),
+          child: ColoredBox(
+            color: Colors.black,
+            child: AppVideo(engine: c, fit: BoxFit.contain),
           ),
         );
       } else {
