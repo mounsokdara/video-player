@@ -42,7 +42,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            Background play keeps audio going after you leave the app.
-            More uses the default Material 3 ripple.
+            Background play uses a foreground notification and does not restart
+            playback when you come back or when you left paused.
 
             Uninstall the previous APK before installing this one.

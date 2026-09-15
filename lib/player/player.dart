@@ -88,7 +88,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Timer? _zoomHudTimer;
   DateTime? _tapAt;
   Offset? _tapPos;
-  DateTime _lastBg = DateTime.fromMillisecondsSinceEpoch(0);
   bool _chromeHeld = false;
   bool _uiBeforeTap = true;
   final _ripples = <RippleSpec>[];
@@ -150,6 +149,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _lastPlaying = vc?.value.isPlaying ?? false;
       _endedLatch = false;
       _openFails = 0;
+      final keptEngine = vc;
+      if (keptEngine != null) PlaybackSession.bind(keptEngine, item);
       unawaited(WakelockPlus.enable());
       unawaited(AndroidBridge.setKeepScreenOn(true));
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -160,7 +161,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _applySystemUi();
       _applyRotation();
       _applySpeed();
-      _syncBackground();
       _armHide();
     } else {
       if (PlaybackSession.controller != null && PlaybackSession.controller != vc) {
@@ -179,15 +179,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (e['type'] == 'media') {
         switch (e['action']) {
           case 'play':
-            PlaybackSession.userPaused = false;
-            PlaybackSession.holdingAudio = PlaybackSession.inBackground && appSettings.backgroundPlay;
             unawaited(AndroidBridge.requestAudioFocus());
             vc?.setVolume(1);
             unawaited(AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight));
-            unawaited(vc?.forcePlay() ?? Future<void>.value());
+            unawaited(vc?.play() ?? Future<void>.value());
           case 'pause':
-            PlaybackSession.userPaused = true;
-            PlaybackSession.holdingAudio = false;
             vc?.pause();
           case 'duck':
             vc?.setVolume(0.2);
@@ -208,19 +204,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _persistProgress();
-      unawaited(PlaybackSession.enterBackground(
+      unawaited(PlaybackSession.onAway(
         engine: vc,
         title: item.title,
         artist: item.folderName,
       ));
     } else if (state == AppLifecycleState.resumed) {
-      unawaited(PlaybackSession.leaveBackground(engine: vc));
+      unawaited(PlaybackSession.onBack(engine: vc));
       _applySystemUi();
-      if (appSettings.backgroundPlay) unawaited(_syncBackground());
     }
   }
 
@@ -295,29 +288,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _syncBackground() async {
-    if (!appSettings.backgroundPlay) {
-      await AndroidBridge.stopBackground();
-      return;
-    }
-    final c = vc;
-    final playing = !PlaybackSession.userPaused &&
-        (PlaybackSession.holdingAudio || (c?.wantPlay ?? false) || (c?.value.isPlaying ?? false));
-    await AndroidBridge.startBackground(
-      title: item.title,
-      artist: item.folderName,
-      playing: playing,
-      positionMs: c?.value.position.inMilliseconds ?? 0,
-      durationMs: c?.value.duration.inMilliseconds ?? 0,
-    );
-    await AndroidBridge.updateBackground(
-      playing: playing,
-      positionMs: c?.value.position.inMilliseconds ?? 0,
-      durationMs: c?.value.duration.inMilliseconds ?? 0,
-      title: item.title,
-    );
-  }
-
   Future<void> _persistProgress() async {
     final c = vc;
     if (c == null || !c.value.isInitialized) return;
@@ -384,13 +354,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         throw StateError(engine.value.errorDescription ?? 'Player failed to start');
       }
       vc = engine;
+      PlaybackSession.bind(engine, item);
       _openFails = 0;
       _endedLatch = false;
       await AndroidBridge.requestAudioFocus();
       await engine.play();
       _lastPlaying = true;
       _syncPip();
-      unawaited(_syncBackground());
       unawaited(_applySpeed());
       unawaited(AndroidBridge.preparePreview(item.path));
       unawaited(_applyEq());
@@ -441,21 +411,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
       final playing = c.value.isPlaying;
       final nowTick = DateTime.now();
-      if (PlaybackSession.holdingAudio &&
-          !PlaybackSession.userPaused &&
-          !playing &&
-          !c.value.completed &&
-          c.wantPlay) {
-        unawaited(c.forcePlay());
-      }
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
-        unawaited(_syncBackground());
-      }
-      if (appSettings.backgroundPlay && nowTick.difference(_lastBg) >= const Duration(milliseconds: 800)) {
-        _lastBg = nowTick;
-        unawaited(_syncBackground());
       }
       if (!_endedLatch &&
           (c.value.completed ||
@@ -640,7 +598,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           speed: speed,
           aspect: aspect,
         );
-        unawaited(_syncBackground());
       } else if (PlaybackSession.controller == null) {
         vc = null;
       } else {
@@ -684,7 +641,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         speed: speed,
         aspect: aspect,
       );
-      unawaited(_syncBackground());
     } else {
       PlaybackSession.keepAlive = false;
     }
@@ -1446,11 +1402,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       await Permission.notification.request();
     } catch (_) {}
-    if (on) {
-      PlaybackSession.userPaused = false;
-      unawaited(AndroidBridge.requestAudioFocus());
-    }
-    await _syncBackground();
+    await PlaybackSession.syncNotification(engine: vc, title: item.title, artist: item.folderName);
     setState(() {});
     _flash(on ? 'Background play on' : 'Background play off');
   }
@@ -1480,7 +1432,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     setState(() {});
     _armHide();
-    unawaited(_syncBackground());
   }
 
   String _stamp(Duration d) {

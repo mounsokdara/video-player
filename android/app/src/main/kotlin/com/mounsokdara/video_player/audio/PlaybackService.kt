@@ -34,7 +34,7 @@ class PlaybackService : Service() {
             if (!playing) return
             positionMs += 500
             if (durationMs > 0 && positionMs > durationMs) positionMs = durationMs
-            session?.setPlaybackState(buildState())
+            publishState()
             ticker.postDelayed(this, 500)
         }
     }
@@ -58,17 +58,19 @@ class PlaybackService : Service() {
         session = MediaSessionCompat(this, "video_player").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
+                    if (playing) return
                     playing = true
                     acquireWake()
                     MainActivity.emitMedia("play")
-                    notifyNow()
+                    showForeground()
                 }
 
                 override fun onPause() {
+                    if (!playing) return
                     playing = false
                     releaseWake()
                     MainActivity.emitMedia("pause")
-                    notifyNow()
+                    showForeground()
                 }
 
                 override fun onSkipToNext() {
@@ -82,7 +84,7 @@ class PlaybackService : Service() {
                 override fun onSeekTo(pos: Long) {
                     MainActivity.emitMedia("seek", mapOf("positionMs" to pos))
                     positionMs = pos.toInt().coerceAtLeast(0)
-                    notifyNow()
+                    showForeground()
                 }
 
                 override fun onStop() {
@@ -94,22 +96,24 @@ class PlaybackService : Service() {
             setPlaybackToLocal(AudioManager.STREAM_MUSIC)
             isActive = true
         }
-        startInForeground()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isRunning = true
-        acquireWake()
         when (intent?.action) {
             ACTION_PLAY -> {
-                playing = true
-                acquireWake()
-                MainActivity.emitMedia("play")
+                if (!playing) {
+                    playing = true
+                    acquireWake()
+                    MainActivity.emitMedia("play")
+                }
             }
             ACTION_PAUSE -> {
-                playing = false
-                releaseWake()
-                MainActivity.emitMedia("pause")
+                if (playing) {
+                    playing = false
+                    releaseWake()
+                    MainActivity.emitMedia("pause")
+                }
             }
             ACTION_NEXT -> MainActivity.emitMedia("next")
             ACTION_PREV -> MainActivity.emitMedia("prev")
@@ -135,7 +139,7 @@ class PlaybackService : Service() {
             }
         }
         if (playing) acquireWake() else releaseWake()
-        startInForeground()
+        showForeground()
         return START_STICKY
     }
 
@@ -157,7 +161,11 @@ class PlaybackService : Service() {
             .build()
     }
 
-    private fun startInForeground() {
+    private fun publishState() {
+        session?.setPlaybackState(buildState())
+    }
+
+    private fun showForeground() {
         session?.setMetadata(
             MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
@@ -167,7 +175,7 @@ class PlaybackService : Service() {
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs.toLong())
                 .build()
         )
-        session?.setPlaybackState(buildState())
+        publishState()
         stopTicker()
         if (playing) ticker.postDelayed(tickRunnable, 500)
         val notification = buildNotification()
@@ -186,10 +194,6 @@ class PlaybackService : Service() {
             } catch (_: Throwable) {
             }
         }
-    }
-
-    private fun notifyNow() {
-        startInForeground()
     }
 
     private fun buildNotification(): Notification {
@@ -257,7 +261,7 @@ class PlaybackService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (playing) {
             acquireWake()
-            startInForeground()
+            showForeground()
             return
         }
         stopSelf()

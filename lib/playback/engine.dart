@@ -40,11 +40,9 @@ class PlaybackEngine extends ChangeNotifier {
   Future<void>? _inFlight;
   double _rate = 1;
   bool _pitchShift = false;
-  bool _audioOnly = false;
   bool wantPlay = false;
 
   bool get hasPlayer => _player != null && !_closed;
-  bool get audioOnly => _audioOnly;
 
   Future<void> open(String path, {required String hwdec}) async {
     await _queue(() => _openBody(path, hwdec: hwdec));
@@ -99,7 +97,6 @@ class PlaybackEngine extends ChangeNotifier {
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
     await player.setRate(_rate <= 0 ? 1 : _rate);
-    if (_audioOnly) await _applyAudioOnly(true);
     _emit(player);
     if (value.hasError) {
       throw StateError(value.errorDescription ?? 'Source error');
@@ -194,14 +191,6 @@ class PlaybackEngine extends ChangeNotifier {
           push();
           return;
         }
-        if (_audioOnly && wantPlay) {
-          final dur = player.state.duration;
-          final pos = player.state.position;
-          if (dur > Duration.zero && pos < dur - const Duration(milliseconds: 800)) {
-            unawaited(forcePlay());
-            return;
-          }
-        }
         value = EngineValue(
           isInitialized: true,
           isPlaying: false,
@@ -254,36 +243,6 @@ class PlaybackEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setAudioOnly(bool on) async {
-    _audioOnly = on;
-    await _applyAudioOnly(on);
-  }
-
-  Future<void> _applyAudioOnly(bool on) async {
-    try {
-      final platform = _player?.platform;
-      if (platform is NativePlayer) {
-        await platform.setProperty('vid', on ? 'no' : 'auto');
-        if (on) {
-          await platform.setProperty('pause', 'no');
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> forcePlay() async {
-    wantPlay = true;
-    try {
-      await _player?.play();
-    } catch (_) {}
-    try {
-      final platform = _player?.platform;
-      if (platform is NativePlayer) {
-        await platform.setProperty('pause', 'no');
-      }
-    } catch (_) {}
-  }
-
   Future<void> play() async {
     wantPlay = true;
     await _player?.play();
@@ -314,7 +273,6 @@ class PlaybackEngine extends ChangeNotifier {
     if (_closed) return;
     _closed = true;
     wantPlay = false;
-    _audioOnly = false;
     await _disposePlayer();
     super.dispose();
   }

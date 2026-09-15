@@ -247,11 +247,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         await c.play();
       }
       if (appSettings.backgroundPlay) {
-        await AndroidBridge.updateBackground(
-          playing: c.value.isPlaying,
-          positionMs: c.value.position.inMilliseconds,
-          durationMs: c.value.duration.inMilliseconds,
-        );
+        await PlaybackSession.syncNotification();
       } else {
         await AndroidBridge.stopBackground();
       }

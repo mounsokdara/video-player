@@ -322,11 +322,8 @@ class _VideoSettingsState extends State<VideoSettings> {
                   try {
                     await Permission.notification.request();
                   } catch (_) {}
-                  await PlaybackSession.keepBackgroundAlive();
-                } else {
-                  PlaybackSession.holdingAudio = false;
-                  await AndroidBridge.stopBackground();
                 }
+                await PlaybackSession.syncNotification();
               }());
             },
           ),
