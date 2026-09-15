@@ -1157,10 +1157,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 onTap: (id) => unawaited(_runAction(id)),
               ),
             if (showUi && !locked) ..._chrome(c, size, watch: watch, pad: pad),
-            if (appSettings.playlistStyle == PlaylistUiStyle.youtube &&
-                watch &&
-                (!showUi || locked || size.height < 168))
-              _ytFrameButtons(watch: true, pad: pad, stageH: size.height),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
             PlayerRippleLayer(
               size: size,
@@ -1194,36 +1190,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         backgroundColor: Colors.black,
         resizeToAvoidBottomInset: false,
         body: body,
-      ),
-    );
-  }
-
-  Widget _ytFrameButtons({required bool watch, required EdgeInsets pad, required double stageH}) {
-    final extra = watch ? 0.0 : pad.bottom;
-    final transport = showUi && !locked && stageH >= 168;
-    final bottom = (transport ? 118.0 : (watch ? 8.0 : 20.0)) + extra;
-    return Positioned(
-      right: 4 + pad.right,
-      bottom: bottom,
-      child: Material(
-        color: Colors.black.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(24),
-        child: IconButton(
-          tooltip: watch ? 'Maximize' : 'Minimize',
-          onPressed: () => _setYtMax(watch),
-          icon: AnimatedSwitcher(
-            duration: appSettings.reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
-            transitionBuilder: (child, anim) => FadeTransition(
-              opacity: anim,
-              child: ScaleTransition(scale: anim, child: child),
-            ),
-            child: Icon(
-              watch ? Icons.fullscreen : Icons.fullscreen_exit,
-              key: ValueKey(watch),
-              color: Colors.white,
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -1552,6 +1518,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   if (!watch)
                     Expanded(
                       child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  if (watch && compact)
+                    IconButton(
+                      tooltip: 'Maximize',
+                      onPressed: () => _setYtMax(true),
+                      icon: const Icon(Icons.fullscreen, color: Colors.white),
                     ),
                   if (watch)
                     Expanded(
