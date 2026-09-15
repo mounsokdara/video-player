@@ -2,11 +2,7 @@ part of 'player.dart';
 
 extension PlayerSheets on _PlayerPageState {
   Future<void> _playlist() async {
-    if (appSettings.playlistStyle == PlaylistUiStyle.youtube) {
-      if (_watch) return;
-      setState(() => _ytQueue = true);
-      return;
-    }
+    if (appSettings.playlistStyle == PlaylistUiStyle.youtube) return;
     await _sheetPlaylist();
   }
 

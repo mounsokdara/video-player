@@ -43,7 +43,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
+class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late int index;
   PlaybackEngine? vc;
   bool ready = false;
@@ -118,14 +118,29 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int _openFails = 0;
   bool _ytMax = false;
   bool _ytQueue = false;
+  late final AnimationController _ytMaxAnim;
+  final GlobalKey _ytVideoKey = GlobalKey();
+  final ScrollController _ytScroll = ScrollController();
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
-  bool get _watch => appSettings.playlistStyle == PlaylistUiStyle.youtube && !_ytMax;
+  bool get _watch => appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytMaxAnim.value < 0.85;
 
   @override
   void initState() {
     super.initState();
+    _ytMaxAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _ytMaxAnim.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _ytMaxAnim.addStatusListener((s) {
+      if (s == AnimationStatus.completed || s == AnimationStatus.dismissed) {
+        if (mounted) _applySystemUi();
+      }
+    });
     WidgetsBinding.instance.addObserver(this);
     index = widget.index.clamp(0, widget.playlist.length - 1);
     aspect = appSettings.aspect;
@@ -283,11 +298,24 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void _setYtMax(bool max) {
+    if (max == _ytMax && (max ? _ytMaxAnim.isCompleted : _ytMaxAnim.isDismissed)) {
+      return;
+    }
     setState(() {
       _ytMax = max;
       if (!max) _ytQueue = false;
       showUi = true;
     });
+    if (max && _ytScroll.hasClients) {
+      _ytScroll.jumpTo(0);
+    }
+    if (appSettings.reduceMotion) {
+      _ytMaxAnim.value = max ? 1 : 0;
+    } else if (max) {
+      unawaited(_ytMaxAnim.forward());
+    } else {
+      unawaited(_ytMaxAnim.reverse());
+    }
     _applySystemUi();
     _armHide();
   }
@@ -583,6 +611,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _leftHide?.cancel();
     _rightHide?.cancel();
     _midHide?.cancel();
+    _ytMaxAnim.dispose();
+    _ytScroll.dispose();
     vc?.removeListener(_tick);
     _persistProgress();
     unawaited(_unhookBrightness());
@@ -686,62 +716,127 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           setState(() => _ytQueue = false);
           return;
         }
-        if (appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytMax) {
+        if (appSettings.playlistStyle == PlaylistUiStyle.youtube &&
+            (_ytMax || _ytMaxAnim.value > 0.01)) {
           _setYtMax(false);
           return;
         }
         _armMiniThenPop();
       },
-      child: _watch ? _watchScaffold(c, size) : _fullScaffold(c, size, pad),
+      child: appSettings.playlistStyle == PlaylistUiStyle.youtube
+          ? _youtubePage(c, size, pad)
+          : _fullScaffold(c, size, pad),
     );
   }
 
   Widget _fullScaffold(PlaybackEngine? c, Size size, EdgeInsets pad) {
     return _playerChrome(
-      Stack(
-        fit: StackFit.expand,
-        children: [
-          _stage(c, size, pad, watch: false),
-          if (appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytQueue) _ytQueueOverlay(),
-        ],
-      ),
+      _stage(c, size, pad, watch: false),
     );
   }
 
-  Widget _watchScaffold(PlaybackEngine? c, Size size) {
-    final paneH = math.min(size.width * 9 / 16, size.height * 0.42).clamp(160.0, size.height * 0.5);
-    final paneSize = Size(size.width, paneH);
+  bool get _portraitVideo {
+    final s = _sourceVideoSize();
+    return s.height > s.width;
+  }
+
+  Size _sourceVideoSize() {
+    try {
+      final s = vc?.value.size;
+      if (s != null && s.width > 1 && s.height > 1) return s;
+    } catch (_) {}
+    if (item.width > 1 && item.height > 1) {
+      return Size(item.width.toDouble(), item.height.toDouble());
+    }
+    return const Size(16, 9);
+  }
+
+  double _ytMaxAnimT() => Curves.easeInOutCubic.transform(_ytMaxAnim.value);
+
+  double _ytPaneMaxH(Size screen, double topGap, double t) {
+    final usable = (screen.height - topGap).clamp(120.0, screen.height);
+    final w = screen.width;
+    final natural = _portraitVideo ? w * 16 / 9 : w * 9 / 16;
+    final cap916 = w * 16 / 9;
+    final leave = ui.lerpDouble(math.min(128.0, usable * 0.18), 0, t)!;
+    final watchH = math.min(natural, math.min(cap916, usable - leave)).clamp(120.0, usable);
+    return ui.lerpDouble(watchH, screen.height, t)!;
+  }
+
+  Widget _youtubePage(PlaybackEngine? c, Size size, EdgeInsets pad) {
+    final t = _ytMaxAnimT();
     final light = Theme.of(context).brightness == Brightness.light;
+    final topGap = ui.lerpDouble(pad.top, 0, t)!;
+    final watchLike = t < 0.85;
+    final maxH = _ytPaneMaxH(size, topGap, t);
+    final minH = ui.lerpDouble(96, size.height, t)!.clamp(96.0, size.height);
+    final bg = Color.lerp(Theme.of(context).colorScheme.surface, Colors.black, t)!;
+    final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
+    final scheme = Theme.of(context).colorScheme;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemBars.overlay(icons: light ? Brightness.dark : Brightness.light),
+      value: SystemBars.overlay(icons: (watchLike && light) ? Brightness.dark : Brightness.light),
       child: Scaffold(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              ColoredBox(
-                color: Colors.black,
-                child: SizedBox(
-                  width: paneSize.width,
-                  height: paneSize.height,
-                  child: _stage(c, paneSize, EdgeInsets.zero, watch: true),
-                ),
+        backgroundColor: bg,
+        body: Column(
+          children: [
+            if (topGap > 0.5) SizedBox(height: topGap),
+            Expanded(
+              child: CustomScrollView(
+                controller: _ytScroll,
+                physics: t > 0.02
+                    ? const NeverScrollableScrollPhysics()
+                    : const AlwaysScrollableScrollPhysics(),
+                clipBehavior: Clip.hardEdge,
+                slivers: [
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _YtVideoHeader(
+                      minH: math.min(minH, maxH),
+                      maxH: math.max(minH, maxH),
+                      builder: (h) => _stage(c, Size(size.width, h), stagePad, watch: watchLike),
+                    ),
+                  ),
+                  SliverOpacity(
+                    opacity: (1 - t).clamp(0.0, 1.0),
+                    sliver: SliverIgnorePointer(
+                      ignoring: t > 0.2,
+                      sliver: SliverToBoxAdapter(child: _watchMeta()),
+                    ),
+                  ),
+                  SliverOpacity(
+                    opacity: (1 - t).clamp(0.0, 1.0),
+                    sliver: SliverIgnorePointer(
+                      ignoring: t > 0.2,
+                      sliver: SliverPadding(
+                        padding: EdgeInsets.only(bottom: 24 + pad.bottom),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (_, i) => Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: _watchQueueTile(i, scheme),
+                            ),
+                            childCount: list.length,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              Expanded(child: _watchDetails()),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _stage(PlaybackEngine? c, Size size, EdgeInsets pad, {required bool watch}) {
+    final g = !watch;
     return Listener(
-        onPointerDown: (e) => _pinchDown(e, size),
-        onPointerMove: (e) => _pinchMove(e, size),
-        onPointerUp: (e) => _pinchUp(e.pointer),
-        onPointerCancel: (e) => _pinchUp(e.pointer),
+        onPointerDown: g ? (e) => _pinchDown(e, size) : null,
+        onPointerMove: g ? (e) => _pinchMove(e, size) : null,
+        onPointerUp: g ? (e) => _pinchUp(e.pointer) : null,
+        onPointerCancel: g ? (e) => _pinchUp(e.pointer) : null,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -750,6 +845,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               onTapDown: (d) {
                 _tapPos = d.localPosition;
                 _tapBurst = false;
+                if (!g) return;
                 if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') {
                   _ateTap = true;
                   return;
@@ -763,6 +859,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 }
               },
               onTap: () {
+                if (!g) {
+                  if (locked) return;
+                  _setUi(!showUi);
+                  return;
+                }
                 if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') return;
                 if (_tapBurst || _ateTap) {
                   _tapBurst = false;
@@ -772,7 +873,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 _uiBeforeTap = showUi;
                 _setUi(!showUi);
               },
-              onLongPressStart: (_) async {
+              onLongPressStart: !g
+                  ? null
+                  : (_) async {
                 if (locked || !appSettings.longPress2x || c == null) return;
                 if (_pts.length >= 2 || _pinching || _gesture == 'pan') return;
                 _gesture = 'hold';
@@ -786,14 +889,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 }
                 setState(() {});
               },
-              onLongPressEnd: (_) async {
+              onLongPressEnd: !g
+                  ? null
+                  : (_) async {
                 if (!speeding) return;
                 speeding = false;
                 _gesture = '';
                 unawaited(_applySpeed());
                 setState(() {});
               },
-              onPanStart: (d) {
+              onPanStart: !g
+                  ? null
+                  : (d) {
                 if (locked || !appSettings.gestureControl) return;
                 if (_pts.length >= 2 || _pinching || _gesture == 'hold' || _gesture == 'pinch') return;
                 _gesture = 'pan';
@@ -805,7 +912,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 panStart = d.localPosition;
                 panKind = '';
               },
-              onPanUpdate: (d) {
+              onPanUpdate: !g
+                  ? null
+                  : (d) {
                 if (locked || !appSettings.gestureControl || panStart == null || c == null) return;
                 if (_pts.length >= 2 || _pinching) return;
                 final dx = d.localPosition.dx - panStart!.dx;
@@ -845,7 +954,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   setState(() {});
                 }
               },
-              onPanEnd: (_) async {
+              onPanEnd: !g
+                  ? null
+                  : (_) async {
                 if (panKind == 'seek' && _scrub != null && c != null) {
                   final dur = c.value.duration.inMilliseconds;
                   unawaited(c.seekTo(Duration(milliseconds: (_scrub! * dur).round())));
@@ -872,7 +983,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            PlayerRippleLayer(
+            if (g)
+              PlayerRippleLayer(
               size: size,
               ripples: _ripples,
               leftCount: _leftCount,
@@ -959,8 +1071,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 onTap: (id) => unawaited(_runAction(id)),
               ),
             if (showUi && !locked) ..._chrome(c, size, watch: watch, pad: pad),
-            if (appSettings.playlistStyle == PlaylistUiStyle.youtube && (!watch || !showUi || locked))
-              _ytFrameButtons(watch: watch, pad: pad),
+            if (appSettings.playlistStyle == PlaylistUiStyle.youtube && (watch ? (!showUi || locked || size.height < 168) : true))
+              _ytFrameButtons(watch: watch, pad: pad, stageH: size.height),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
           ],
         ),
@@ -978,30 +1090,31 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _ytFrameButtons({required bool watch, required EdgeInsets pad}) {
+  Widget _ytFrameButtons({required bool watch, required EdgeInsets pad, required double stageH}) {
     final extra = watch ? 0.0 : pad.bottom;
-    final bottom = ((showUi && !locked) ? 118.0 : (watch ? 8.0 : 20.0)) + extra;
+    final transport = showUi && !locked && stageH >= 168;
+    final bottom = (transport ? 118.0 : (watch ? 8.0 : 20.0)) + extra;
     return Positioned(
       right: 4 + pad.right,
       bottom: bottom,
       child: Material(
         color: Colors.black.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(24),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!watch)
-              IconButton(
-                tooltip: 'Playlist',
-                onPressed: () => setState(() => _ytQueue = true),
-                icon: const Icon(Icons.queue_music, color: Colors.white),
-              ),
-            IconButton(
-              tooltip: watch ? 'Maximize' : 'Minimize',
-              onPressed: () => _setYtMax(watch),
-              icon: Icon(watch ? Icons.fullscreen : Icons.fullscreen_exit, color: Colors.white),
+        child: IconButton(
+          tooltip: watch ? 'Maximize' : 'Minimize',
+          onPressed: () => _setYtMax(watch),
+          icon: AnimatedSwitcher(
+            duration: appSettings.reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(scale: anim, child: child),
             ),
-          ],
+            child: Icon(
+              watch ? Icons.fullscreen : Icons.fullscreen_exit,
+              key: ValueKey(watch),
+              color: Colors.white,
+            ),
+          ),
         ),
       ),
     );
@@ -1051,63 +1164,70 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _watchDetails() {
+  Widget _watchMeta() {
     final scheme = Theme.of(context).colorScheme;
     final created = item.created ?? item.modified;
     final bookmarked = item.bookmarked || appSettings.bookmarks.contains(item.path);
     final pinned = appSettings.pinned.contains(item.path);
-    final pad = MediaQuery.viewPaddingOf(context);
-    return ListView(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, 24 + pad.bottom),
-      children: [
-        Text(item.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.25)),
-        const SizedBox(height: 6),
-        Text(
-          '${DateFormat.yMMMd().format(created)}  ·  ${formatBytes(item.size)}',
-          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _watchChip('bookmark', bookmarked ? Icons.bookmark : Icons.bookmark_outline, 'Bookmark', on: bookmarked),
-            _watchChip('pin', pinned ? Icons.push_pin : Icons.push_pin_outlined, 'Pin', on: pinned),
-            _watchChip('share', Icons.share_outlined, 'Share'),
-            _watchChip('properties', Icons.info_outline, 'Properties'),
-            _watchChip('delete', Icons.delete_outline, 'Delete'),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Text('Path: ${item.path}', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-            PopupMenuButton<PlayMode>(
-              tooltip: 'Order',
-              onSelected: (m) {
-                setState(() => appSettings.playMode = m);
-                appSettings.save();
-              },
-              itemBuilder: (_) => [
-                for (final m in PlayMode.values) PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(item.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.25)),
+          const SizedBox(height: 6),
+          Text(
+            '${DateFormat.yMMMd().format(created)}  ·  ${formatBytes(item.size)}',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              primary: false,
+              children: [
+                _watchChip('bookmark', bookmarked ? Icons.bookmark : Icons.bookmark_outline, 'Bookmark', on: bookmarked),
+                const SizedBox(width: 8),
+                _watchChip('pin', pinned ? Icons.push_pin : Icons.push_pin_outlined, 'Pin', on: pinned),
+                const SizedBox(width: 8),
+                _watchChip('share', Icons.share_outlined, 'Share'),
+                const SizedBox(width: 8),
+                _watchChip('properties', Icons.info_outline, 'Properties'),
+                const SizedBox(width: 8),
+                _watchChip('delete', Icons.delete_outline, 'Delete'),
               ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                child: Row(
-                  children: [
-                    Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
-                    Icon(Icons.expand_more, color: scheme.primary, size: 18),
-                  ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text('Path: ${item.path}', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+              PopupMenuButton<PlayMode>(
+                tooltip: 'Order',
+                onSelected: (m) {
+                  setState(() => appSettings.playMode = m);
+                  appSettings.save();
+                },
+                itemBuilder: (_) => [
+                  for (final m in PlayMode.values) PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: Row(
+                    children: [
+                      Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Icon(Icons.expand_more, color: scheme.primary, size: 18),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        for (var i = 0; i < list.length; i++) _watchQueueTile(i, scheme),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1211,7 +1331,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } catch (_) {
       return const SizedBox.expand();
     }
-    Widget player = AppVideo(engine: c);
+    Widget player = AppVideo(key: _ytVideoKey, engine: c);
     var vw = c.value.size.width;
     var vh = c.value.size.height;
     if (vw <= 1 || vh <= 1) {
@@ -1282,6 +1402,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
+  List<String> _titleActionIds() {
+    final raw = appSettings.titleActions.isEmpty ? const <String>['more'] : appSettings.titleActions;
+    if (appSettings.playlistStyle != PlaylistUiStyle.youtube) return List<String>.from(raw);
+    return [for (final id in raw) if (id != 'playlist') id];
+  }
+
   List<Widget> _chrome(PlaybackEngine? c, Size size, {required bool watch, required EdgeInsets pad}) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
@@ -1290,6 +1416,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
     final wide = size.width >= 600;
+    final compact = watch && size.height < 168;
     return [
       Positioned(
         top: 0,
@@ -1312,11 +1439,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   if (!watch)
                     Expanded(
                       child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  if (watch)
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          reverse: true,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final id in _titleActionIds()) _titleBtn(id),
+                            ],
+                          ),
+                        ),
+                      ),
                     )
                   else
-                    const Spacer(),
-                  if (!watch)
-                    for (final id in (appSettings.titleActions.isEmpty ? const <String>['more'] : appSettings.titleActions)) _titleBtn(id),
+                    for (final id in _titleActionIds()) _titleBtn(id),
                 ],
               ),
               if (!watch) _quickActions(),
@@ -1336,6 +1477,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         ),
         ),
       ),
+      if (!compact)
       Positioned(
         left: pad.left,
         right: pad.right,
@@ -1771,4 +1913,34 @@ class _HudChip extends StatelessWidget {
       child: child,
     );
   }
+}
+
+class _YtVideoHeader extends SliverPersistentHeaderDelegate {
+  _YtVideoHeader({
+    required this.minH,
+    required this.maxH,
+    required this.builder,
+  });
+
+  final double minH;
+  final double maxH;
+  final Widget Function(double height) builder;
+
+  @override
+  double get minExtent => minH;
+
+  @override
+  double get maxExtent => math.max(minH, maxH);
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final h = (maxExtent - shrinkOffset).clamp(minExtent, maxExtent).toDouble();
+    return ColoredBox(
+      color: Colors.black,
+      child: builder(h),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _YtVideoHeader old) => minH != old.minH || maxH != old.maxH;
 }

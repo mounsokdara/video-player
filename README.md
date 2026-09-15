@@ -18,7 +18,7 @@ Uninstall any older build before installing this one.
 - Paste is a bottom-right button and clears after one paste
 - Mini player scales to the screen and snaps to **16:9** or **9:16**
 - HUD buttons only show with the player controls
-- Player style: bottom dialog sheet (default) or YouTube watch page
+- Player style: bottom dialog sheet (default) or YouTube watch page (16:9 / 9:16, scroll to resize, animated maximize)
 - Dynamic color from the wallpaper; seed picker greys out while that is on
 - Speed changes video and audio together; pitch shift is optional
 - Background audio with a notification; pause stays paused

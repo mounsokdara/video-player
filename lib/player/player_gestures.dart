@@ -2,6 +2,7 @@ part of 'player.dart';
 
 extension PlayerGestures on _PlayerPageState {
   void _pinchDown(PointerDownEvent e, Size size) {
+    if (_watch) return;
     _pts[e.pointer] = e.localPosition;
     if (_pts.length == 2 && appSettings.allowZoom) {
       if (_gesture == 'pan' || _gesture == 'hold') return;
@@ -20,6 +21,7 @@ extension PlayerGestures on _PlayerPageState {
   }
 
   void _pinchMove(PointerMoveEvent e, Size size) {
+    if (_watch) return;
     _pts[e.pointer] = e.localPosition;
     if (_pts.length < 2 || !appSettings.allowZoom) return;
     final pts = _pts.values.toList();

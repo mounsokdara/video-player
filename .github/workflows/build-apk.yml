@@ -57,7 +57,7 @@ jobs:
             - Mini player scales to the screen, 16:9 or 9:16
             - HUD buttons only appear with the player controls
             - Background play with a notification; pause stays paused
-            - Player style: bottom dialog sheet (default) or YouTube watch page
+            - Player style: bottom dialog sheet (default) or YouTube watch page (16:9 / 9:16, scroll-resize)
             - Dynamic color from the wallpaper; seed picker greys out while that is on
             - Equalizer, gestures, sleep timer, PIP, in-app mini player
             - Speed changes picture and sound together; pitch shift is optional
