@@ -208,8 +208,11 @@ class VlcFit extends StatelessWidget {
       case AspectMode.stretch:
         break;
       case AspectMode.original:
-        dh = vh;
         dw = vw;
+        dh = vh;
+        final down = math.min(1.0, math.min(sw / dw, sh / dh));
+        dw *= down;
+        dh *= down;
       case AspectMode.ratio16_9:
         ar = 16 / 9;
         if (dar < ar) {

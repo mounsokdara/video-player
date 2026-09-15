@@ -306,7 +306,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     }
     setState(() {
       _ytMax = max;
-      if (!max) _ytQueue = false;
+      if (!max) {
+        _ytQueue = false;
+        _resetZoom();
+      }
       showUi = true;
     });
     if (max && _ytScroll.hasClients) {
@@ -321,6 +324,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     }
     _applySystemUi();
     _armHide();
+  }
+
+  void _resetZoom() {
+    _zoomScale = 1;
+    _zoomPan = Offset.zero;
+    _pinching = false;
+    _showZoomHud = false;
+    _zoomHudTimer?.cancel();
   }
 
   void _syncPip() {
@@ -355,10 +366,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     _endedLatch = false;
     _scrub = null;
     _previewBytes = null;
-    _zoomScale = 1;
-    _zoomPan = Offset.zero;
-    _pinching = false;
-    _showZoomHud = false;
+    _resetZoom();
     _pts.clear();
     _sawTwo = false;
     _gestureAt = null;
@@ -762,7 +770,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   double _ytPaneMaxH(Size screen, double topGap, double t) {
     final usable = (screen.height - topGap).clamp(120.0, screen.height);
     final w = screen.width;
-    final natural = _portraitVideo ? w * 16 / 9 : w * 9 / 16;
+    final src = _sourceVideoSize();
+    final ar = src.width / math.max(src.height, 1.0);
+    final fromVideo = w / ar;
+    final natural = aspect == AspectMode.original
+        ? fromVideo
+        : (_portraitVideo ? w * 16 / 9 : w * 9 / 16);
     final cap916 = w * 16 / 9;
     final leave = ui.lerpDouble(math.min(128.0, usable * 0.18), 0, t)!;
     final watchH = math.min(natural, math.min(cap916, usable - leave)).clamp(120.0, usable);
@@ -899,7 +912,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               padding: EdgeInsets.fromLTRB(pad.left + inset, pad.top + inset * 0.5, inset, pad.bottom),
               child: LayoutBuilder(builder: (ctx, box) {
                 final w = box.maxWidth;
-                final watchH = math.min(w * 9 / 16, math.max(120.0, box.maxHeight - detailsKeep));
+                final src = _sourceVideoSize();
+                final ar = src.width / math.max(src.height, 1.0);
+                final fromVideo = w / ar;
+                final watchH = math.min(
+                  aspect == AspectMode.original ? fromVideo : w * 9 / 16,
+                  math.min(w * 16 / 9, math.max(120.0, box.maxHeight - detailsKeep)),
+                );
                 final videoH = ui.lerpDouble(watchH, box.maxHeight, t)!.clamp(96.0, box.maxHeight);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -976,7 +995,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               onTapDown: (d) {
                 _tapPos = d.localPosition;
                 _tapBurst = false;
-                if (!g) return;
                 if (locked || _busyGesture) {
                   _ateTap = true;
                   return;
@@ -990,11 +1008,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 }
               },
               onTap: () {
-                if (!g) {
-                  if (locked) return;
-                  _setUi(!showUi);
-                  return;
-                }
                 if (locked || _busyGesture) return;
                 if (_tapBurst || _ateTap) {
                   _tapBurst = false;
@@ -1050,8 +1063,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               ),
             ),
             ),
-            if (g)
-              PlayerRippleLayer(
+            PlayerRippleLayer(
               size: size,
               ripples: _ripples,
               leftCount: _leftCount,
@@ -1403,11 +1415,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       return const SizedBox.expand();
     }
     Widget player = AppVideo(key: _ytVideoKey, engine: c);
-    var vw = c.value.size.width;
-    var vh = c.value.size.height;
+    final src = _sourceVideoSize();
+    var vw = src.width;
+    var vh = src.height;
     if (vw <= 1 || vh <= 1) {
-      vw = screen.width.clamp(1, 10000).toDouble();
-      vh = screen.height.clamp(1, 10000).toDouble();
+      vw = 16;
+      vh = 9;
     }
     player = VlcFit(visW: vw, visH: vh, screen: screen, mode: aspect, child: player);
     final w = screen.width <= 0 ? 1.0 : screen.width;
