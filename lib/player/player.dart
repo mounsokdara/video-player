@@ -765,15 +765,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   bool _ytWide(Size size) => size.width > size.height;
 
-  double _ytWidePaneW(Size screen, double t) {
-    final ar = _portraitVideo ? 9 / 16 : 16 / 9;
-    var watchW = screen.height * ar;
-    watchW = math.min(watchW, screen.width * 0.68);
-    watchW = math.min(watchW, math.max(200.0, screen.width - 280));
-    watchW = watchW.clamp(160.0, math.max(160.0, screen.width - 160));
-    return ui.lerpDouble(watchW, screen.width, t)!;
-  }
-
   Widget _youtubePage(PlaybackEngine? c, Size size, EdgeInsets pad) {
     if (_ytWide(size)) return _youtubeWide(c, size, pad);
     final t = _ytMaxAnimT();
@@ -822,6 +813,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   ),
                 ),
                 SliverToBoxAdapter(child: _watchMeta()),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    child: _watchUpNextHeader(),
+                  ),
+                ),
                 SliverPadding(
                   padding: EdgeInsets.only(bottom: 24 + pad.bottom),
                   sliver: SliverList(
@@ -873,42 +870,81 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   Widget _youtubeWide(PlaybackEngine? c, Size size, EdgeInsets pad) {
     final t = _ytMaxAnimT();
-    final paneW = _ytWidePaneW(size, t);
     final watchLike = t < 0.85;
-    final stagePad = EdgeInsets.lerp(
-      EdgeInsets.only(top: pad.top, left: pad.left, bottom: pad.bottom),
-      pad,
+    final listW = ui.lerpDouble(
+      math.min(400.0, size.width * 0.36).clamp(240.0, size.width * 0.42),
+      0,
       t,
     )!;
+    final leftW = math.max(200.0, size.width - listW);
+    final detailsKeep = ui.lerpDouble(148, 0, t)!;
+    final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
+    final inset = ui.lerpDouble(12, 0, t)!;
     final scheme = Theme.of(context).colorScheme;
     return _youtubeShell(
       t: t,
       body: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ColoredBox(
-            color: Colors.black,
-            child: SizedBox(
-              width: paneW,
-              height: size.height,
-              child: _stage(c, Size(paneW, size.height), stagePad, watch: watchLike),
+          SizedBox(
+            width: leftW,
+            height: size.height,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(pad.left + inset, pad.top + inset * 0.5, inset, pad.bottom),
+              child: LayoutBuilder(builder: (ctx, box) {
+                final w = box.maxWidth;
+                final watchH = math.min(w * 9 / 16, math.max(120.0, box.maxHeight - detailsKeep));
+                final videoH = ui.lerpDouble(watchH, box.maxHeight, t)!.clamp(96.0, box.maxHeight);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ColoredBox(
+                      color: Colors.black,
+                      child: SizedBox(
+                        width: w,
+                        height: videoH,
+                        child: _stage(c, Size(w, videoH), stagePad, watch: watchLike),
+                      ),
+                    ),
+                    if (t < 0.999 && box.maxHeight - videoH > 8)
+                      Expanded(
+                        child: IgnorePointer(
+                          ignoring: t > 0.2,
+                          child: Opacity(
+                            opacity: (1 - t).clamp(0.0, 1.0),
+                            child: SingleChildScrollView(child: _watchMeta()),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              }),
             ),
           ),
-          if (t < 0.999)
-            Expanded(
+          if (listW > 1)
+            SizedBox(
+              width: listW,
+              height: size.height,
               child: IgnorePointer(
                 ignoring: t > 0.2,
                 child: Opacity(
                   opacity: (1 - t).clamp(0.0, 1.0),
-                  child: ListView(
-                    padding: EdgeInsets.only(top: pad.top, right: pad.right, bottom: pad.bottom),
-                    children: [
-                      _watchMeta(),
-                      for (var i = 0; i < list.length; i++)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: _watchQueueTile(i, scheme),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(4, pad.top + inset * 0.5, pad.right + inset, pad.bottom),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _watchUpNextHeader(),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: ListView.builder(
+                            padding: const EdgeInsets.only(right: 4),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) => _watchQueueTile(i, scheme),
+                          ),
                         ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1159,8 +1195,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 onTap: (id) => unawaited(_runAction(id)),
               ),
             if (showUi && !locked) ..._chrome(c, size, watch: watch, pad: pad),
-            if (appSettings.playlistStyle == PlaylistUiStyle.youtube && (watch ? (!showUi || locked || size.height < 168) : true))
-              _ytFrameButtons(watch: watch, pad: pad, stageH: size.height),
+            if (appSettings.playlistStyle == PlaylistUiStyle.youtube &&
+                watch &&
+                (!showUi || locked || size.height < 168))
+              _ytFrameButtons(watch: true, pad: pad, stageH: size.height),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
           ],
         ),
@@ -1289,33 +1327,36 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           ),
           const SizedBox(height: 12),
           Text('Path: ${item.path}', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-              PopupMenuButton<PlayMode>(
-                tooltip: 'Order',
-                onSelected: (m) {
-                  setState(() => appSettings.playMode = m);
-                  appSettings.save();
-                },
-                itemBuilder: (_) => [
-                  for (final m in PlayMode.values) PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                  child: Row(
-                    children: [
-                      Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
-                      Icon(Icons.expand_more, color: scheme.primary, size: 18),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
         ],
       ),
+    );
+  }
+
+  Widget _watchUpNextHeader() {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+        PopupMenuButton<PlayMode>(
+          tooltip: 'Order',
+          onSelected: (m) {
+            setState(() => appSettings.playMode = m);
+            appSettings.save();
+          },
+          itemBuilder: (_) => [
+            for (final m in PlayMode.values) PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
+          ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              children: [
+                Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+                Icon(Icons.expand_more, color: scheme.primary, size: 18),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1716,8 +1757,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                         onPressed: _aspectSheet,
                         icon: const Icon(Icons.aspect_ratio, color: Colors.white),
                         tooltip: 'Screen mode',
+                      ),
+                    if (!watch && appSettings.playlistStyle == PlaylistUiStyle.youtube)
+                      IconButton(
+                        tooltip: 'Minimize',
+                        onPressed: () => _setYtMax(false),
+                        icon: const Icon(Icons.fullscreen_exit, color: Colors.white),
                       )
-                    else
+                    else if (watch)
                       IconButton(
                         tooltip: 'Maximize',
                         onPressed: () => _setYtMax(true),

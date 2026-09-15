@@ -555,7 +555,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
             value: PlaylistUiStyle.youtube,
             groupValue: s.playlistStyle,
             title: const Text('YouTube'),
-            subtitle: const Text('Watch page under the video, or split on landscape. Portrait up to 9:16. Maximize is fullscreen with gestures'),
+            subtitle: const Text('Watch page: video, details below, list on the right in landscape. Maximize is fullscreen'),
             onChanged: (v) {
               if (v != null) set(() => s.playlistStyle = v);
             },
