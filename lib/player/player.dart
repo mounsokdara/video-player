@@ -1063,27 +1063,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               ),
             ),
             ),
-            PlayerRippleLayer(
-              size: size,
-              ripples: _ripples,
-              leftCount: _leftCount,
-              rightCount: _rightCount,
-              leftOn: _leftOn,
-              rightOn: _rightOn,
-              midBursts: _midBursts,
-              reduceMotion: appSettings.reduceMotion,
-              onRippleDone: (id) {
-                if (!mounted) return;
-                setState(() {
-                  _ripples.removeWhere((e) => e.id == id);
-                  _activeRipples = (_activeRipples - 1).clamp(0, 99);
-                });
-              },
-              onMidDone: (id) {
-                if (!mounted) return;
-                setState(() => _midBursts.removeWhere((e) => e.id == id));
-              },
-            ),
             if (speeding)
               const IgnorePointer(
                 child: Center(
@@ -1155,6 +1134,27 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 (!showUi || locked || size.height < 168))
               _ytFrameButtons(watch: true, pad: pad, stageH: size.height),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
+            PlayerRippleLayer(
+              size: size,
+              ripples: _ripples,
+              leftCount: _leftCount,
+              rightCount: _rightCount,
+              leftOn: _leftOn,
+              rightOn: _rightOn,
+              midBursts: _midBursts,
+              reduceMotion: appSettings.reduceMotion,
+              onRippleDone: (id) {
+                if (!mounted) return;
+                setState(() {
+                  _ripples.removeWhere((e) => e.id == id);
+                  _activeRipples = (_activeRipples - 1).clamp(0, 99);
+                });
+              },
+              onMidDone: (id) {
+                if (!mounted) return;
+                setState(() => _midBursts.removeWhere((e) => e.id == id));
+              },
+            ),
           ],
     );
   }
@@ -1516,6 +1516,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
             gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent]),
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 children: [
@@ -1576,6 +1577,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 children: [
