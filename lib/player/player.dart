@@ -132,8 +132,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     invert = appSettings.invertColors;
     bool kept = false;
     try {
-      kept = (PlaybackSession.active || PlaybackSession.transferring) &&
-          PlaybackSession.controller != null &&
+      kept = PlaybackSession.controller != null &&
+          PlaybackSession.controller!.hasPlayer &&
           PlaybackSession.controller!.value.isInitialized &&
           PlaybackSession.item?.path == widget.playlist[index].path;
     } catch (_) {
@@ -163,10 +163,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _applySpeed();
       _armHide();
     } else {
-      if (PlaybackSession.controller != null && PlaybackSession.controller != vc) {
-        unawaited(PlaybackSession.stop());
-      }
-      _boot();
+      unawaited(_startNew());
     }
     clockTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       setState(() => now = DateTime.now());
@@ -233,6 +230,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (mounted) setState(() {});
     });
     await _openCurrent();
+  }
+
+  Future<void> _startNew() async {
+    final other = PlaybackSession.controller;
+    if (other != null && other != vc) {
+      await PlaybackSession.stop();
+    }
+    if (mounted) await _boot();
   }
 
   void _applyRotation() {
@@ -567,7 +572,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     vc?.removeListener(_tick);
     _persistProgress();
     unawaited(_unhookBrightness());
-    if (_handedOff) {
+    if (PlaybackSession.replacing) {
+      vc = null;
+    } else if (_handedOff) {
       if (!PlaybackSession.keepAlive) {
         final dying = vc;
         vc = null;

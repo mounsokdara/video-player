@@ -33,6 +33,7 @@ class PlaybackSession {
   static int index = 0;
   static bool keepAlive = false;
   static bool transferring = false;
+  static bool replacing = false;
   static double speed = 1;
   static AspectMode aspect = AspectMode.fit;
   static VoidCallback? onMutated;

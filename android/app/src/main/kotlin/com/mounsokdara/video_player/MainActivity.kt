@@ -149,7 +149,9 @@ class MainActivity : FlutterActivity() {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
                     eventsSink = events
-                    pendingOpen?.let { emit(mapOf("type" to "open", "path" to it)) }
+                    val pending = pendingOpen
+                    pendingOpen = null
+                    if (pending != null) emit(mapOf("type" to "open", "path" to pending))
                     startLibraryWatcher()
                 }
 
@@ -744,7 +746,9 @@ class MainActivity : FlutterActivity() {
         val path = resolveUri(uri)
         if (path != null) {
             pendingOpen = path
+            val listening = eventSink != null || eventsSink != null
             emit(mapOf("type" to "open", "path" to path))
+            if (listening) pendingOpen = null
         }
     }
 
@@ -778,8 +782,8 @@ class MainActivity : FlutterActivity() {
 
     private fun emit(payload: Map<String, Any?>) {
         mainHandler.post {
-            eventSink?.success(payload)
-            eventsSink?.success(payload)
+            val sink = eventSink ?: eventsSink
+            sink?.success(payload)
         }
     }
 

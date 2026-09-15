@@ -47,6 +47,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   String? folderPath;
   final folderTrail = <String>[];
   bool _miniPlaying = false;
+  int _openGen = 0;
 
   @override
   void initState() {
@@ -176,18 +177,37 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _open(VideoItem item, {List<VideoItem>? playlist}) async {
+    final gen = ++_openGen;
     await CrashLog.breadcrumb('Play ${item.path}');
+    if (!mounted) return;
+    final nav = Navigator.of(context);
+    final reuse = PlaybackSession.controller != null &&
+        PlaybackSession.controller!.hasPlayer &&
+        PlaybackSession.item?.path == item.path;
+
+    PlaybackSession.replacing = true;
+    try {
+      if (nav.canPop()) nav.popUntil((r) => r.isFirst);
+      await WidgetsBinding.instance.endOfFrame;
+    } finally {
+      PlaybackSession.replacing = false;
+    }
+    if (!mounted || gen != _openGen) return;
+    if (!reuse) await PlaybackSession.stop();
+    if (!mounted || gen != _openGen) return;
+
     final list = playlist ?? visible;
     final i = list.indexWhere((v) => v.id == item.id);
-    await Navigator.of(context).push(PlayerSlideRoute(
+    await nav.push(PlayerSlideRoute(
       page: PlayerPage(
         playlist: list,
         index: i < 0 ? 0 : i,
         onChanged: () => setState(() {}),
       ),
     ));
+    if (gen != _openGen) return;
     _bindSession();
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _bindSession() {

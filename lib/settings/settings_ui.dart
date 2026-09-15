@@ -482,46 +482,60 @@ class _ThemeSettingsState extends State<ThemeSettings> {
             onChanged: (v) => set(() => s.dynamicColor = v),
           ),
           const SizedBox(height: 8),
-          const Text('Seed color', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ChipScroller(
-            children: [
-              for (final e in seeds)
-                GestureDetector(
-                  onTap: () => set(() {
-                    s.seedColor = e.$2;
-                    s.dynamicColor = false;
-                  }),
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Color(e.$2),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: s.seedColor == e.$2 ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
-                        width: 3,
-                      ),
-                    ),
+          IgnorePointer(
+            ignoring: s.dynamicColor,
+            child: Opacity(
+              opacity: s.dynamicColor ? 0.38 : 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Seed color', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  ChipScroller(
+                    children: [
+                      for (final e in seeds)
+                        GestureDetector(
+                          onTap: () => set(() {
+                            s.seedColor = e.$2;
+                            s.dynamicColor = false;
+                          }),
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: Color(e.$2),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: s.seedColor == e.$2 ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
-            ],
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: CircleAvatar(backgroundColor: Color(s.seedColor)),
-            title: const Text('Custom color'),
-            subtitle: Text('#${s.seedColor.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              final picked = await showColorPicker(context, Color(s.seedColor));
-              if (picked != null) {
-                set(() {
-                  s.seedColor = picked.toARGB32();
-                  s.dynamicColor = false;
-                });
-              }
-            },
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    enabled: !s.dynamicColor,
+                    leading: CircleAvatar(backgroundColor: Color(s.seedColor)),
+                    title: const Text('Custom color'),
+                    subtitle: Text('#${s.seedColor.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: s.dynamicColor
+                        ? null
+                        : () async {
+                            final picked = await showColorPicker(context, Color(s.seedColor));
+                            if (picked != null) {
+                              set(() {
+                                s.seedColor = picked.toARGB32();
+                                s.dynamicColor = false;
+                              });
+                            }
+                          },
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

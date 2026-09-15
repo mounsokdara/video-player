@@ -42,7 +42,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            Background play uses a foreground notification and does not restart
-            playback when you come back or when you left paused.
+            Dynamic color greys out the seed picker. Only one video plays
+            at a time; opening from Files or tapping twice replaces the old one.
 
             Uninstall the previous APK before installing this one.
