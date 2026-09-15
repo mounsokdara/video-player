@@ -123,6 +123,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   late final AnimationController _ytMaxAnim;
   final GlobalKey _ytVideoKey = GlobalKey();
   final ScrollController _ytScroll = ScrollController();
+  final ValueNotifier<int> _posTick = ValueNotifier<int>(0);
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
@@ -169,6 +170,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       aspect = PlaybackSession.aspect;
       vc?.addListener(_tick);
       _lastPlaying = vc?.value.isPlaying ?? false;
+      _posTick.value = vc?.value.position.inMilliseconds ?? 0;
       _endedLatch = false;
       _openFails = 0;
       final keptEngine = vc;
@@ -371,6 +373,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     _sawTwo = false;
     _gestureAt = null;
     _gesture = '';
+    _posTick.value = 0;
     if (mounted) setState(() {});
     final existing = vc;
     PlaybackEngine? opened;
@@ -421,6 +424,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       await AndroidBridge.requestAudioFocus();
       await engine.play();
       _lastPlaying = true;
+      _posTick.value = engine.value.position.inMilliseconds;
       _syncPip();
       unawaited(_applySpeed());
       unawaited(AndroidBridge.preparePreview(item.path));
@@ -475,6 +479,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
+        if (mounted) setState(() {});
       }
       if (!_endedLatch &&
           (c.value.completed ||
@@ -484,9 +489,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         _endedLatch = true;
         _onEnded();
       }
-      if (nowTick.difference(_lastUi) >= const Duration(milliseconds: 120)) {
+      if (nowTick.difference(_lastUi) >= const Duration(milliseconds: 200)) {
         _lastUi = nowTick;
-        setState(() {});
+        final ms = c.value.position.inMilliseconds;
+        if (_posTick.value != ms) _posTick.value = ms;
       }
     } catch (e, s) {
       CrashLog.record('TICK', '$e', s);
@@ -627,6 +633,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     _midHide?.cancel();
     _ytMaxAnim.dispose();
     _ytScroll.dispose();
+    _posTick.dispose();
     vc?.removeListener(_tick);
     _persistProgress();
     unawaited(_unhookBrightness());
@@ -820,7 +827,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           Expanded(
             child: CustomScrollView(
               controller: _ytScroll,
-              physics: const AlwaysScrollableScrollPhysics(),
+              cacheExtent: 480,
+              physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
               clipBehavior: Clip.hardEdge,
               slivers: [
                 SliverPersistentHeader(
@@ -828,7 +836,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   delegate: _YtVideoHeader(
                     minH: math.min(minH, maxH),
                     maxH: math.max(minH, maxH),
-                    builder: (h) => _stage(c, Size(size.width, h), EdgeInsets.zero, watch: true),
+                    builder: (h) => _stage(
+                      c,
+                      Size(size.width, h),
+                      EdgeInsets.zero,
+                      watch: true,
+                      videoBox: Size(size.width, math.max(minH, maxH)),
+                    ),
                   ),
                 ),
                 SliverToBoxAdapter(child: _watchMeta()),
@@ -963,6 +977,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                         const SizedBox(height: 4),
                         Expanded(
                           child: ListView.builder(
+                            cacheExtent: 480,
                             padding: const EdgeInsets.only(right: 4),
                             itemCount: list.length,
                             itemBuilder: (_, i) => _watchQueueTile(i, scheme),
@@ -979,8 +994,32 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     );
   }
 
-  Widget _stage(PlaybackEngine? c, Size size, EdgeInsets pad, {required bool watch}) {
+  Widget _stage(PlaybackEngine? c, Size size, EdgeInsets pad, {required bool watch, Size? videoBox}) {
     final g = !watch;
+    final box = videoBox ?? size;
+    Widget videoChild() {
+      try {
+        if (c != null && c.video != null) {
+          final w = box.width <= 0 ? 1.0 : box.width;
+          final h = box.height <= 0 ? 1.0 : box.height;
+          return _video(c, Size(w, h));
+        }
+      } catch (_) {}
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final frame = videoBox != null
+        ? ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.center,
+              minWidth: box.width,
+              maxWidth: box.width,
+              minHeight: box.height,
+              maxHeight: box.height,
+              child: SizedBox(width: box.width, height: box.height, child: videoChild()),
+            ),
+          )
+        : videoChild();
     return Stack(
           fit: StackFit.expand,
           children: [
@@ -1048,18 +1087,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               onScaleEnd: !g ? null : (d) => unawaited(_onScaleEnd(c)),
               child: ColoredBox(
                 color: Colors.black,
-                child: ClipRect(
-                  child: () {
-                    try {
-                      if (c != null && c.video != null) {
-                        final w = size.width <= 0 ? 1.0 : size.width;
-                        final h = size.height <= 0 ? 1.0 : size.height;
-                        return _video(c, Size(w, h));
-                      }
-                    } catch (_) {}
-                    return const Center(child: CircularProgressIndicator());
-                  }(),
-                ),
+                child: frame,
               ),
             ),
             ),
@@ -1414,7 +1442,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     } catch (_) {
       return const SizedBox.expand();
     }
-    Widget player = AppVideo(key: _ytVideoKey, engine: c);
+    Widget player = RepaintBoundary(
+      child: AppVideo(key: _ytVideoKey, engine: c),
+    );
     final src = _sourceVideoSize();
     var vw = src.width;
     var vh = src.height;
@@ -1493,10 +1523,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   }
 
   List<Widget> _chrome(PlaybackEngine? c, Size size, {required bool watch, required EdgeInsets pad}) {
-    final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
     final playing = c?.value.isPlaying ?? false;
-    final remain = dur - pos;
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
     final wide = size.width >= 600;
@@ -1571,7 +1599,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           onPointerDown: (_) => _holdChrome(true),
           onPointerUp: (_) => _holdChrome(false),
           onPointerCancel: (_) => _holdChrome(false),
-          child: Container(
+          child: ValueListenableBuilder<int>(
+            valueListenable: _posTick,
+            builder: (_, ms, __) {
+              final pos = Duration(milliseconds: ms);
+              final remain = dur - pos;
+              return Container(
           padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom),
           decoration: const BoxDecoration(
             gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black87, Colors.transparent]),
@@ -1732,7 +1765,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               ),
             ],
           ),
-        ),
+        );
+            },
+          ),
         ),
       ),
     ];
@@ -2034,5 +2069,5 @@ class _YtVideoHeader extends SliverPersistentHeaderDelegate {
   }
 
   @override
-  bool shouldRebuild(covariant _YtVideoHeader old) => minH != old.minH || maxH != old.maxH;
+  bool shouldRebuild(covariant _YtVideoHeader old) => true;
 }
