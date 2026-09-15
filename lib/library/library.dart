@@ -25,6 +25,86 @@ class LibraryService {
   final Map<String, DateTime> _thumbMiss = {};
   String? clipPath;
   bool clipCut = false;
+  List<String> clipPaths = [];
+
+  bool get hasClipboard => clipPaths.isNotEmpty || (clipPath != null && clipPath!.isNotEmpty);
+
+  void clearClipboard() {
+    clipPath = null;
+    clipCut = false;
+    clipPaths = [];
+  }
+
+  void copyEntry(String path) => copyEntries([path]);
+
+  void cutEntry(String path) => cutEntries([path]);
+
+  void copyEntries(Iterable<String> paths) {
+    clipPaths = paths.where((e) => e.isNotEmpty).toSet().toList();
+    clipPath = clipPaths.isEmpty ? null : clipPaths.first;
+    clipCut = false;
+  }
+
+  void cutEntries(Iterable<String> paths) {
+    clipPaths = paths.where((e) => e.isNotEmpty).toSet().toList();
+    clipPath = clipPaths.isEmpty ? null : clipPaths.first;
+    clipCut = true;
+  }
+
+  Future<bool> pasteInto(String dir) async {
+    final sources = clipPaths.isNotEmpty
+        ? List<String>.from(clipPaths)
+        : (clipPath == null || clipPath!.isEmpty ? <String>[] : [clipPath!]);
+    if (sources.isEmpty) return false;
+    var ok = true;
+    for (final src in sources) {
+      if (!await _pasteOne(dir, src)) ok = false;
+    }
+    clearClipboard();
+    return ok;
+  }
+
+  Future<bool> _pasteOne(String dir, String src) async {
+    if (src.isEmpty) return false;
+    final name = p.basename(src);
+    var dest = p.join(dir, name);
+    if (dest == src) return false;
+    if (File(dest).existsSync() || Directory(dest).existsSync()) {
+      final stem = p.basenameWithoutExtension(name);
+      final ext = p.extension(name);
+      dest = p.join(dir, '${stem}_copy$ext');
+    }
+    if (clipCut) {
+      final moved = await AndroidBridge.movePath(src, dest);
+      if (moved == null) return false;
+      final i = videos.indexWhere((v) => v.path == src);
+      if (i >= 0) {
+        videos[i] = videos[i].copyWith(path: moved, title: p.basename(moved));
+      }
+      _rebuildFolders();
+      return true;
+    }
+    final copied = await AndroidBridge.copyPath(src, dest);
+    if (copied) {
+      VideoItem? srcItem;
+      for (final v in videos) {
+        if (v.path == src) srcItem = v;
+      }
+      videos.add(
+        VideoItem(
+          id: dest,
+          path: dest,
+          title: p.basename(dest),
+          folder: dir,
+          size: srcItem?.size ?? File(dest).lengthSync(),
+          modified: DateTime.now(),
+          duration: srcItem?.duration ?? Duration.zero,
+        ),
+      );
+      _rebuildFolders();
+    }
+    return copied;
+  }
 
   Future<void> requestPermissions() async {
     await [
@@ -358,61 +438,6 @@ class LibraryService {
     final i = videos.indexWhere((v) => v.id == item.id);
     if (i >= 0) videos[i] = next;
     return next;
-  }
-
-  void copyEntry(String path) {
-    clipPath = path;
-    clipCut = false;
-  }
-
-  void cutEntry(String path) {
-    clipPath = path;
-    clipCut = true;
-  }
-
-  Future<bool> pasteInto(String dir) async {
-    final src = clipPath;
-    if (src == null || src.isEmpty) return false;
-    final name = p.basename(src);
-    var dest = p.join(dir, name);
-    if (dest == src) return false;
-    if (File(dest).existsSync() || Directory(dest).existsSync()) {
-      final stem = p.basenameWithoutExtension(name);
-      final ext = p.extension(name);
-      dest = p.join(dir, '${stem}_copy$ext');
-    }
-    if (clipCut) {
-      final moved = await AndroidBridge.movePath(src, dest);
-      if (moved == null) return false;
-      clipPath = null;
-      clipCut = false;
-      final i = videos.indexWhere((v) => v.path == src);
-      if (i >= 0) {
-        videos[i] = videos[i].copyWith(path: moved, title: p.basename(moved));
-      }
-      _rebuildFolders();
-      return true;
-    }
-    final ok = await AndroidBridge.copyPath(src, dest);
-    if (ok) {
-      VideoItem? srcItem;
-      for (final v in videos) {
-        if (v.path == src) srcItem = v;
-      }
-      videos.add(
-        VideoItem(
-          id: dest,
-          path: dest,
-          title: p.basename(dest),
-          folder: dir,
-          size: srcItem?.size ?? File(dest).lengthSync(),
-          modified: DateTime.now(),
-          duration: srcItem?.duration ?? Duration.zero,
-        ),
-      );
-      _rebuildFolders();
-    }
-    return ok;
   }
 
   Future<bool> deletePath(String path) async {

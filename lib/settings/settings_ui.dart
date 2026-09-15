@@ -68,7 +68,7 @@ class SettingsHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: const Text('Video Player 1.0.0 pre-Release'),
+              subtitle: const Text('Video Player 1.0.0'),
               onTap: () async {
                 if (!context.mounted) return;
                 await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
@@ -536,6 +536,29 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 24),
+          const Text('Playlist UI style', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          RadioListTile<PlaylistUiStyle>(
+            contentPadding: EdgeInsets.zero,
+            value: PlaylistUiStyle.sheet,
+            groupValue: s.playlistStyle,
+            title: const Text('Bottom dialog sheet'),
+            subtitle: const Text('Material sheet over the player'),
+            onChanged: (v) {
+              if (v != null) set(() => s.playlistStyle = v);
+            },
+          ),
+          RadioListTile<PlaylistUiStyle>(
+            contentPadding: EdgeInsets.zero,
+            value: PlaylistUiStyle.youtube,
+            groupValue: s.playlistStyle,
+            title: const Text('YouTube'),
+            subtitle: const Text('Queue panel with Now playing and Up next'),
+            onChanged: (v) {
+              if (v != null) set(() => s.playlistStyle = v);
+            },
           ),
         ],
       ),

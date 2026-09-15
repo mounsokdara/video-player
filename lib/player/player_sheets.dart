@@ -2,6 +2,14 @@ part of 'player.dart';
 
 extension PlayerSheets on _PlayerPageState {
   Future<void> _playlist() async {
+    if (appSettings.playlistStyle == PlaylistUiStyle.youtube) {
+      await _youtubePlaylist();
+      return;
+    }
+    await _sheetPlaylist();
+  }
+
+  Future<void> _sheetPlaylist() async {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -32,13 +40,7 @@ extension PlayerSheets on _PlayerPageState {
                       children: [
                         for (final m in PlayMode.values)
                           ChoiceChip(
-                            label: Text(switch (m) {
-                              PlayMode.order => 'Order',
-                              PlayMode.loopAll => 'Loop all',
-                              PlayMode.repeatOne => 'Repeat current',
-                              PlayMode.shuffle => 'Shuffle all',
-                              PlayMode.noAutoplay => 'No autoplay',
-                            }),
+                            label: Text(_playModeLabel(m)),
                             selected: appSettings.playMode == m,
                             onSelected: (_) {
                               setState(() => appSettings.playMode = m);
@@ -77,6 +79,203 @@ extension PlayerSheets on _PlayerPageState {
       },
     );
   }
+
+  String _playModeLabel(PlayMode m) => switch (m) {
+        PlayMode.order => 'Order',
+        PlayMode.loopAll => 'Loop all',
+        PlayMode.repeatOne => 'Repeat current',
+        PlayMode.shuffle => 'Shuffle all',
+        PlayMode.noAutoplay => 'No autoplay',
+      };
+
+  Future<void> _youtubePlaylist() async {
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Queue',
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      transitionDuration: const Duration(milliseconds: 240),
+      pageBuilder: (ctx, anim, sec) {
+        final size = MediaQuery.sizeOf(ctx);
+        final pad = SystemBars.rawOf(context);
+        final landscape = size.width > size.height;
+        final panelW = landscape ? math.min(420.0, size.width * 0.46) : size.width;
+        return Align(
+          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
+          child: Material(
+            color: Theme.of(ctx).colorScheme.surface,
+            elevation: 16,
+            borderRadius: landscape
+                ? const BorderRadius.horizontal(left: Radius.circular(16))
+                : const BorderRadius.vertical(top: Radius.circular(16)),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: panelW,
+              height: landscape ? size.height : size.height * 0.92,
+              child: _youtubeQueueBody(ctx, pad),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim, sec, child) {
+        final landscape = MediaQuery.sizeOf(ctx).width > MediaQuery.sizeOf(ctx).height;
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: landscape ? const Offset(1, 0) : const Offset(0, 1),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
+        );
+      },
+    );
+  }
+
+  Widget _youtubeQueueBody(BuildContext ctx, EdgeInsets pad) {
+    final scheme = Theme.of(ctx).colorScheme;
+    final current = list.isEmpty ? null : list[index.clamp(0, list.length - 1)];
+    final upNext = <int>[];
+    for (var i = 1; i < list.length; i++) {
+      upNext.add((index + i) % list.length);
+    }
+    return StatefulBuilder(builder: (ctx, ss) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: pad.bottom),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 8),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
+              child: Row(
+                children: [
+                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.keyboard_arrow_down)),
+                  const Expanded(child: Text('Queue', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
+                  Text('${list.length}', style: TextStyle(color: scheme.onSurfaceVariant)),
+                  const SizedBox(width: 12),
+                ],
+              ),
+            ),
+            if (current != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 148,
+                      height: 84,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          VideoThumb(item: current, radius: 8),
+                          const Align(
+                            alignment: Alignment.center,
+                            child: Icon(Icons.equalizer, color: Colors.white, size: 28),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Now playing', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w700, fontSize: 12)),
+                          const SizedBox(height: 4),
+                          Text(current.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.25)),
+                          const SizedBox(height: 6),
+                          Text(formatDuration(current.duration), style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+              child: Row(
+                children: [
+                  const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                  PopupMenuButton<PlayMode>(
+                    tooltip: 'Play mode',
+                    onSelected: (m) {
+                      setState(() => appSettings.playMode = m);
+                      appSettings.save();
+                      ss(() {});
+                    },
+                    itemBuilder: (_) => [
+                      for (final m in PlayMode.values)
+                        PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
+                    ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      child: Row(
+                        children: [
+                          Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+                          Icon(Icons.expand_more, color: scheme.primary, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.builder(
+                itemCount: upNext.length,
+                itemBuilder: (_, n) {
+                  final i = upNext[n];
+                  final v = list[i];
+                  return InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      index = i;
+                      _openCurrent();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 28,
+                            child: Text('${n + 1}', textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant, fontFeatures: const [ui.FontFeature.tabularFigures()])),
+                          ),
+                          SizedBox(width: 96, height: 54, child: VideoThumb(item: v, radius: 6)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(v.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.25)),
+                                const SizedBox(height: 4),
+                                Text(formatDuration(v.duration), style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
   IconData _actionIcon(String id) => switch (id) {
         'speed' => Icons.speed,
         'background' => Icons.headphones_outlined,

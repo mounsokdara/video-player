@@ -49,6 +49,8 @@ enum DecoderMode { auto, hw, sw }
 
 enum ThemeModePref { system, light, dark }
 
+enum PlaylistUiStyle { sheet, youtube }
+
 class VideoItem {
   VideoItem({
     required this.id,

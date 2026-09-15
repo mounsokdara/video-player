@@ -353,6 +353,68 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     await SharePlus.instance.share(ShareParams(files: items.map((e) => XFile(e.path)).toList()));
   }
 
+  List<VideoItem> _selectedVideos() {
+    final out = <VideoItem>[];
+    for (final id in selected) {
+      VideoItem? found;
+      for (final v in library.videos) {
+        if (v.id == id || v.path == id) found = v;
+      }
+      found ??= VideoItem(
+        id: id,
+        path: id,
+        title: p.basename(id),
+        folder: p.dirname(id),
+        size: File(id).existsSync() ? File(id).lengthSync() : 0,
+        modified: DateTime.now(),
+      );
+      out.add(found);
+    }
+    return out;
+  }
+
+  Future<void> _holdVideo(VideoItem item, {required bool folderActions}) async {
+    if (selecting) {
+      if (!selected.contains(item.id)) _toggleSelect(item);
+      await _openSelectionMenu(folderActions: folderActions);
+      return;
+    }
+    await showItemsMenu(
+      context,
+      items: [item],
+      folderActions: folderActions,
+      allowRename: true,
+      onChanged: () { if (mounted) setState(() {}); },
+      onPlay: (items) => _open(items.first, playlist: items),
+    );
+  }
+
+  Future<void> _openSelectionMenu({required bool folderActions}) async {
+    final items = _selectedVideos();
+    if (items.isEmpty) return;
+    await showItemsMenu(
+      context,
+      items: items,
+      folderActions: folderActions,
+      allowRename: folderActions && items.length == 1,
+      fromSelection: true,
+      onChanged: () {
+        if (!mounted) return;
+        setState(() {
+          selected.removeWhere((id) => library.videos.every((v) => v.id != id && v.path != id));
+          if (selected.isEmpty) selecting = false;
+        });
+      },
+      onPlay: (items) {
+        setState(() {
+          selecting = false;
+          selected.clear();
+        });
+        unawaited(_open(items.first, playlist: items));
+      },
+    );
+  }
+
   void _openHiddenTab(String id) {
     final dest = switch (id) {
       'videos' => VideosHub(
@@ -376,6 +438,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onSort: _sortSheet,
           onOpen: _open,
           onToggleSelect: _toggleSelect,
+          onHold: (item) => _holdVideo(item, folderActions: false),
+          onThumbTap: _toggleSelect,
+          onSelectionHold: () => _openSelectionMenu(folderActions: false),
           onShareSelected: _shareSelected,
           onDeleteSelected: _deleteSelected,
           onClearSelect: () => setState(() {
@@ -402,6 +467,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           }),
           onOpen: _open,
           onToggleSelect: _toggleSelect,
+          onHoldVideo: (item) => _holdVideo(item, folderActions: true),
+          onSelectionHold: () => _openSelectionMenu(folderActions: true),
           selecting: selecting,
           selected: selected,
           onSelectMode: () => setState(() => selecting = true),
@@ -420,7 +487,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       'settings' => SettingsHub(onChanged: widget.onSettingsChanged),
       _ => const SizedBox.shrink(),
     };
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(body: dest)));
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        body: dest,
+        floatingActionButton: id == 'folders' ? _pasteFab(forceFolders: true) : null,
+      ),
+    ));
+  }
+
+  Widget? _pasteFab({bool forceFolders = false}) {
+    final onFolders = forceFolders || (tabs.isNotEmpty && tabs[safeTab] == 'folders');
+    if (!onFolders || folderPath == null || !library.hasClipboard) return null;
+    return FloatingActionButton(
+      onPressed: () async {
+        final dir = folderPath;
+        if (dir == null) return;
+        final ok = await library.pasteInto(dir);
+        if (!ok && mounted) showAllFilesFailed(context, 'Paste');
+        if (mounted) setState(() {});
+      },
+      tooltip: library.clipCut ? 'Move here' : 'Paste',
+      child: Icon(library.clipCut ? Icons.drive_file_move_outline : Icons.content_paste),
+    );
   }
 
   List<PopupMenuEntry<String>> _overflowItems({bool includeSelect = false}) {
@@ -496,6 +584,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               }),
               onOpen: _open,
               onToggleSelect: _toggleSelect,
+              onHoldVideo: (item) => _holdVideo(item, folderActions: true),
+          onSelectionHold: () => _openSelectionMenu(folderActions: true),
               selecting: selecting,
               selected: selected,
               onSelectMode: () => setState(() => selecting = true),
@@ -536,6 +626,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             onSort: _sortSheet,
             onOpen: _open,
             onToggleSelect: _toggleSelect,
+            onHold: (item) => _holdVideo(item, folderActions: false),
+            onThumbTap: _toggleSelect,
+            onSelectionHold: () => _openSelectionMenu(folderActions: false),
             onShareSelected: _shareSelected,
             onDeleteSelected: _deleteSelected,
             onClearSelect: () => setState(() {
@@ -640,6 +733,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           ),
           ),
         ),
+        floatingActionButton: _pasteFab(),
       );
     }
 
@@ -648,6 +742,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         padding: EdgeInsets.only(left: pad.left, right: pad.right),
         child: shell(body),
       ),
+      floatingActionButton: _pasteFab(),
       bottomNavigationBar: tabs.length <= 1
           ? null
           : NavigationBar(
@@ -724,6 +819,9 @@ class VideosHub extends StatelessWidget {
     required this.onSort,
     required this.onOpen,
     required this.onToggleSelect,
+    required this.onHold,
+    required this.onThumbTap,
+    required this.onSelectionHold,
     required this.onShareSelected,
     required this.onDeleteSelected,
     required this.onClearSelect,
@@ -752,6 +850,9 @@ class VideosHub extends StatelessWidget {
   final Future<void> Function() onSort;
   final Future<void> Function(VideoItem item, {List<VideoItem>? playlist}) onOpen;
   final void Function(VideoItem) onToggleSelect;
+  final Future<void> Function(VideoItem) onHold;
+  final void Function(VideoItem) onThumbTap;
+  final Future<void> Function() onSelectionHold;
   final Future<void> Function() onShareSelected;
   final Future<void> Function() onDeleteSelected;
   final VoidCallback onClearSelect;
@@ -785,13 +886,16 @@ class VideosHub extends StatelessWidget {
         return [
           SliverAppBar(
             pinned: true,
-            title: Text(selecting ? '${selected.length} selected' : 'Videos'),
+            title: selecting
+                ? GestureDetector(
+                    onLongPress: onSelectionHold,
+                    child: Text('${selected.length} selected'),
+                  )
+                : const Text('Videos'),
             actions: [
-              if (selecting) ...[
-                IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
-                IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
-              ] else ...[
+              if (selecting)
+                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel')
+              else ...[
                 IconButton(onPressed: () => onSearch(true), icon: const Icon(Icons.search), tooltip: 'Search'),
                 if (overflow.isNotEmpty)
                   PopupMenuButton<String>(
@@ -902,8 +1006,8 @@ class VideosHub extends StatelessWidget {
                               selected: selected.contains(item.id),
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                              onLongPress: () => onToggleSelect(item),
-                              onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
+                              onLongPress: () => onHold(item),
+                              onThumbTap: () => onThumbTap(item),
                             );
                           },
                         )
@@ -925,8 +1029,8 @@ class VideosHub extends StatelessWidget {
                               selected: selected.contains(item.id),
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                              onLongPress: () => onToggleSelect(item),
-                              onMenu: () => showVideoMenu(context, item, onChanged: () => onFilter?.call(filter), onPlay: () => onOpen(item)),
+                              onLongPress: () => onHold(item),
+                              onThumbTap: () => onThumbTap(item),
                             );
                           },
                         ),
@@ -994,6 +1098,8 @@ class FoldersHub extends StatelessWidget {
     required this.onPath,
     required this.onOpen,
     required this.onToggleSelect,
+    required this.onHoldVideo,
+    this.onSelectionHold,
     required this.selecting,
     this.selected = const {},
     this.onSelectMode,
@@ -1013,6 +1119,8 @@ class FoldersHub extends StatelessWidget {
   final void Function(String? path, List<String> trail) onPath;
   final Future<void> Function(VideoItem item, {List<VideoItem>? playlist}) onOpen;
   final void Function(VideoItem) onToggleSelect;
+  final Future<void> Function(VideoItem) onHoldVideo;
+  final Future<void> Function()? onSelectionHold;
   final bool selecting;
   final Set<String> selected;
   final VoidCallback? onSelectMode;
@@ -1045,13 +1153,16 @@ class FoldersHub extends StatelessWidget {
         slivers: [
           SliverAppBar(
             pinned: true,
-            title: Text(selecting ? '${selected.length} selected' : 'Folders'),
+            title: selecting
+                ? GestureDetector(
+                    onLongPress: onSelectionHold,
+                    child: Text('${selected.length} selected'),
+                  )
+                : const Text('Folders'),
             actions: [
-              if (selecting) ...[
-                if (onShareSelected != null) IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
-                if (onDeleteSelected != null) IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
-              ] else ...[
+              if (selecting)
+                IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel')
+              else ...[
                 IconButton(
                   tooltip: 'Select',
                   onPressed: onSelectMode,
@@ -1069,7 +1180,7 @@ class FoldersHub extends StatelessWidget {
             const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
           else
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + pad.bottom),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + pad.bottom + (library.hasClipboard ? 80 : 0)),
               sliver: SliverList.list(children: [
                 if (roots.isEmpty)
                   ListTile(
@@ -1138,22 +1249,16 @@ class FoldersHub extends StatelessWidget {
       children: [
         AppBar(
           automaticallyImplyLeading: false,
-          title: Text(selecting ? '${selected.length} selected' : (p.basename(path).isEmpty ? path : p.basename(path))),
+          title: selecting
+              ? GestureDetector(
+                  onLongPress: onSelectionHold,
+                  child: Text('${selected.length} selected'),
+                )
+              : Text(p.basename(path).isEmpty ? path : p.basename(path)),
           actions: [
-            if (selecting) ...[
-              if (onShareSelected != null) IconButton(onPressed: onShareSelected, icon: const Icon(Icons.share_outlined), tooltip: 'Share'),
-              if (onDeleteSelected != null) IconButton(onPressed: onDeleteSelected, icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-              IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel'),
-            ] else ...[
-              if (library.clipPath != null)
-                IconButton(
-                  tooltip: 'Paste',
-                  onPressed: () async {
-                    await library.pasteInto(path);
-                    onRefresh();
-                  },
-                  icon: const Icon(Icons.content_paste),
-                ),
+            if (selecting)
+              IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel')
+            else ...[
               IconButton(
                 tooltip: 'Select',
                 onPressed: onSelectMode,
@@ -1192,7 +1297,7 @@ class FoldersHub extends StatelessWidget {
             onRefresh: onRefresh,
             child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
-            padding: EdgeInsets.only(bottom: pad.bottom + 16),
+            padding: EdgeInsets.only(bottom: pad.bottom + 16 + (library.hasClipboard ? 80 : 0)),
             itemCount: ents.length + 1,
             itemBuilder: (_, i) {
               if (i == 0) {
@@ -1256,22 +1361,20 @@ class FoldersHub extends StatelessWidget {
                           }
                         },
                       )
-                    : IconButton(
-                  icon: const Icon(Icons.more_vert),
-                  onPressed: () => showFolderEntryMenu(
-                    context,
-                    path: e.path,
-                    isDir: isDir,
-                    onChanged: () => onRefresh(),
-                    onOpen: () {
-                      if (isDir) {
-                        onPath(e.path, [...folderTrail, e.path]);
-                      } else if (video != null) {
-                        onOpen(video);
-                      }
-                    },
-                  ),
-                ),
+                    : null,
+                onLongPress: () {
+                  if (isDir) {
+                    showFolderEntryMenu(
+                      context,
+                      path: e.path,
+                      isDir: true,
+                      onChanged: () => onRefresh(),
+                      onOpen: () => onPath(e.path, [...folderTrail, e.path]),
+                    );
+                    return;
+                  }
+                  if (video != null) onHoldVideo(video);
+                },
                 onTap: () {
                   if (selecting) {
                     if (isDir) {
@@ -1357,8 +1460,14 @@ class _SearchPageState extends State<SearchPage> {
                   selected: false,
                   selecting: false,
                   onTap: () => widget.onOpen(item, playlist: items),
-                  onLongPress: () => widget.onToggleSelect(item),
-                  onMenu: () => showVideoMenu(context, item, onChanged: () => setState(() {}), onPlay: () => widget.onOpen(item, playlist: items)),
+                  onLongPress: () => showItemsMenu(
+                    context,
+                    items: [item],
+                    allowRename: true,
+                    onChanged: () { if (mounted) setState(() {}); },
+                    onPlay: (picked) => widget.onOpen(picked.first, playlist: items),
+                  ),
+                  onThumbTap: () => widget.onOpen(item, playlist: items),
                 );
               },
             ),

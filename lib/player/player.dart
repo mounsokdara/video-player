@@ -885,7 +885,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   icon: const Icon(Icons.lock_open),
                 ),
               ),
-            if (!locked)
+            if (showUi && !locked)
               HudLayer(
                 fabs: decodeHud(appSettings.hudFabsJson),
                 pad: pad,

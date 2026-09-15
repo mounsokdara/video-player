@@ -11,6 +11,7 @@ class AppSettings {
   ThemeModePref themeMode = ThemeModePref.system;
   int seedColor = 0xFF8BA3B8;
   bool dynamicColor = true;
+  PlaylistUiStyle playlistStyle = PlaylistUiStyle.sheet;
 
   // General
   bool rememberPlayback = true;
@@ -203,6 +204,7 @@ class AppSettings {
     themeMode = ThemeModePref.values[(p.getInt('themeMode') ?? 0).clamp(0, ThemeModePref.values.length - 1)];
     seedColor = p.getInt('seedColor') ?? 0xFF8BA3B8;
     dynamicColor = p.getBool('dynamicColor') ?? true;
+    playlistStyle = PlaylistUiStyle.values[(p.getInt('playlistStyle') ?? 0).clamp(0, PlaylistUiStyle.values.length - 1)];
     rememberPlayback = p.getBool('rememberPlayback') ?? true;
     confirmDelete = p.getBool('confirmDelete') ?? true;
     scanOnStart = p.getBool('scanOnStart') ?? true;
@@ -350,6 +352,7 @@ class AppSettings {
     await p.setInt('themeMode', themeMode.index);
     await p.setInt('seedColor', seedColor);
     await p.setBool('dynamicColor', dynamicColor);
+    await p.setInt('playlistStyle', playlistStyle.index);
     await p.setBool('rememberPlayback', rememberPlayback);
     await p.setBool('confirmDelete', confirmDelete);
     await p.setBool('scanOnStart', scanOnStart);

@@ -6,14 +6,14 @@ import 'package:video_player_app/playback/session.dart';
 
 class MiniGeom {
   MiniGeom._();
-  static const defW = 216.0;
-  static const minW = 140.0;
-  static const maxW = 520.0;
+  static const defW = 148.0;
+  static const minW = 96.0;
+  static const maxW = 196.0;
   static const fallbackAr = 16 / 9;
-  static const barH = 44.0;
+  static const barH = 40.0;
   static const safeInset = 16.0;
   static const arrowMaxW = 28.0;
-  static const arrowH = 132.0;
+  static const arrowH = 96.0;
   static const parkT = 0.6;
   static const rubber = 0.35;
   static const tapSlop = 5.0;
@@ -45,11 +45,24 @@ class MiniPhysics {
     return Size(w, w / ar + MiniGeom.barH);
   }
 
-  static double maxWFor(Size screen) =>
-      math.min(MiniGeom.maxW, math.max(MiniGeom.minW, screen.width * 0.95));
+  static double maxWFor(Size screen, [Size? video]) {
+    final v = video ?? videoSize();
+    final short = math.min(screen.width, screen.height);
+    final ar = aspect(v);
+    final maxBoxH = (screen.height * 0.28).clamp(MiniGeom.barH + 56, screen.height * 0.34);
+    final fromH = ((maxBoxH - MiniGeom.barH) * ar);
+    final fromW = short * 0.28;
+    final hi = math.min(MiniGeom.maxW, math.min(fromH, fromW));
+    return math.max(72.0, hi);
+  }
 
-  static double clampW(double w, Size screen) {
-    final hi = maxWFor(screen);
+  static double defaultW(Size screen, [Size? video]) {
+    final short = math.min(screen.width, screen.height);
+    return clampW(short * 0.24, screen, video);
+  }
+
+  static double clampW(double w, Size screen, [Size? video]) {
+    final hi = maxWFor(screen, video);
     final lo = math.min(MiniGeom.minW, hi);
     return w.clamp(lo, hi).toDouble();
   }

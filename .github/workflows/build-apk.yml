@@ -34,15 +34,32 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0_pre-Release
-          name: Video Player v1.0.0 pre-Release
+          tag_name: v1.0.0
+          name: Video Player v1.0.0
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           fail_on_unmatched_files: true
-          prerelease: true
+          prerelease: false
           make_latest: true
           generate_release_notes: false
           body: |
-            Dynamic color greys out the seed picker. Only one video plays
-            at a time; opening from Files or tapping twice replaces the old one.
+            Video Player 1.0.0
+
+            Library
+            - Scan internal storage, SD cards, USB drives, and hidden files
+            - Auto-refresh when files are added, changed, or deleted
+            - Videos: hold a clip for actions; tap a thumbnail to select
+            - Folders: hold for play queue, copy, cut, share, bookmark, pin, delete, properties
+            - Rename only when a single item is selected
+            - Paste is a bottom-right button and clears after one paste
+
+            Player
+            - libmpv playback (one video at a time)
+            - Mini player scales to the screen, 16:9 or 9:16
+            - HUD buttons only appear with the player controls
+            - Background play with a notification; pause stays paused
+            - Playlist as a bottom sheet (default) or a YouTube-style queue
+            - Dynamic color from the wallpaper; seed picker greys out while that is on
+            - Equalizer, gestures, sleep timer, PIP, in-app mini player
+            - Speed changes picture and sound together; pitch shift is optional
 
             Uninstall the previous APK before installing this one.

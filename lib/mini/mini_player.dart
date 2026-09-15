@@ -84,6 +84,8 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final newScreen = MediaQuery.sizeOf(context);
     if (_lastScreen == null) {
       _lastScreen = newScreen;
+      _w = MiniPhysics.defaultW(newScreen);
+      MiniMemory.w = _w;
     } else if (_lastScreen != newScreen) {
       final old = _lastScreen!;
       _lastScreen = newScreen;
@@ -111,7 +113,16 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
   }
 
   void _onTick() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final hi = MiniPhysics.maxWFor(_screen, _video);
+    if (_w > hi + 2) {
+      setState(() {
+        _w = hi;
+        MiniMemory.w = _w;
+      });
+      return;
+    }
+    setState(() {});
   }
 
   Size get _screen => MediaQuery.sizeOf(context);
@@ -175,7 +186,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
       navH: widget.navH,
     );
     final video = MiniPhysics.videoSize();
-    final newW = MiniPhysics.clampW(_w, newSize);
+    final newW = MiniPhysics.clampW(_w, newSize, video);
     final newH = MiniPhysics.boxFor(newW, video).height;
 
     if (_pos == null) {
@@ -318,7 +329,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
         pinching) {
       _moved = true;
     }
-    final hi = MiniPhysics.maxWFor(_screen);
+    final hi = MiniPhysics.maxWFor(_screen, _video);
     final lo = math.min(MiniGeom.minW, hi);
     final targetW = MiniPhysics.softClamp(_startW * d.scale, lo, hi);
     final ratio = _startW == 0 ? 1.0 : targetW / _startW;
@@ -396,9 +407,9 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _settle() {
     final screen = _screen;
-    final settledW = MiniPhysics.clampW(_w, screen);
-    final fromPos = _rawPos;
     final video = _video;
+    final settledW = MiniPhysics.clampW(_w, screen, video);
+    final fromPos = _rawPos;
     final settledH = MiniPhysics.boxFor(settledW, video).height;
     final safe = _safe;
     final dismissThresholdY = screen.height - (settledH * 0.4);
@@ -451,7 +462,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
     final side = _parkSide != 0 ? _parkSide : _sideFor(_rawPos);
     if (side == 0) return;
     final video = _video;
-    final targetW = MiniPhysics.clampW(_w, _screen);
+    final targetW = MiniPhysics.clampW(_w, _screen, video);
     final targetH = MiniPhysics.boxFor(targetW, video).height;
     final safe = _safe;
     final targetX =

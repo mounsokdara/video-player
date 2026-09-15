@@ -140,7 +140,7 @@ class VideoListTile extends StatelessWidget {
     required this.selecting,
     required this.onTap,
     required this.onLongPress,
-    required this.onMenu,
+    required this.onThumbTap,
   });
 
   final VideoItem item;
@@ -148,28 +148,48 @@ class VideoListTile extends StatelessWidget {
   final bool selecting;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback onMenu;
+  final VoidCallback onThumbTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
       color: selected ? scheme.secondaryContainer.withValues(alpha: 0.45) : Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onThumbTap,
+              onLongPress: onLongPress,
+              child: SizedBox(
                 width: 128,
                 height: 72,
-                child: VideoThumb(item: item, radius: 10),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    VideoThumb(item: item, radius: 10),
+                    if (selecting || selected)
+                      Positioned(
+                        left: 6,
+                        top: 6,
+                        child: Icon(
+                          selected ? Icons.check_circle : Icons.circle_outlined,
+                          color: selected ? scheme.primary : Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InkWell(
+                onTap: onTap,
+                onLongPress: onLongPress,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -199,15 +219,8 @@ class VideoListTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (selecting)
-                Checkbox(
-                  value: selected,
-                  onChanged: (_) => onTap(),
-                )
-              else
-                IconButton(onPressed: onMenu, icon: const Icon(Icons.more_vert), visualDensity: VisualDensity.compact),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -222,7 +235,7 @@ class VideoGridCard extends StatelessWidget {
     required this.selecting,
     required this.onTap,
     required this.onLongPress,
-    required this.onMenu,
+    required this.onThumbTap,
   });
 
   final VideoItem item;
@@ -230,7 +243,7 @@ class VideoGridCard extends StatelessWidget {
   final bool selecting;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback onMenu;
+  final VoidCallback onThumbTap;
 
   @override
   Widget build(BuildContext context) {
@@ -239,18 +252,18 @@ class VideoGridCard extends StatelessWidget {
       color: scheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: onThumbTap,
+              onLongPress: onLongPress,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   VideoThumb(item: item, radius: 0),
-                  if (selecting)
+                  if (selecting || selected)
                     Positioned(
                       left: 8,
                       top: 8,
@@ -259,42 +272,31 @@ class VideoGridCard extends StatelessWidget {
                         color: selected ? scheme.primary : Colors.white,
                       ),
                     ),
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: IconButton(
-                      onPressed: onMenu,
-                      icon: const Icon(Icons.more_vert, color: Colors.white, size: 20),
-                    ),
-                  ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-              child: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+          ),
+          InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          formatBytes(item.size),
-                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                        ),
-                      ),
-                    ],
+                  Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
+                  const SizedBox(height: 4),
+                  Text(
+                    formatBytes(item.size),
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 4),
                   ResumeBar(progress: item.progress),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -358,66 +360,130 @@ Future<T?> showAppSheet<T>({
 }
 
 Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidCallback onChanged, required VoidCallback onPlay}) async {
+  await showItemsMenu(
+    context,
+    items: [item],
+    allowRename: true,
+    onChanged: onChanged,
+    onPlay: (_) => onPlay(),
+  );
+}
+
+Future<void> showItemsMenu(
+  BuildContext context, {
+  required List<VideoItem> items,
+  required VoidCallback onChanged,
+  required void Function(List<VideoItem> items) onPlay,
+  bool folderActions = false,
+  bool allowRename = false,
+  bool fromSelection = false,
+}) async {
+  if (items.isEmpty) return;
   final scheme = Theme.of(context).colorScheme;
+  final many = items.length > 1;
+  final playLabel = folderActions
+      ? 'Play queue selected'
+      : (fromSelection ? 'Play selected' : 'Play');
+  final allBookmarked = items.every((e) => e.bookmarked || appSettings.bookmarks.contains(e.path));
+  final allPinned = items.every((e) => appSettings.pinned.contains(e.path));
   await showAppSheet<void>(
     context: context,
     initial: 0.72,
     children: (ctx) => [
       ListTile(
-        leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: item, radius: 8)),
-        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(formatBytes(item.size)),
+        leading: many
+            ? CircleAvatar(child: Text('${items.length}'))
+            : SizedBox(width: 64, height: 40, child: VideoThumb(item: items.first, radius: 8)),
+        title: Text(
+          many ? '${items.length} selected' : items.first.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(many ? formatBytes(items.fold<int>(0, (n, v) => n + v.size)) : formatBytes(items.first.size)),
       ),
       const Divider(height: 1),
-      ListTile(leading: const Icon(Icons.play_arrow), title: const Text('Play'), onTap: () { Navigator.pop(ctx); onPlay(); }),
       ListTile(
-        leading: const Icon(Icons.drive_file_rename_outline),
-        title: const Text('Rename'),
-        onTap: () async {
+        leading: const Icon(Icons.play_arrow),
+        title: Text(playLabel),
+        onTap: () {
           Navigator.pop(ctx);
-          await Future<void>.delayed(const Duration(milliseconds: 160));
-          if (!context.mounted) return;
-          final name = await promptText(context, 'Rename', item.title);
-          if (name != null && name.trim().isNotEmpty) {
-            final next = await library.rename(item, name.trim());
-            if (next == null && context.mounted) showAllFilesFailed(context, 'Rename');
-            onChanged();
-          }
+          onPlay(items);
         },
       ),
+      if (allowRename && !many)
+        ListTile(
+          leading: const Icon(Icons.drive_file_rename_outline),
+          title: const Text('Rename'),
+          onTap: () async {
+            Navigator.pop(ctx);
+            await Future<void>.delayed(const Duration(milliseconds: 160));
+            if (!context.mounted) return;
+            final item = items.first;
+            final name = await promptText(context, 'Rename', item.title);
+            if (name != null && name.trim().isNotEmpty) {
+              final next = await library.rename(item, name.trim());
+              if (next == null && context.mounted) showAllFilesFailed(context, 'Rename');
+              onChanged();
+            }
+          },
+        ),
+      if (folderActions) ...[
+        ListTile(
+          leading: const Icon(Icons.copy),
+          title: const Text('Copy'),
+          onTap: () {
+            Navigator.pop(ctx);
+            library.copyEntries(items.map((e) => e.path));
+            onChanged();
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.content_cut),
+          title: const Text('Cut'),
+          onTap: () {
+            Navigator.pop(ctx);
+            library.cutEntries(items.map((e) => e.path));
+            onChanged();
+          },
+        ),
+      ],
       ListTile(
         leading: const Icon(Icons.share_outlined),
         title: const Text('Share'),
         onTap: () async {
           Navigator.pop(ctx);
-          await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], title: item.title));
+          await SharePlus.instance.share(ShareParams(files: items.map((e) => XFile(e.path)).toList()));
         },
       ),
       ListTile(
-        leading: Icon(item.bookmarked ? Icons.bookmark : Icons.bookmark_border),
-        title: Text(item.bookmarked ? 'Remove bookmark' : 'Bookmark'),
+        leading: Icon(allBookmarked ? Icons.bookmark : Icons.bookmark_outline),
+        title: Text(allBookmarked ? 'Remove bookmark' : 'Bookmark'),
         onTap: () {
           Navigator.pop(ctx);
-          if (appSettings.bookmarks.contains(item.path)) {
-            appSettings.bookmarks.remove(item.path);
-            item.bookmarked = false;
-          } else {
-            appSettings.bookmarks.add(item.path);
-            item.bookmarked = true;
+          for (final item in items) {
+            if (allBookmarked) {
+              appSettings.bookmarks.remove(item.path);
+              item.bookmarked = false;
+            } else {
+              appSettings.bookmarks.add(item.path);
+              item.bookmarked = true;
+            }
           }
           appSettings.save();
           onChanged();
         },
       ),
       ListTile(
-        leading: Icon(appSettings.pinned.contains(item.path) ? Icons.push_pin : Icons.push_pin_outlined),
-        title: Text(appSettings.pinned.contains(item.path) ? 'Unpin' : 'Pin to top'),
+        leading: Icon(allPinned ? Icons.push_pin : Icons.push_pin_outlined),
+        title: Text(allPinned ? 'Unpin' : 'Pin'),
         onTap: () {
           Navigator.pop(ctx);
-          if (appSettings.pinned.contains(item.path)) {
-            appSettings.pinned.remove(item.path);
-          } else {
-            appSettings.pinned.add(item.path);
+          for (final item in items) {
+            if (allPinned) {
+              appSettings.pinned.remove(item.path);
+            } else {
+              appSettings.pinned.add(item.path);
+            }
           }
           appSettings.save();
           onChanged();
@@ -428,9 +494,10 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
         title: Text('Delete', style: TextStyle(color: scheme.error)),
         onTap: () async {
           Navigator.pop(ctx);
-          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete this video?', item.title);
+          final ok = !appSettings.confirmDelete ||
+              await confirm(context, many ? 'Delete ${items.length} videos?' : 'Delete this video?', many ? 'This cannot be undone.' : items.first.title);
           if (ok == true) {
-            final done = await library.deleteVideos([item]);
+            final done = await library.deleteVideos(items);
             if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
             onChanged();
           }
@@ -439,15 +506,28 @@ Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidC
       ListTile(
         leading: const Icon(Icons.info_outline),
         title: const Text('Properties'),
-        onTap: () {
+        onTap: () async {
           Navigator.pop(ctx);
-          showProperties(context, item);
+          await Future<void>.delayed(const Duration(milliseconds: 160));
+          if (!context.mounted) return;
+          if (!many) {
+            showProperties(context, items.first);
+            return;
+          }
+          showAppSheet<void>(
+            context: context,
+            initial: 0.4,
+            children: (c) => [
+              const ListTile(title: Text('Properties')),
+              ListTile(title: const Text('Items'), subtitle: Text('${items.length}')),
+              ListTile(title: const Text('Total size'), subtitle: Text(formatBytes(items.fold<int>(0, (n, v) => n + v.size)))),
+            ],
+          );
         },
       ),
     ],
   );
 }
-
 Future<void> showProperties(BuildContext context, VideoItem item) async {
   final file = File(item.path);
   final exists = file.existsSync();
