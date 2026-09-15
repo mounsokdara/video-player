@@ -109,6 +109,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   DateTime _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _midTap = DateTime.fromMillisecondsSinceEpoch(0);
   String _gesture = '';
+  DateTime? _gestureAt;
+  bool _sawTwo = false;
   bool _previewBusy = false;
   double? _previewWant;
   bool _tapBurst = false;
@@ -358,6 +360,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     _pinching = false;
     _showZoomHud = false;
     _pts.clear();
+    _sawTwo = false;
+    _gestureAt = null;
+    _gesture = '';
     if (mounted) setState(() {});
     final existing = vc;
     PlaybackEngine? opened;
@@ -960,7 +965,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     return Stack(
           fit: StackFit.expand,
           children: [
-            GestureDetector(
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: !g ? null : _trackPointerDown,
+              onPointerMove: !g ? null : _trackPointerMove,
+              onPointerUp: !g ? null : _trackPointerUp,
+              onPointerCancel: !g ? null : (e) => _trackPointerUp(e),
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapDown: (d) {
                 _tapPos = d.localPosition;
@@ -1037,6 +1048,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   }(),
                 ),
               ),
+            ),
             ),
             if (g)
               PlayerRippleLayer(

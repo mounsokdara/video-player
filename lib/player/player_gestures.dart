@@ -1,33 +1,65 @@
 part of 'player.dart';
 
 extension PlayerGestures on _PlayerPageState {
+  int get _fingers => _pts.length;
+
+  void _trackPointerDown(PointerDownEvent e) {
+    _pts[e.pointer] = e.localPosition;
+  }
+
+  void _trackPointerMove(PointerMoveEvent e) {
+    _pts[e.pointer] = e.localPosition;
+  }
+
+  void _trackPointerUp(PointerEvent e) {
+    _pts.remove(e.pointer);
+  }
+
   void _onScaleStart(ScaleStartDetails d, Size size) {
     if (locked || _watch) return;
-    if (_gesture == 'hold') return;
-    if (d.pointerCount >= 2 && appSettings.allowZoom) {
+    if (_gesture == 'hold' || _gesture == 'pinch' || _pinching) return;
+    _gestureAt = DateTime.now();
+    _sawTwo = d.pointerCount >= 2 || _fingers >= 2;
+    panStart = d.focalPoint;
+    panKind = '';
+    if (_sawTwo && appSettings.allowZoom) {
       _ateTap = true;
       _abortPan();
       _beginPinch(d.focalPoint);
       return;
     }
-    if (_gesture == 'pinch' || _pinching) return;
-    panStart = d.focalPoint;
-    panKind = '';
+    _gesture = 'wait';
   }
 
   void _onScaleUpdate(ScaleUpdateDetails d, Size size, PlaybackEngine? c) {
     if (locked || _watch || _gesture == 'hold') return;
-    if (appSettings.allowZoom && d.pointerCount >= 2) {
-      if (_gesture == 'pan') _abortPan();
-      if (_gesture != 'pinch') {
-        _ateTap = true;
-        _beginPinch(d.focalPoint);
-      }
+    final two = d.pointerCount >= 2 || _fingers >= 2;
+    if (two) _sawTwo = true;
+    final wantPinch = appSettings.allowZoom && (two || (d.scale - 1).abs() > 0.04);
+
+    if (_gesture == 'pinch' || _pinching) {
+      if (appSettings.allowZoom) _applyPinch(d, size);
+      return;
+    }
+    if (wantPinch) {
+      _ateTap = true;
+      _abortPan();
+      _beginPinch(d.focalPoint, scale: d.scale);
       _applyPinch(d, size);
       return;
     }
-    if (_gesture == 'pinch' || _pinching) return;
-    if (!appSettings.gestureControl || c == null) return;
+    if (_gesture == 'pan') {
+      if (c != null) _applyOneFinger(d.focalPoint, size, c);
+      return;
+    }
+    if (two) return;
+    if (c == null) return;
+    if (!appSettings.gestureControl && _zoomScale <= 1.02) return;
+    if (appSettings.allowZoom) {
+      final waited = _gestureAt != null &&
+          DateTime.now().difference(_gestureAt!) >= const Duration(milliseconds: 90);
+      if (!waited) return;
+    }
     panStart ??= d.focalPoint;
     _applyOneFinger(d.focalPoint, size, c);
   }
@@ -44,7 +76,11 @@ extension PlayerGestures on _PlayerPageState {
       _zoomHudTimer = Timer(const Duration(milliseconds: 900), () {
         if (mounted) setState(() => _showZoomHud = false);
       });
-    } else if (_gesture == 'pan' && panKind == 'seek' && _scrub != null && c != null) {
+    } else if (!_sawTwo &&
+        _gesture == 'pan' &&
+        panKind == 'seek' &&
+        _scrub != null &&
+        c != null) {
       final dur = c.value.duration.inMilliseconds;
       unawaited(c.seekTo(Duration(milliseconds: (_scrub! * dur).round())));
     }
@@ -52,29 +88,39 @@ extension PlayerGestures on _PlayerPageState {
     panStart = null;
     _scrub = null;
     _previewBytes = null;
+    _sawTwo = false;
+    _gestureAt = null;
     if (_gesture != 'hold') _gesture = '';
     _pinching = false;
     if (mounted) setState(() {});
   }
 
-  void _beginPinch(Offset focal) {
+  void _beginPinch(Offset focal, {double scale = 1}) {
     _gesture = 'pinch';
     _pinching = true;
-    _pinchBase = _zoomScale;
+    _sawTwo = true;
+    final s = scale.abs() < 0.001 ? 1.0 : scale;
+    _pinchBase = _zoomScale / s;
     _pinchBasePan = _zoomPan;
     _pinchStartFocal = focal;
-    _pinchStart = 1;
+    _pinchStart = s;
     _showZoomHud = true;
     _zoomHudTimer?.cancel();
     if (mounted) setState(() {});
   }
 
   void _abortPan() {
+    final had = _scrub != null || panKind.isNotEmpty || overlay.isNotEmpty;
     panKind = '';
     panStart = null;
     _scrub = null;
     _previewBytes = null;
-    if (_gesture == 'pan') _gesture = '';
+    if (_gesture == 'pan' || _gesture == 'wait') _gesture = '';
+    if (had) {
+      overlayTimer?.cancel();
+      overlay = '';
+      if (mounted) setState(() {});
+    }
   }
 
   void _applyPinch(ScaleUpdateDetails d, Size size) {
@@ -106,22 +152,38 @@ extension PlayerGestures on _PlayerPageState {
     final dx = focal.dx - start.dx;
     final dy = focal.dy - start.dy;
     if (panKind.isEmpty) {
-      if (dx.abs() > 24 && dx.abs() > dy.abs()) {
+      final slop = appSettings.allowZoom ? 36.0 : 24.0;
+      if (Offset(dx, dy).distance <= slop) return;
+      if (_zoomScale > 1.02) {
+        _gesture = 'pan';
+        _ateTap = true;
+        panKind = 'frame';
+        _pinchBasePan = _zoomPan;
+        _pinchStartFocal = start;
+      } else if (dx.abs() > dy.abs()) {
+        if (!appSettings.gestureControl) return;
         _gesture = 'pan';
         _ateTap = true;
         panKind = 'seek';
         panBase = c.value.position.inMilliseconds.toDouble();
-      } else if (dy.abs() > 24) {
+      } else {
+        if (!appSettings.gestureControl) return;
         _gesture = 'pan';
         _ateTap = true;
         panKind = start.dx < size.width / 2 ? 'brightness' : 'volume';
         panBase = panKind == 'brightness' ? brightness : volume;
-      } else {
-        return;
       }
     }
     if (_gesture != 'pan') return;
-    if (panKind == 'seek') {
+    if (panKind == 'frame') {
+      final nextPan = _pinchBasePan + (focal - _pinchStartFocal);
+      final maxX = (_zoomScale - 1) * size.width / 2 + 48;
+      final maxY = (_zoomScale - 1) * size.height / 2 + 48;
+      setState(() {
+        _zoomPan = Offset(nextPan.dx.clamp(-maxX, maxX), nextPan.dy.clamp(-maxY, maxY));
+        _showZoomHud = true;
+      });
+    } else if (panKind == 'seek') {
       final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
       final delta = (dx / size.width) * dur * 0.6;
       final next = (panBase + delta).clamp(0, dur);
