@@ -723,7 +723,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         }
         _armMiniThenPop();
       },
-      child: appSettings.playlistStyle == PlaylistUiStyle.youtube
+      child: appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytMaxAnim.value < 0.99
           ? _youtubePage(c, size, pad)
           : _fullScaffold(c, size, pad),
     );
@@ -763,69 +763,157 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     return ui.lerpDouble(watchH, screen.height, t)!;
   }
 
+  bool _ytWide(Size size) => size.width > size.height;
+
+  double _ytWidePaneW(Size screen, double t) {
+    final ar = _portraitVideo ? 9 / 16 : 16 / 9;
+    var watchW = screen.height * ar;
+    watchW = math.min(watchW, screen.width * 0.68);
+    watchW = math.min(watchW, math.max(200.0, screen.width - 280));
+    watchW = watchW.clamp(160.0, math.max(160.0, screen.width - 160));
+    return ui.lerpDouble(watchW, screen.width, t)!;
+  }
+
   Widget _youtubePage(PlaybackEngine? c, Size size, EdgeInsets pad) {
+    if (_ytWide(size)) return _youtubeWide(c, size, pad);
     final t = _ytMaxAnimT();
+    if (t > 0.001) return _youtubeMaxing(c, size, pad, t);
+    return _youtubeTall(c, size, pad);
+  }
+
+  Widget _youtubeShell({
+    required double t,
+    required Widget body,
+  }) {
     final light = Theme.of(context).brightness == Brightness.light;
-    final topGap = ui.lerpDouble(pad.top, 0, t)!;
     final watchLike = t < 0.85;
-    final maxH = _ytPaneMaxH(size, topGap, t);
-    final minH = ui.lerpDouble(96, size.height, t)!.clamp(96.0, size.height);
     final bg = Color.lerp(Theme.of(context).colorScheme.surface, Colors.black, t)!;
-    final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
-    final scheme = Theme.of(context).colorScheme;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemBars.overlay(icons: (watchLike && light) ? Brightness.dark : Brightness.light),
       child: Scaffold(
         backgroundColor: bg,
-        body: Column(
-          children: [
-            if (topGap > 0.5) SizedBox(height: topGap),
-            Expanded(
-              child: CustomScrollView(
-                controller: _ytScroll,
-                physics: t > 0.02
-                    ? const NeverScrollableScrollPhysics()
-                    : const AlwaysScrollableScrollPhysics(),
-                clipBehavior: Clip.hardEdge,
-                slivers: [
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _YtVideoHeader(
-                      minH: math.min(minH, maxH),
-                      maxH: math.max(minH, maxH),
-                      builder: (h) => _stage(c, Size(size.width, h), stagePad, watch: watchLike),
-                    ),
+        resizeToAvoidBottomInset: false,
+        body: body,
+      ),
+    );
+  }
+
+  Widget _youtubeTall(PlaybackEngine? c, Size size, EdgeInsets pad) {
+    final scheme = Theme.of(context).colorScheme;
+    final maxH = _ytPaneMaxH(size, pad.top, 0);
+    const minH = 96.0;
+    return _youtubeShell(
+      t: 0,
+      body: Column(
+        children: [
+          if (pad.top > 0.5) SizedBox(height: pad.top),
+          Expanded(
+            child: CustomScrollView(
+              controller: _ytScroll,
+              physics: const AlwaysScrollableScrollPhysics(),
+              clipBehavior: Clip.hardEdge,
+              slivers: [
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _YtVideoHeader(
+                    minH: math.min(minH, maxH),
+                    maxH: math.max(minH, maxH),
+                    builder: (h) => _stage(c, Size(size.width, h), EdgeInsets.zero, watch: true),
                   ),
-                  SliverOpacity(
-                    opacity: (1 - t).clamp(0.0, 1.0),
-                    sliver: SliverIgnorePointer(
-                      ignoring: t > 0.2,
-                      sliver: SliverToBoxAdapter(child: _watchMeta()),
-                    ),
-                  ),
-                  SliverOpacity(
-                    opacity: (1 - t).clamp(0.0, 1.0),
-                    sliver: SliverIgnorePointer(
-                      ignoring: t > 0.2,
-                      sliver: SliverPadding(
-                        padding: EdgeInsets.only(bottom: 24 + pad.bottom),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (_, i) => Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: _watchQueueTile(i, scheme),
-                            ),
-                            childCount: list.length,
-                          ),
-                        ),
+                ),
+                SliverToBoxAdapter(child: _watchMeta()),
+                SliverPadding(
+                  padding: EdgeInsets.only(bottom: 24 + pad.bottom),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: _watchQueueTile(i, scheme),
                       ),
+                      childCount: list.length,
                     ),
                   ),
-                ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _youtubeMaxing(PlaybackEngine? c, Size size, EdgeInsets pad, double t) {
+    final topGap = ui.lerpDouble(pad.top, 0, t)!;
+    final paneH = _ytPaneMaxH(size, topGap, t);
+    final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
+    final rest = size.height - topGap - paneH;
+    return _youtubeShell(
+      t: t,
+      body: Column(
+        children: [
+          if (topGap > 0.5) SizedBox(height: topGap),
+          SizedBox(
+            width: size.width,
+            height: paneH.clamp(96.0, math.max(96.0, size.height - topGap)),
+            child: _stage(c, Size(size.width, paneH), stagePad, watch: t < 0.85),
+          ),
+          if (rest > 1)
+            Expanded(
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: (1 - t).clamp(0.0, 1.0),
+                  child: const ColoredBox(color: Colors.transparent),
+                ),
               ),
             ),
-          ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _youtubeWide(PlaybackEngine? c, Size size, EdgeInsets pad) {
+    final t = _ytMaxAnimT();
+    final paneW = _ytWidePaneW(size, t);
+    final watchLike = t < 0.85;
+    final stagePad = EdgeInsets.lerp(
+      EdgeInsets.only(top: pad.top, left: pad.left, bottom: pad.bottom),
+      pad,
+      t,
+    )!;
+    final scheme = Theme.of(context).colorScheme;
+    return _youtubeShell(
+      t: t,
+      body: Row(
+        children: [
+          ColoredBox(
+            color: Colors.black,
+            child: SizedBox(
+              width: paneW,
+              height: size.height,
+              child: _stage(c, Size(paneW, size.height), stagePad, watch: watchLike),
+            ),
+          ),
+          if (t < 0.999)
+            Expanded(
+              child: IgnorePointer(
+                ignoring: t > 0.2,
+                child: Opacity(
+                  opacity: (1 - t).clamp(0.0, 1.0),
+                  child: ListView(
+                    padding: EdgeInsets.only(top: pad.top, right: pad.right, bottom: pad.bottom),
+                    children: [
+                      _watchMeta(),
+                      for (var i = 0; i < list.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: _watchQueueTile(i, scheme),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
