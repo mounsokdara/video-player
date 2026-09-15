@@ -439,7 +439,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onOpen: _open,
           onToggleSelect: _toggleSelect,
           onHold: (item) => _holdVideo(item, folderActions: false),
-          onThumbTap: _toggleSelect,
           onSelectionHold: () => _openSelectionMenu(folderActions: false),
           onShareSelected: _shareSelected,
           onDeleteSelected: _deleteSelected,
@@ -627,7 +626,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             onOpen: _open,
             onToggleSelect: _toggleSelect,
             onHold: (item) => _holdVideo(item, folderActions: false),
-            onThumbTap: _toggleSelect,
             onSelectionHold: () => _openSelectionMenu(folderActions: false),
             onShareSelected: _shareSelected,
             onDeleteSelected: _deleteSelected,
@@ -820,7 +818,6 @@ class VideosHub extends StatelessWidget {
     required this.onOpen,
     required this.onToggleSelect,
     required this.onHold,
-    required this.onThumbTap,
     required this.onSelectionHold,
     required this.onShareSelected,
     required this.onDeleteSelected,
@@ -851,7 +848,6 @@ class VideosHub extends StatelessWidget {
   final Future<void> Function(VideoItem item, {List<VideoItem>? playlist}) onOpen;
   final void Function(VideoItem) onToggleSelect;
   final Future<void> Function(VideoItem) onHold;
-  final void Function(VideoItem) onThumbTap;
   final Future<void> Function() onSelectionHold;
   final Future<void> Function() onShareSelected;
   final Future<void> Function() onDeleteSelected;
@@ -1007,7 +1003,7 @@ class VideosHub extends StatelessWidget {
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                               onLongPress: () => onHold(item),
-                              onThumbTap: () => onThumbTap(item),
+                              onThumbTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                             );
                           },
                         )
@@ -1030,7 +1026,7 @@ class VideosHub extends StatelessWidget {
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                               onLongPress: () => onHold(item),
-                              onThumbTap: () => onThumbTap(item),
+                              onThumbTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                             );
                           },
                         ),

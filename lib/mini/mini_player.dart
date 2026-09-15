@@ -114,6 +114,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
   void _onTick() {
     if (!mounted) return;
+    if (_gestureActive || _arrowDragging || _anim.isAnimating) return;
     final hi = MiniPhysics.maxWFor(_screen, _video);
     if (_w > hi + 2) {
       setState(() {

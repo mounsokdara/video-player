@@ -538,14 +538,14 @@ class _ThemeSettingsState extends State<ThemeSettings> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text('Playlist UI style', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('Player style', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           RadioListTile<PlaylistUiStyle>(
             contentPadding: EdgeInsets.zero,
             value: PlaylistUiStyle.sheet,
             groupValue: s.playlistStyle,
             title: const Text('Bottom dialog sheet'),
-            subtitle: const Text('Material sheet over the player'),
+            subtitle: const Text('Fullscreen player, playlist as a Material sheet'),
             onChanged: (v) {
               if (v != null) set(() => s.playlistStyle = v);
             },
@@ -555,7 +555,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
             value: PlaylistUiStyle.youtube,
             groupValue: s.playlistStyle,
             title: const Text('YouTube'),
-            subtitle: const Text('Queue panel with Now playing and Up next'),
+            subtitle: const Text('Watch page with the list under the video. Maximize for fullscreen'),
             onChanged: (v) {
               if (v != null) set(() => s.playlistStyle = v);
             },

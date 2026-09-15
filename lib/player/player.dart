@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:share_plus/share_plus.dart';
@@ -115,9 +116,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _handedOff = false;
   bool _endedLatch = false;
   int _openFails = 0;
+  bool _ytMax = false;
+  bool _ytQueue = false;
 
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
+  bool get _watch => appSettings.playlistStyle == PlaylistUiStyle.youtube && !_ytMax;
 
   @override
   void initState() {
@@ -274,8 +278,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _applySystemUi() {
     SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
     final sheetOpen = SystemBars.popupCount > 0;
-    final hide = !sheetOpen && (appSettings.alwaysHideNavBar || !showUi);
+    final hide = !sheetOpen && !_watch && (appSettings.alwaysHideNavBar || !showUi);
     SystemBars.apply(icons: Brightness.light, contrast: true, hide: hide);
+  }
+
+  void _setYtMax(bool max) {
+    setState(() {
+      _ytMax = max;
+      if (!max) _ytQueue = false;
+      showUi = true;
+    });
+    _applySystemUi();
+    _armHide();
   }
 
   void _syncPip() {
@@ -668,10 +682,62 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_ytQueue) {
+          setState(() => _ytQueue = false);
+          return;
+        }
+        if (appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytMax) {
+          _setYtMax(false);
+          return;
+        }
         _armMiniThenPop();
       },
-      child: _playerChrome(
-        Listener(
+      child: _watch ? _watchScaffold(c, size) : _fullScaffold(c, size, pad),
+    );
+  }
+
+  Widget _fullScaffold(PlaybackEngine? c, Size size, EdgeInsets pad) {
+    return _playerChrome(
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          _stage(c, size, pad, watch: false),
+          if (appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytQueue) _ytQueueOverlay(),
+        ],
+      ),
+    );
+  }
+
+  Widget _watchScaffold(PlaybackEngine? c, Size size) {
+    final paneH = math.min(size.width * 9 / 16, size.height * 0.42).clamp(160.0, size.height * 0.5);
+    final paneSize = Size(size.width, paneH);
+    final light = Theme.of(context).brightness == Brightness.light;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemBars.overlay(icons: light ? Brightness.dark : Brightness.light),
+      child: Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              ColoredBox(
+                color: Colors.black,
+                child: SizedBox(
+                  width: paneSize.width,
+                  height: paneSize.height,
+                  child: _stage(c, paneSize, EdgeInsets.zero, watch: true),
+                ),
+              ),
+              Expanded(child: _watchDetails()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stage(PlaybackEngine? c, Size size, EdgeInsets pad, {required bool watch}) {
+    return Listener(
         onPointerDown: (e) => _pinchDown(e, size),
         onPointerMove: (e) => _pinchMove(e, size),
         onPointerUp: (e) => _pinchUp(e.pointer),
@@ -885,19 +951,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   icon: const Icon(Icons.lock_open),
                 ),
               ),
-            if (showUi && !locked)
+            if (showUi && !locked && !watch)
               HudLayer(
                 fabs: decodeHud(appSettings.hudFabsJson),
                 pad: pad,
                 bottomReserve: 24,
                 onTap: (id) => unawaited(_runAction(id)),
               ),
-            if (showUi && !locked) ..._chrome(c, size),
+            if (showUi && !locked) ..._chrome(c, size, watch: watch, pad: pad),
+            if (appSettings.playlistStyle == PlaylistUiStyle.youtube && (!watch || !showUi || locked))
+              _ytFrameButtons(watch: watch, pad: pad),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
           ],
         ),
-      ),
-    ),
     );
   }
 
@@ -911,6 +977,202 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       ),
     );
   }
+
+  Widget _ytFrameButtons({required bool watch, required EdgeInsets pad}) {
+    final extra = watch ? 0.0 : pad.bottom;
+    final bottom = ((showUi && !locked) ? 118.0 : (watch ? 8.0 : 20.0)) + extra;
+    return Positioned(
+      right: 4 + pad.right,
+      bottom: bottom,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(24),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!watch)
+              IconButton(
+                tooltip: 'Playlist',
+                onPressed: () => setState(() => _ytQueue = true),
+                icon: const Icon(Icons.queue_music, color: Colors.white),
+              ),
+            IconButton(
+              tooltip: watch ? 'Maximize' : 'Minimize',
+              onPressed: () => _setYtMax(watch),
+              icon: Icon(watch ? Icons.fullscreen : Icons.fullscreen_exit, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _ytQueueOverlay() {
+    final size = MediaQuery.sizeOf(context);
+    final pad = SystemBars.rawOf(context);
+    final landscape = size.width > size.height;
+    final panelW = landscape ? math.min(420.0, size.width * 0.46) : size.width;
+    return Positioned.fill(
+      child: Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () => setState(() => _ytQueue = false),
+            child: ColoredBox(color: Colors.black.withValues(alpha: 0.55)),
+          ),
+        ),
+        Align(
+          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
+          child: Material(
+            color: Theme.of(context).colorScheme.surface,
+            elevation: 16,
+            borderRadius: landscape
+                ? const BorderRadius.horizontal(left: Radius.circular(16))
+                : const BorderRadius.vertical(top: Radius.circular(16)),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: panelW,
+              height: landscape ? size.height : size.height * 0.92,
+              child: _youtubeQueueBody(
+                context,
+                pad,
+                onClose: () => setState(() => _ytQueue = false),
+                onPick: (i) {
+                  setState(() => _ytQueue = false);
+                  index = i;
+                  unawaited(_openCurrent());
+                },
+              ),
+            ),
+          ),
+        ),
+      ],
+      ),
+    );
+  }
+
+  Widget _watchDetails() {
+    final scheme = Theme.of(context).colorScheme;
+    final created = item.created ?? item.modified;
+    final bookmarked = item.bookmarked || appSettings.bookmarks.contains(item.path);
+    final pinned = appSettings.pinned.contains(item.path);
+    final pad = MediaQuery.viewPaddingOf(context);
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 24 + pad.bottom),
+      children: [
+        Text(item.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.25)),
+        const SizedBox(height: 6),
+        Text(
+          '${DateFormat.yMMMd().format(created)}  ·  ${formatBytes(item.size)}',
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _watchChip('bookmark', bookmarked ? Icons.bookmark : Icons.bookmark_outline, 'Bookmark', on: bookmarked),
+            _watchChip('pin', pinned ? Icons.push_pin : Icons.push_pin_outlined, 'Pin', on: pinned),
+            _watchChip('share', Icons.share_outlined, 'Share'),
+            _watchChip('properties', Icons.info_outline, 'Properties'),
+            _watchChip('delete', Icons.delete_outline, 'Delete'),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text('Path: ${item.path}', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            const Expanded(child: Text('Up next', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+            PopupMenuButton<PlayMode>(
+              tooltip: 'Order',
+              onSelected: (m) {
+                setState(() => appSettings.playMode = m);
+                appSettings.save();
+              },
+              itemBuilder: (_) => [
+                for (final m in PlayMode.values) PopupMenuItem(value: m, child: Text(_playModeLabel(m))),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                child: Row(
+                  children: [
+                    Text(_playModeLabel(appSettings.playMode), style: TextStyle(color: scheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+                    Icon(Icons.expand_more, color: scheme.primary, size: 18),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (var i = 0; i < list.length; i++) _watchQueueTile(i, scheme),
+      ],
+    );
+  }
+
+  Widget _watchChip(String id, IconData icon, String label, {bool on = false}) {
+    final scheme = Theme.of(context).colorScheme;
+    return ActionChip(
+      avatar: Icon(icon, size: 18, color: on ? scheme.primary : scheme.onSurfaceVariant),
+      label: Text(label),
+      onPressed: () => unawaited(_runAction(id)),
+    );
+  }
+
+  Widget _watchQueueTile(int i, ColorScheme scheme) {
+    final v = list[i];
+    final current = i == index;
+    return InkWell(
+      onTap: () {
+        if (i == index) return;
+        index = i;
+        unawaited(_openCurrent());
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 120,
+              height: 68,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  VideoThumb(item: v, radius: 8),
+                  if (current)
+                    const ColoredBox(
+                      color: Color(0x66000000),
+                      child: Center(child: Icon(Icons.equalizer, color: Colors.white)),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    v.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontWeight: current ? FontWeight.w700 : FontWeight.w600, height: 1.25),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${formatDuration(v.duration)}  ·  ${formatBytes(v.size)}',
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _seekHud(PlaybackEngine? c, EdgeInsets pad) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
@@ -1020,12 +1282,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  List<Widget> _chrome(PlaybackEngine? c, Size size) {
+  List<Widget> _chrome(PlaybackEngine? c, Size size, {required bool watch, required EdgeInsets pad}) {
     final pos = c?.value.position ?? Duration.zero;
     final dur = c?.value.duration ?? Duration.zero;
     final playing = c?.value.isPlaying ?? false;
     final remain = dur - pos;
-    final pad = MediaQuery.viewPaddingOf(context);
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
     final wide = size.width >= 600;
@@ -1048,14 +1309,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               Row(
                 children: [
                   IconButton(onPressed: _armMiniThenPop, icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white)),
-                  Expanded(
-                    child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                  ),
-                  for (final id in (appSettings.titleActions.isEmpty ? const <String>['more'] : appSettings.titleActions)) _titleBtn(id),
+                  if (!watch)
+                    Expanded(
+                      child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    )
+                  else
+                    const Spacer(),
+                  if (!watch)
+                    for (final id in (appSettings.titleActions.isEmpty ? const <String>['more'] : appSettings.titleActions)) _titleBtn(id),
                 ],
               ),
-              _quickActions(),
-              if (appSettings.showClock || appSettings.showBattery)
+              if (!watch) _quickActions(),
+              if (!watch && (appSettings.showClock || appSettings.showBattery))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Text(
@@ -1169,17 +1434,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 height: playSize + 12,
                 child: Row(
                   children: [
-                    IconButton(
-                      onPressed: () {
-                        setState(() {
-                          locked = true;
-                          showUi = false;
-                        });
-                        _applySystemUi();
-                      },
-                      icon: const Icon(Icons.lock_outline, color: Colors.white),
-                      tooltip: 'Lock',
-                    ),
+                    if (!watch)
+                      IconButton(
+                        onPressed: () {
+                          setState(() {
+                            locked = true;
+                            showUi = false;
+                          });
+                          _applySystemUi();
+                        },
+                        icon: const Icon(Icons.lock_outline, color: Colors.white),
+                        tooltip: 'Lock',
+                      )
+                    else
+                      const SizedBox(width: 48),
                     Expanded(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1213,11 +1481,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: _aspectSheet,
-                      icon: const Icon(Icons.aspect_ratio, color: Colors.white),
-                      tooltip: 'Screen mode',
-                    ),
+                    if (!watch)
+                      IconButton(
+                        onPressed: _aspectSheet,
+                        icon: const Icon(Icons.aspect_ratio, color: Colors.white),
+                        tooltip: 'Screen mode',
+                      )
+                    else
+                      IconButton(
+                        tooltip: 'Maximize',
+                        onPressed: () => _setYtMax(true),
+                        icon: const Icon(Icons.fullscreen, color: Colors.white),
+                      ),
                   ],
                 ),
               ),
@@ -1234,6 +1509,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       final on = switch (id) {
         'background' => appSettings.backgroundPlay,
         'bookmark' => item.bookmarked || appSettings.bookmarks.contains(item.path),
+        'pin' => appSettings.pinned.contains(item.path),
         'night' => night,
         'ab' => abA != null,
         _ => false,
@@ -1291,6 +1567,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         }
       case 'bookmark':
         _toggleBookmark();
+      case 'pin':
+        _togglePin();
       case 'playopt':
         await _playOptions();
       case 'ab':
@@ -1372,6 +1650,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       default:
         break;
     }
+  }
+
+  void _togglePin() {
+    if (appSettings.pinned.contains(item.path)) {
+      appSettings.pinned.remove(item.path);
+    } else {
+      appSettings.pinned.add(item.path);
+    }
+    appSettings.save();
+    widget.onChanged();
+    setState(() {});
   }
 
   void _toggleBookmark() {

@@ -3,7 +3,8 @@ part of 'player.dart';
 extension PlayerSheets on _PlayerPageState {
   Future<void> _playlist() async {
     if (appSettings.playlistStyle == PlaylistUiStyle.youtube) {
-      await _youtubePlaylist();
+      if (_watch) return;
+      setState(() => _ytQueue = true);
       return;
     }
     await _sheetPlaylist();
@@ -88,49 +89,12 @@ extension PlayerSheets on _PlayerPageState {
         PlayMode.noAutoplay => 'No autoplay',
       };
 
-  Future<void> _youtubePlaylist() async {
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Queue',
-      barrierColor: Colors.black.withValues(alpha: 0.55),
-      transitionDuration: const Duration(milliseconds: 240),
-      pageBuilder: (ctx, anim, sec) {
-        final size = MediaQuery.sizeOf(ctx);
-        final pad = SystemBars.rawOf(context);
-        final landscape = size.width > size.height;
-        final panelW = landscape ? math.min(420.0, size.width * 0.46) : size.width;
-        return Align(
-          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
-          child: Material(
-            color: Theme.of(ctx).colorScheme.surface,
-            elevation: 16,
-            borderRadius: landscape
-                ? const BorderRadius.horizontal(left: Radius.circular(16))
-                : const BorderRadius.vertical(top: Radius.circular(16)),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              width: panelW,
-              height: landscape ? size.height : size.height * 0.92,
-              child: _youtubeQueueBody(ctx, pad),
-            ),
-          ),
-        );
-      },
-      transitionBuilder: (ctx, anim, sec, child) {
-        final landscape = MediaQuery.sizeOf(ctx).width > MediaQuery.sizeOf(ctx).height;
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: landscape ? const Offset(1, 0) : const Offset(0, 1),
-            end: Offset.zero,
-          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
-          child: child,
-        );
-      },
-    );
-  }
-
-  Widget _youtubeQueueBody(BuildContext ctx, EdgeInsets pad) {
+  Widget _youtubeQueueBody(
+    BuildContext ctx,
+    EdgeInsets pad, {
+    required VoidCallback onClose,
+    required void Function(int i) onPick,
+  }) {
     final scheme = Theme.of(ctx).colorScheme;
     final current = list.isEmpty ? null : list[index.clamp(0, list.length - 1)];
     final upNext = <int>[];
@@ -158,7 +122,7 @@ extension PlayerSheets on _PlayerPageState {
               padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
               child: Row(
                 children: [
-                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.keyboard_arrow_down)),
+                  IconButton(onPressed: onClose, icon: const Icon(Icons.keyboard_arrow_down)),
                   const Expanded(child: Text('Queue', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
                   Text('${list.length}', style: TextStyle(color: scheme.onSurfaceVariant)),
                   const SizedBox(width: 12),
@@ -238,11 +202,7 @@ extension PlayerSheets on _PlayerPageState {
                   final i = upNext[n];
                   final v = list[i];
                   return InkWell(
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      index = i;
-                      _openCurrent();
-                    },
+                    onTap: () => onPick(i),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       child: Row(
@@ -285,6 +245,7 @@ extension PlayerSheets on _PlayerPageState {
         'ab' => Icons.repeat,
         'eq' => Icons.equalizer,
         'bookmark' => Icons.bookmark_outline,
+        'pin' => Icons.push_pin_outlined,
         'brightness' => Icons.brightness_6_outlined,
         'rotate' => Icons.screen_rotation,
         'share' => Icons.share_outlined,

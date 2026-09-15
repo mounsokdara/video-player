@@ -6,9 +6,9 @@ import 'package:video_player_app/playback/session.dart';
 
 class MiniGeom {
   MiniGeom._();
-  static const defW = 148.0;
+  static const defW = 168.0;
   static const minW = 96.0;
-  static const maxW = 196.0;
+  static const maxW = 420.0;
   static const fallbackAr = 16 / 9;
   static const barH = 40.0;
   static const safeInset = 16.0;
@@ -49,16 +49,16 @@ class MiniPhysics {
     final v = video ?? videoSize();
     final short = math.min(screen.width, screen.height);
     final ar = aspect(v);
-    final maxBoxH = (screen.height * 0.28).clamp(MiniGeom.barH + 56, screen.height * 0.34);
+    final maxBoxH = (screen.height * 0.45).clamp(MiniGeom.barH + 80, screen.height * 0.5);
     final fromH = ((maxBoxH - MiniGeom.barH) * ar);
-    final fromW = short * 0.28;
+    final fromW = math.min(screen.width - MiniGeom.safeInset * 2, short * 0.72);
     final hi = math.min(MiniGeom.maxW, math.min(fromH, fromW));
     return math.max(72.0, hi);
   }
 
   static double defaultW(Size screen, [Size? video]) {
     final short = math.min(screen.width, screen.height);
-    return clampW(short * 0.24, screen, video);
+    return clampW(short * 0.36, screen, video);
   }
 
   static double clampW(double w, Size screen, [Size? video]) {

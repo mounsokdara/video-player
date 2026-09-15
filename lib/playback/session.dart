@@ -11,14 +11,14 @@ import 'package:video_player_app/settings/settings.dart';
 
 class MiniMemory {
   MiniMemory._();
-  static double w = 148;
+  static double w = 168;
   static double? dx;
   static double? dy;
   static bool parked = false;
   static int parkSide = 0;
 
   static void reset() {
-    w = 148;
+    w = 168;
     dx = null;
     dy = null;
     parked = false;
