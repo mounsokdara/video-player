@@ -125,6 +125,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   VideoItem get item => widget.playlist[index];
   List<VideoItem> get list => widget.playlist;
   bool get _watch => appSettings.playlistStyle == PlaylistUiStyle.youtube && _ytMaxAnim.value < 0.85;
+  bool get _busyGesture => _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch';
 
   @override
   void initState() {
@@ -956,12 +957,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   Widget _stage(PlaybackEngine? c, Size size, EdgeInsets pad, {required bool watch}) {
     final g = !watch;
-    return Listener(
-        onPointerDown: g ? (e) => _pinchDown(e, size) : null,
-        onPointerMove: g ? (e) => _pinchMove(e, size) : null,
-        onPointerUp: g ? (e) => _pinchUp(e.pointer) : null,
-        onPointerCancel: g ? (e) => _pinchUp(e.pointer) : null,
-        child: Stack(
+    return Stack(
           fit: StackFit.expand,
           children: [
             GestureDetector(
@@ -970,7 +966,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 _tapPos = d.localPosition;
                 _tapBurst = false;
                 if (!g) return;
-                if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') {
+                if (locked || _busyGesture) {
                   _ateTap = true;
                   return;
                 }
@@ -988,7 +984,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   _setUi(!showUi);
                   return;
                 }
-                if (locked || _pts.length >= 2 || _pinching || _gesture == 'pan' || _gesture == 'hold' || _gesture == 'pinch') return;
+                if (locked || _busyGesture) return;
                 if (_tapBurst || _ateTap) {
                   _tapBurst = false;
                   _ateTap = false;
@@ -1001,7 +997,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   ? null
                   : (_) async {
                 if (locked || !appSettings.longPress2x || c == null) return;
-                if (_pts.length >= 2 || _pinching || _gesture == 'pan') return;
+                if (_busyGesture && _gesture != '') return;
+                if (_gesture == 'pinch' || _pinching) return;
                 _gesture = 'hold';
                 _ateTap = true;
                 speeding = true;
@@ -1022,75 +1019,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 unawaited(_applySpeed());
                 setState(() {});
               },
-              onPanStart: !g
-                  ? null
-                  : (d) {
-                if (locked || !appSettings.gestureControl) return;
-                if (_pts.length >= 2 || _pinching || _gesture == 'hold' || _gesture == 'pinch') return;
-                _gesture = 'pan';
-                _tapBurst = false;
-                _ateTap = true;
-                _leftTap = DateTime.fromMillisecondsSinceEpoch(0);
-                _rightTap = DateTime.fromMillisecondsSinceEpoch(0);
-                _midTap = DateTime.fromMillisecondsSinceEpoch(0);
-                panStart = d.localPosition;
-                panKind = '';
-              },
-              onPanUpdate: !g
-                  ? null
-                  : (d) {
-                if (locked || !appSettings.gestureControl || panStart == null || c == null) return;
-                if (_pts.length >= 2 || _pinching) return;
-                final dx = d.localPosition.dx - panStart!.dx;
-                final dy = d.localPosition.dy - panStart!.dy;
-                if (panKind.isEmpty) {
-                  if (dx.abs() > 24 && dx.abs() > dy.abs()) {
-                    panKind = 'seek';
-                    panBase = c.value.position.inMilliseconds.toDouble();
-                  } else if (dy.abs() > 24) {
-                    panKind = panStart!.dx < size.width / 2 ? 'brightness' : 'volume';
-                    panBase = panKind == 'brightness' ? brightness : volume;
-                  } else {
-                    return;
-                  }
-                }
-                if (panKind == 'seek') {
-                  final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
-                  final delta = (dx / size.width) * dur * 0.6;
-                  final next = (panBase + delta).clamp(0, dur);
-                  setState(() => _scrub = next / dur);
-                  _queuePreview((next / dur).toDouble());
-                  _flash(formatDuration(Duration(milliseconds: next.round())));
-                } else if (panKind == 'brightness') {
-                  brightness = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
-                  unawaited(ScreenBrightness().setApplicationScreenBrightness(brightness));
-                  if (appSettings.rememberBrightness) {
-                    appSettings.brightness = brightness;
-                  }
-                  _flash('Brightness ${(brightness * 100).round()}%');
-                  setState(() {});
-                } else if (panKind == 'volume') {
-                  volume = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
-                  try {
-                    VolumeController.instance.setVolume(volume);
-                  } catch (_) {}
-                  _flash('Volume ${(volume * 100).round()}%');
-                  setState(() {});
-                }
-              },
-              onPanEnd: !g
-                  ? null
-                  : (_) async {
-                if (panKind == 'seek' && _scrub != null && c != null) {
-                  final dur = c.value.duration.inMilliseconds;
-                  unawaited(c.seekTo(Duration(milliseconds: (_scrub! * dur).round())));
-                }
-                panKind = '';
-                _scrub = null;
-                _previewBytes = null;
-                _gesture = '';
-                if (mounted) setState(() {});
-              },
+              onScaleStart: !g ? null : (d) => _onScaleStart(d, size),
+              onScaleUpdate: !g ? null : (d) => _onScaleUpdate(d, size, c),
+              onScaleEnd: !g ? null : (d) => unawaited(_onScaleEnd(c)),
               child: ColoredBox(
                 color: Colors.black,
                 child: ClipRect(
@@ -1201,7 +1132,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               _ytFrameButtons(watch: true, pad: pad, stageH: size.height),
             if (_scrub != null && !(showUi && !locked)) _seekHud(c, pad),
           ],
-        ),
     );
   }
 

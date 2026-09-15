@@ -1,47 +1,91 @@
 part of 'player.dart';
 
 extension PlayerGestures on _PlayerPageState {
-  void _pinchDown(PointerDownEvent e, Size size) {
-    if (_watch) return;
-    _pts[e.pointer] = e.localPosition;
-    if (_pts.length == 2 && appSettings.allowZoom) {
-      if (_gesture == 'pan' || _gesture == 'hold') return;
-      _gesture = 'pinch';
+  void _onScaleStart(ScaleStartDetails d, Size size) {
+    if (locked || _watch) return;
+    if (_gesture == 'hold') return;
+    if (d.pointerCount >= 2 && appSettings.allowZoom) {
       _ateTap = true;
-      final pts = _pts.values.toList();
-      _pinchStart = (pts[0] - pts[1]).distance;
-      _pinchBase = _zoomScale;
-      _pinchBasePan = _zoomPan;
-      _pinchStartFocal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
-      _pinching = true;
-      _showZoomHud = true;
-      _zoomHudTimer?.cancel();
-      if (mounted) setState(() {});
-    }
-  }
-
-  void _pinchMove(PointerMoveEvent e, Size size) {
-    if (_watch) return;
-    _pts[e.pointer] = e.localPosition;
-    if (_pts.length < 2 || !appSettings.allowZoom) return;
-    final pts = _pts.values.toList();
-    final dist = (pts[0] - pts[1]).distance;
-    final focal = Offset((pts[0].dx + pts[1].dx) / 2, (pts[0].dy + pts[1].dy) / 2);
-    if (_pinchStart <= 12) {
-      _pinchStart = dist;
-      _pinchBase = _zoomScale;
-      _pinchBasePan = _zoomPan;
-      _pinchStartFocal = focal;
+      _abortPan();
+      _beginPinch(d.focalPoint);
       return;
     }
-    final nextScale = (_pinchBase * dist / _pinchStart).clamp(0.01, 10.0);
+    if (_gesture == 'pinch' || _pinching) return;
+    panStart = d.focalPoint;
+    panKind = '';
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails d, Size size, PlaybackEngine? c) {
+    if (locked || _watch || _gesture == 'hold') return;
+    if (appSettings.allowZoom && d.pointerCount >= 2) {
+      if (_gesture == 'pan') _abortPan();
+      if (_gesture != 'pinch') {
+        _ateTap = true;
+        _beginPinch(d.focalPoint);
+      }
+      _applyPinch(d, size);
+      return;
+    }
+    if (_gesture == 'pinch' || _pinching) return;
+    if (!appSettings.gestureControl || c == null) return;
+    panStart ??= d.focalPoint;
+    _applyOneFinger(d.focalPoint, size, c);
+  }
+
+  Future<void> _onScaleEnd(PlaybackEngine? c) async {
+    if (_gesture == 'hold') return;
+    if (_gesture == 'pinch' || _pinching) {
+      _pinching = false;
+      if (_zoomScale < 0.011) {
+        _zoomScale = 0.01;
+        _zoomPan = Offset.zero;
+      }
+      _zoomHudTimer?.cancel();
+      _zoomHudTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _showZoomHud = false);
+      });
+    } else if (_gesture == 'pan' && panKind == 'seek' && _scrub != null && c != null) {
+      final dur = c.value.duration.inMilliseconds;
+      unawaited(c.seekTo(Duration(milliseconds: (_scrub! * dur).round())));
+    }
+    panKind = '';
+    panStart = null;
+    _scrub = null;
+    _previewBytes = null;
+    if (_gesture != 'hold') _gesture = '';
+    _pinching = false;
+    if (mounted) setState(() {});
+  }
+
+  void _beginPinch(Offset focal) {
+    _gesture = 'pinch';
+    _pinching = true;
+    _pinchBase = _zoomScale;
+    _pinchBasePan = _zoomPan;
+    _pinchStartFocal = focal;
+    _pinchStart = 1;
+    _showZoomHud = true;
+    _zoomHudTimer?.cancel();
+    if (mounted) setState(() {});
+  }
+
+  void _abortPan() {
+    panKind = '';
+    panStart = null;
+    _scrub = null;
+    _previewBytes = null;
+    if (_gesture == 'pan') _gesture = '';
+  }
+
+  void _applyPinch(ScaleUpdateDetails d, Size size) {
+    final nextScale = (_pinchBase * d.scale).clamp(0.01, 10.0);
     final center = Offset(size.width / 2, size.height / 2);
     Offset nextPan;
     if (nextScale <= 1.001) {
       nextPan = Offset.zero;
     } else {
-      final content = (_pinchStartFocal - center - _pinchBasePan) / _pinchBase;
-      nextPan = focal - center - content * nextScale;
+      final content = (_pinchStartFocal - center - _pinchBasePan) / (_pinchBase == 0 ? 1 : _pinchBase);
+      nextPan = d.focalPoint - center - content * nextScale;
       final maxX = (nextScale - 1) * size.width / 2 + 48;
       final maxY = (nextScale - 1) * size.height / 2 + 48;
       nextPan = Offset(nextPan.dx.clamp(-maxX, maxX), nextPan.dy.clamp(-maxY, maxY));
@@ -52,24 +96,53 @@ extension PlayerGestures on _PlayerPageState {
         _zoomPan = nextScale <= 0.011 ? Offset.zero : nextPan;
         _pinching = true;
         _showZoomHud = true;
+        _gesture = 'pinch';
       });
     }
   }
 
-  void _pinchUp(int pointer) {
-    _pts.remove(pointer);
-    if (_pts.length < 2 && _pinching) {
-      _pinching = false;
-      _gesture = '';
-      if (_zoomScale < 0.011) {
-        _zoomScale = 0.01;
-        _zoomPan = Offset.zero;
+  void _applyOneFinger(Offset focal, Size size, PlaybackEngine c) {
+    final start = panStart ?? focal;
+    final dx = focal.dx - start.dx;
+    final dy = focal.dy - start.dy;
+    if (panKind.isEmpty) {
+      if (dx.abs() > 24 && dx.abs() > dy.abs()) {
+        _gesture = 'pan';
+        _ateTap = true;
+        panKind = 'seek';
+        panBase = c.value.position.inMilliseconds.toDouble();
+      } else if (dy.abs() > 24) {
+        _gesture = 'pan';
+        _ateTap = true;
+        panKind = start.dx < size.width / 2 ? 'brightness' : 'volume';
+        panBase = panKind == 'brightness' ? brightness : volume;
+      } else {
+        return;
       }
-      _zoomHudTimer?.cancel();
-      _zoomHudTimer = Timer(const Duration(milliseconds: 900), () {
-        if (mounted) setState(() => _showZoomHud = false);
-      });
-      if (mounted) setState(() {});
+    }
+    if (_gesture != 'pan') return;
+    if (panKind == 'seek') {
+      final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
+      final delta = (dx / size.width) * dur * 0.6;
+      final next = (panBase + delta).clamp(0, dur);
+      setState(() => _scrub = next / dur);
+      _queuePreview((next / dur).toDouble());
+      _flash(formatDuration(Duration(milliseconds: next.round())));
+    } else if (panKind == 'brightness') {
+      brightness = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
+      unawaited(ScreenBrightness().setApplicationScreenBrightness(brightness));
+      if (appSettings.rememberBrightness) {
+        appSettings.brightness = brightness;
+      }
+      _flash('Brightness ${(brightness * 100).round()}%');
+      setState(() {});
+    } else if (panKind == 'volume') {
+      volume = (panBase - dy / size.height).clamp(0.0, 1.0).toDouble();
+      try {
+        VolumeController.instance.setVolume(volume);
+      } catch (_) {}
+      _flash('Volume ${(volume * 100).round()}%');
+      setState(() {});
     }
   }
 
