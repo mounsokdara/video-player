@@ -4,7 +4,6 @@ Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files st
 
 [Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.1/com.mounsokdara.video_player.apk)
 
-Uninstall any older APK before installing.
 
 ## Library
 
