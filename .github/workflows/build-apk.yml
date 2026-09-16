@@ -42,25 +42,35 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            Video Player 1.0.1
+            Changelog — v1.0.1
 
             Library
-            - Scan internal storage, SD cards, USB drives, and hidden files
-            - Auto-refresh when files are added, changed, or deleted
-            - Videos: tap anywhere on the row to open; checkbox sits on the right while selecting
-            - Folders: hold for play queue, copy, cut, share, bookmark, pin, delete, properties
-            - Rename only when a single item is selected
-            - Paste is a bottom-right button and clears after one paste
-            - Other apps' Open-from / Get content opens the in-app video picker
+            - Videos tab: the whole row is tappable again (not only the thumbnail)
+            - Videos tab: checkbox sits on the right while selecting, like Folders
+            - Other apps' Open-from / Get content / Pick opens the in-app video picker instead of a Files folder
 
-            Player
-            - libmpv playback (one video at a time)
-            - Mini player scales to the screen, 16:9 or 9:16
-            - HUD buttons only appear with the player controls
-            - Background play with a notification; pause stays paused
-            - Player style: bottom dialog sheet (default) or YouTube watch page (16:9 / 9:16, landscape split, scroll-resize)
-            - Dynamic color from the wallpaper; seed picker greys out while that is on
-            - Equalizer, gestures, sleep timer, PIP, in-app mini player
-            - Speed changes picture and sound together; pitch shift is optional
+            Player style
+            - Playlist UI style is now Player style: bottom dialog sheet (default) or YouTube watch page
+            - YouTube style is a watch page, not a bottom sheet
+            - Watch page: video on top, details under the frame, Up next list below (or on the right in landscape)
+            - Portrait watch frame grows and shrinks with scroll, up to 9:16
+            - Landscape / wide: video top-left, details under it, list on the right
+            - Animated maximize and minimize
+            - Title-bar buttons stay available on the minimized YouTube frame
+            - No playlist button on YouTube style
+            - Maximize only shows with the player controls (no floating maximize)
+            - Filter chips scroll horizontally
+
+            Gestures and picture
+            - Only one gesture at a time: pinch zoom no longer starts seek
+            - Quick gestures stay off while the YouTube frame is minimized
+            - Double-tap seek works on the minimized watch frame, with Material 3 ripples
+            - Zoom resets when minimizing
+            - Original size uses the video's real pixels and never upscales
+
+            Mini player
+            - Window scales to the screen
+            - Landscape docks at 16:9, portrait at 9:16
+            - Pinch resize no longer loops or resets
 
             Uninstall the previous APK before installing this one.
