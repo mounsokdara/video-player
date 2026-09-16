@@ -62,5 +62,3 @@ jobs:
             - Dynamic color from the wallpaper; seed picker greys out while that is on
             - Equalizer, gestures, sleep timer, PIP, in-app mini player
             - Speed changes picture and sound together; pitch shift is optional
-
-            Uninstall the previous APK before installing this one.
