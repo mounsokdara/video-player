@@ -50,7 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : FlutterActivity() {
+open class MainActivity : FlutterActivity() {
     private val channelName = NativeConstants.CHANNEL
     private val eventName = NativeConstants.EVENTS
     private var wantPip = false
@@ -813,7 +813,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun onUserLeaveHint() {
+    open override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (wantPip && isPlaying && Build.VERSION.SDK_INT >= 26) {
             enterPipNow()
