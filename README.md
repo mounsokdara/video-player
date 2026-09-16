@@ -2,9 +2,9 @@
 
 Material 3 local video player for Android. Playback uses [media_kit](https://pub.dev/packages/media_kit) (libmpv).
 
-**v1.0.0** · `com.mounsokdara.video_player`
+**v1.0.1** · `com.mounsokdara.video_player`
 
-[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.0/com.mounsokdara.video_player.apk)
+[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.1/com.mounsokdara.video_player.apk)
 
 Uninstall any older build before installing this one.
 
@@ -12,10 +12,11 @@ Uninstall any older build before installing this one.
 
 - Library of videos on internal storage, SD cards, and USB drives, including hidden files
 - Library auto-refresh when files are added, changed, or deleted
-- Videos tab: hold a clip for actions; tap a thumbnail or row to open
+- Videos tab: tap anywhere on the row to open; checkbox sits on the right while selecting
 - Folders tab: hold for play queue, copy, cut, share, bookmark, pin, properties, delete
 - Rename only when one item is selected
 - Paste is a bottom-right button and clears after one paste
+- Other apps can open the in-app video picker (Get content / Pick)
 - Mini player scales to the screen and snaps to **16:9** or **9:16**
 - HUD buttons only show with the player controls
 - Player style: bottom dialog sheet (default) or YouTube watch page (16:9 / 9:16, landscape split, scroll to resize, animated maximize)

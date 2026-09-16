@@ -2,6 +2,8 @@ package com.mounsokdara.video_player
 
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
@@ -35,7 +37,9 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.MimeTypeMap
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -453,6 +457,18 @@ class MainActivity : FlutterActivity() {
                                 pickResult = result
                                 launchPickVideo()
                             }
+                        }
+                        "pickerAllowMultiple" -> {
+                            result.success(intent?.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false) == true)
+                        }
+                        "completePick" -> {
+                            val path = call.argument<String>("path")
+                            val paths = call.argument<List<String>>("paths")
+                            result.success(finishPick(path, paths))
+                        }
+                        "cancelPick" -> {
+                            cancelPick()
+                            result.success(true)
                         }
                         "extractCaptions" -> {
                             val path = call.argument<String>("path") ?: ""
@@ -1495,6 +1511,76 @@ class MainActivity : FlutterActivity() {
     private fun writeLeShort(out: java.io.DataOutputStream, v: Int) {
         out.write(v and 0xFF)
         out.write((v shr 8) and 0xFF)
+    }
+
+    private fun isPickerIntent(): Boolean {
+        val action = intent?.action ?: return false
+        return action == Intent.ACTION_GET_CONTENT || action == Intent.ACTION_PICK
+    }
+
+    private fun cancelPick() {
+        if (!isPickerIntent()) return
+        setResult(Activity.RESULT_CANCELED)
+        finish()
+    }
+
+    private fun finishPick(path: String?, paths: List<String>?): Boolean {
+        if (!isPickerIntent()) return false
+        val files = ArrayList<File>()
+        if (!paths.isNullOrEmpty()) {
+            for (p in paths) {
+                if (p.isNotBlank()) files.add(File(p))
+            }
+        } else if (!path.isNullOrBlank()) {
+            files.add(File(path))
+        }
+        val existing = files.filter { it.exists() && it.isFile }
+        if (existing.isEmpty()) return false
+        val uris = existing.mapNotNull { shareUri(it) }
+        if (uris.isEmpty()) return false
+        val mime = mimeOfFile(existing.first())
+        val reply = Intent()
+        if (uris.size == 1) {
+            reply.setDataAndType(uris[0], mime)
+        } else {
+            reply.type = "video/*"
+            val clip = ClipData(ClipDescription("videos", arrayOf("video/*")), ClipData.Item(uris[0]))
+            for (i in 1 until uris.size) clip.addItem(ClipData.Item(uris[i]))
+            reply.clipData = clip
+        }
+        reply.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+        )
+        val pkg = callingPackage
+        if (pkg != null) {
+            for (uri in uris) {
+                try {
+                    grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {
+                }
+            }
+        }
+        setResult(Activity.RESULT_OK, reply)
+        finish()
+        return true
+    }
+
+    private fun shareUri(file: File): Uri? {
+        return try {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        } catch (_: Exception) {
+            mediaUriForPath(file.absolutePath) ?: try {
+                Uri.fromFile(file)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun mimeOfFile(file: File): String {
+        val ext = file.extension.lowercase()
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "video/*"
     }
 
     companion object {

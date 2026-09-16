@@ -68,7 +68,7 @@ class SettingsHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: const Text('Video Player 1.0.0'),
+              subtitle: Text('Video Player ${AboutInfo.displayVersion}'),
               onTap: () async {
                 if (!context.mounted) return;
                 await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));

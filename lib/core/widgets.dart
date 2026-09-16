@@ -139,57 +139,35 @@ class VideoListTile extends StatelessWidget {
     required this.selected,
     required this.selecting,
     required this.onTap,
-    required this.onLongPress,
-    required this.onThumbTap,
+    this.onLongPress,
   });
 
   final VideoItem item;
   final bool selected;
   final bool selecting;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
-  final VoidCallback onThumbTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
       color: selected ? scheme.secondaryContainer.withValues(alpha: 0.45) : Colors.transparent,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onThumbTap,
-              onLongPress: onLongPress,
-              child: SizedBox(
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
                 width: 128,
                 height: 72,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    VideoThumb(item: item, radius: 10),
-                    if (selecting || selected)
-                      Positioned(
-                        left: 6,
-                        top: 6,
-                        child: Icon(
-                          selected ? Icons.check_circle : Icons.circle_outlined,
-                          color: selected ? scheme.primary : Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                  ],
-                ),
+                child: VideoThumb(item: item, radius: 10),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: InkWell(
-                onTap: onTap,
-                onLongPress: onLongPress,
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -219,8 +197,13 @@ class VideoListTile extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ],
+              if (selecting)
+                Checkbox(
+                  value: selected,
+                  onChanged: (_) => onTap(),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -234,69 +217,61 @@ class VideoGridCard extends StatelessWidget {
     required this.selected,
     required this.selecting,
     required this.onTap,
-    required this.onLongPress,
-    required this.onThumbTap,
+    this.onLongPress,
   });
 
   final VideoItem item;
   final bool selected;
   final bool selecting;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
-  final VoidCallback onThumbTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surfaceContainerLow,
+      color: selected ? scheme.secondaryContainer.withValues(alpha: 0.7) : scheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: onThumbTap,
-              onLongPress: onLongPress,
-              child: Stack(
-                fit: StackFit.expand,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: VideoThumb(item: item, radius: 0)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  VideoThumb(item: item, radius: 0),
-                  if (selecting || selected)
-                    Positioned(
-                      left: 8,
-                      top: 8,
-                      child: Icon(
-                        selected ? Icons.check_circle : Icons.circle_outlined,
-                        color: selected ? scheme.primary : Colors.white,
-                      ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
+                        const SizedBox(height: 4),
+                        Text(
+                          formatBytes(item.size),
+                          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 4),
+                        ResumeBar(progress: item.progress),
+                      ],
+                    ),
+                  ),
+                  if (selecting)
+                    Checkbox(
+                      value: selected,
+                      onChanged: (_) => onTap(),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                 ],
               ),
             ),
-          ),
-          InkWell(
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, height: 1.25)),
-                  const SizedBox(height: 4),
-                  Text(
-                    formatBytes(item.size),
-                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 4),
-                  ResumeBar(progress: item.progress),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1003,7 +1003,6 @@ class VideosHub extends StatelessWidget {
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                               onLongPress: () => onHold(item),
-                              onThumbTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                             );
                           },
                         )
@@ -1026,7 +1025,6 @@ class VideosHub extends StatelessWidget {
                               selecting: selecting,
                               onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                               onLongPress: () => onHold(item),
-                              onThumbTap: () => selecting ? onToggleSelect(item) : onOpen(item),
                             );
                           },
                         ),
@@ -1463,7 +1461,6 @@ class _SearchPageState extends State<SearchPage> {
                     onChanged: () { if (mounted) setState(() {}); },
                     onPlay: (picked) => widget.onOpen(picked.first, playlist: items),
                   ),
-                  onThumbTap: () => widget.onOpen(item, playlist: items),
                 );
               },
             ),

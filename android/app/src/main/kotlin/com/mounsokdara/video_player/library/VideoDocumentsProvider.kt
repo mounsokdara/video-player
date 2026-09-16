@@ -16,19 +16,9 @@ class VideoDocumentsProvider : DocumentsProvider() {
 
     override fun queryRoots(projection: Array<String>?): Cursor {
         val result = MatrixCursor(projection ?: ROOT_COLUMNS)
-        result.newRow()
-            .add(DocumentsContract.Root.COLUMN_ROOT_ID, ROOT_ID)
-            .add(DocumentsContract.Root.COLUMN_DOCUMENT_ID, DOC_ROOT)
-            .add(DocumentsContract.Root.COLUMN_TITLE, "Video Player")
-            .add(DocumentsContract.Root.COLUMN_SUMMARY, "Videos on this device")
-            .add(DocumentsContract.Root.COLUMN_ICON, R.mipmap.ic_launcher)
-            .add(DocumentsContract.Root.COLUMN_MIME_TYPES, "video/*")
-            .add(
-                DocumentsContract.Root.COLUMN_FLAGS,
-                DocumentsContract.Root.FLAG_LOCAL_ONLY or
-                    DocumentsContract.Root.FLAG_SUPPORTS_RECENTS or
-                    DocumentsContract.Root.FLAG_SUPPORTS_SEARCH
-            )
+        // Do not advertise a SAF folder root. DocumentsUI always opens
+        // provider roots inside Files; GET_CONTENT is handled by
+        // VideoPickerActivity so "Video Player" launches our picker UI.
         return result
     }
 
@@ -55,12 +45,14 @@ class VideoDocumentsProvider : DocumentsProvider() {
 
     override fun queryRecentDocuments(rootId: String, projection: Array<String>?): Cursor {
         val result = MatrixCursor(projection ?: DOC_COLUMNS)
+        if (rootId != ROOT_ID) return result
         for (row in loadVideos(limit = 64)) addVideoRow(result, row)
         return result
     }
 
     override fun querySearchDocuments(rootId: String, query: String, projection: Array<String>?): Cursor {
         val result = MatrixCursor(projection ?: DOC_COLUMNS)
+        if (rootId != ROOT_ID) return result
         val q = query.lowercase()
         if (q.isBlank()) return result
         for (row in loadVideos(limit = 200)) {

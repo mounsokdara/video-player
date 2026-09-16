@@ -34,23 +34,24 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: Video Player v1.0.0
+          tag_name: v1.0.1
+          name: Video Player v1.0.1
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           fail_on_unmatched_files: true
           prerelease: false
           make_latest: true
           generate_release_notes: false
           body: |
-            Video Player 1.0.0
+            Video Player 1.0.1
 
             Library
             - Scan internal storage, SD cards, USB drives, and hidden files
             - Auto-refresh when files are added, changed, or deleted
-            - Videos: hold a clip for actions; tap a thumbnail or row to open
+            - Videos: tap anywhere on the row to open; checkbox sits on the right while selecting
             - Folders: hold for play queue, copy, cut, share, bookmark, pin, delete, properties
             - Rename only when a single item is selected
             - Paste is a bottom-right button and clears after one paste
+            - Other apps' Open-from / Get content opens the in-app video picker
 
             Player
             - libmpv playback (one video at a time)

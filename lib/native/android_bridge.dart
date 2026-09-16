@@ -466,4 +466,30 @@ class AndroidBridge {
       await _ch.invokeMethod('breadcrumb', {'action': action});
     } catch (_) {}
   }
+
+  static Future<bool> pickerAllowMultiple() async {
+    try {
+      return await _ch.invokeMethod<bool>('pickerAllowMultiple') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> completePick({String? path, List<String>? paths}) async {
+    try {
+      return await _ch.invokeMethod<bool>('completePick', {
+            'path': path,
+            'paths': paths,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> cancelPick() async {
+    try {
+      await _ch.invokeMethod('cancelPick');
+    } catch (_) {}
+  }
 }

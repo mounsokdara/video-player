@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'package:video_player_app/core/crash.dart';
 import 'package:video_player_app/library/home.dart';
+import 'package:video_player_app/library/picker.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/core/models.dart';
@@ -102,18 +103,51 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
               child: child ?? const SizedBox.shrink(),
             );
           },
+          initialRoute: WidgetsBinding.instance.platformDispatcher.defaultRouteName,
+          onGenerateInitialRoutes: (name) {
+            if (name == '/pick' || name.endsWith('/pick')) {
+              return [
+                MaterialPageRoute<void>(
+                  settings: const RouteSettings(name: '/pick'),
+                  builder: (_) => const VideoPickerPage(),
+                ),
+              ];
+            }
+            return [
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(name: '/'),
+                builder: (_) => HomeShell(
+                  onSettingsChanged: () {
+                    setState(() {});
+                    appSettings.save();
+                  },
+                ),
+              ),
+            ];
+          },
+          onGenerateRoute: (settings) {
+            if (settings.name == '/pick') {
+              return MaterialPageRoute<void>(
+                settings: settings,
+                builder: (_) => const VideoPickerPage(),
+              );
+            }
+            return MaterialPageRoute<void>(
+              settings: settings,
+              builder: (_) => HomeShell(
+                onSettingsChanged: () {
+                  setState(() {});
+                  appSettings.save();
+                },
+              ),
+            );
+          },
           onUnknownRoute: (settings) {
             return MaterialPageRoute<void>(
               settings: settings,
               builder: (_) => const SizedBox.shrink(),
             );
           },
-          home: HomeShell(
-            onSettingsChanged: () {
-              setState(() {});
-              appSettings.save();
-            },
-          ),
         );
       },
     );
