@@ -72,5 +72,3 @@ jobs:
             - Window scales to the screen
             - Landscape docks at 16:9, portrait at 9:16
             - Pinch resize no longer loops or resets
-
-            Uninstall the previous APK before installing this one.
