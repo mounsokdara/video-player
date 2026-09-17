@@ -33,7 +33,6 @@ IconData playerActionIcon(String id) => switch (id) {
       'decoder' => Icons.memory,
       'mirror' => Icons.flip,
       'invert' => Icons.invert_colors,
-      'subtitle' => Icons.subtitles_outlined,
       'repeat' => Icons.queue_music,
       'delete' => Icons.delete_outline,
       'cast' => Icons.cast,
@@ -63,11 +62,11 @@ Future<void> showPlayerMoreSheet({
   const sections = <String, List<String>>{
     'Playback': ['speed', 'lock', 'ab', 'skipBack', 'skipForward', 'playopt', 'decoder', 'timer', 'repeat'],
     'Audio': ['background', 'eq', 'volume'],
-    'Picture': ['screenshot', 'aspect', 'brightness', 'rotate', 'night', 'zoom', 'color', 'mirror', 'invert', 'subtitle'],
+    'Picture': ['screenshot', 'aspect', 'brightness', 'rotate', 'night', 'zoom', 'color', 'mirror', 'invert'],
     'System': ['popup', 'navbar', 'cast'],
     'File': ['bookmark', 'share', 'properties', 'delete'],
   };
-  const toggles = {'background', 'popup', 'subtitle', 'night', 'mirror', 'invert', 'navbar', 'bookmark'};
+  const toggles = {'background', 'popup', 'night', 'mirror', 'invert', 'navbar', 'bookmark'};
   final scheme = Theme.of(context).colorScheme;
   return SystemBars.modal(
     () => showModalBottomSheet<void>(
@@ -85,7 +84,6 @@ Future<void> showPlayerMoreSheet({
                 bool onFor(String id) => switch (id) {
                       'background' => appSettings.backgroundPlay,
                       'popup' => appSettings.autoMiniplayer,
-                      'subtitle' => appSettings.captions,
                       'night' => appSettings.nightMode,
                       'mirror' => appSettings.mirror,
                       'invert' => appSettings.invertColors,

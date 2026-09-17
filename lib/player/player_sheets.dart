@@ -260,7 +260,6 @@ extension PlayerSheets on _PlayerPageState {
         'decoder' => Icons.memory,
         'mirror' => Icons.flip,
         'invert' => Icons.invert_colors,
-        'subtitle' => Icons.subtitles_outlined,
         'repeat' => Icons.queue_music,
         'delete' => Icons.delete_outline,
         'cast' => Icons.cast,

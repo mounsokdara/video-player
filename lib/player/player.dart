@@ -1788,9 +1788,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         await _speedSheet();
       case 'rotate':
         await _rotationSheet();
-      case 'subtitle':
-        setState(() => appSettings.captions = !appSettings.captions);
-        await appSettings.save();
       case 'background':
         await _toggleBackground(!appSettings.backgroundPlay);
       case 'popup':

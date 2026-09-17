@@ -57,7 +57,6 @@ class AppSettings {
   PlayMode playMode = PlayMode.order;
 
   // Accessibility
-  bool captions = false;
   bool highContrast = false;
   bool reduceMotion = false;
   bool largeControls = false;
@@ -122,7 +121,6 @@ class AppSettings {
     'decoder': 'Decoder',
     'mirror': 'Mirror',
     'invert': 'Invert',
-    'subtitle': 'Subtitle',
     'repeat': 'Playlist',
     'delete': 'Delete',
     'cast': 'Cast',
@@ -242,7 +240,6 @@ class AppSettings {
     hdrOn = p.getBool('hdrOn') ?? true;
     pitchShift = p.getBool('pitchShift') ?? false;
     playMode = PlayMode.values[(p.getInt('playMode') ?? 0).clamp(0, PlayMode.values.length - 1)];
-    captions = p.getBool('captions') ?? false;
     highContrast = p.getBool('highContrast') ?? false;
     reduceMotion = p.getBool('reduceMotion') ?? false;
     largeControls = p.getBool('largeControls') ?? false;
@@ -283,6 +280,7 @@ class AppSettings {
       titleActions = List<String>.from(p.getStringList('titleActions') ?? defaultTitleActions);
       if (titleActions.isEmpty) titleActions = List<String>.from(defaultTitleActions);
     }
+    titleActions.removeWhere((id) => id == 'subtitle');
     hudFabsJson = p.getString('hudFabsJson') ?? '[]';
 
     eqEnabled = p.getBool('eqEnabled') ?? false;
@@ -360,7 +358,6 @@ class AppSettings {
     await p.setBool('hdrOn', hdrOn);
     await p.setBool('pitchShift', pitchShift);
     await p.setInt('playMode', playMode.index);
-    await p.setBool('captions', captions);
     await p.setBool('highContrast', highContrast);
     await p.setBool('reduceMotion', reduceMotion);
     await p.setBool('largeControls', largeControls);

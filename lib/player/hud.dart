@@ -82,7 +82,6 @@ class HudLayer extends StatelessWidget {
         'decoder' => Icons.memory,
         'mirror' => Icons.flip,
         'invert' => Icons.invert_colors,
-        'subtitle' => Icons.subtitles_outlined,
         'repeat' => Icons.queue_music,
         'delete' => Icons.delete_outline,
         'cast' => Icons.cast,
@@ -398,7 +397,7 @@ List<HudFab> decodeHud(String? raw) {
   if (raw == null || raw.isEmpty) return [];
   try {
     final list = jsonDecode(raw) as List;
-    return list.map((e) => HudFab.fromJson(Map<String, dynamic>.from(e as Map))).where((e) => e.id != 'pick').toList();
+    return list.map((e) => HudFab.fromJson(Map<String, dynamic>.from(e as Map))).where((e) => e.id != 'pick' && e.id != 'subtitle').toList();
   } catch (_) {
     return [];
   }

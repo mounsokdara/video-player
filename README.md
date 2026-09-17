@@ -57,7 +57,6 @@ Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files st
 - Lock controls
 - Mirror, invert, night mode, extra dim
 - Color correction: contrast, saturation, gamma, hue
-- Subtitles (embedded)
 - Always-hide navigation bar, or bars follow the controller
 - Material 3 ripples on double-tap seek
 
