@@ -178,38 +178,6 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<Map<String, dynamic>?> initEqualizer(int sessionId) async {
-    try {
-      final raw = await _ch.invokeMethod('initEqualizer', {'sessionId': sessionId});
-      if (raw is Map) return Map<String, dynamic>.from(raw);
-    } catch (_) {}
-    return null;
-  }
-
-  static Future<void> setEqBand(int band, int level) async {
-    try {
-      await _ch.invokeMethod('setEqBand', {'band': band, 'level': level});
-    } catch (_) {}
-  }
-
-  static Future<void> setEqBands(List<int> levels) async {
-    try {
-      await _ch.invokeMethod('setEqBands', {'levels': levels});
-    } catch (_) {}
-  }
-
-  static Future<void> setEqPreset(int preset) async {
-    try {
-      await _ch.invokeMethod('setEqPreset', {'preset': preset});
-    } catch (_) {}
-  }
-
-  static Future<void> setEqEnabled(bool on) async {
-    try {
-      await _ch.invokeMethod('setEqEnabled', {'on': on});
-    } catch (_) {}
-  }
-
   static Future<void> applyEqualizer({
     required bool enabled,
     required List<int> bands,
@@ -248,27 +216,6 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<void> setBassBoost({required bool on, required int strength}) async {
-    try {
-      await _ch.invokeMethod('setBassBoost', {'on': on, 'strength': strength});
-    } catch (_) {}
-  }
-
-  static Future<void> setSurround({required bool on, required int strength}) async {
-    try {
-      await _ch.invokeMethod('setVirtualizer', {'on': on, 'strength': strength});
-    } catch (_) {}
-  }
-
-  static Future<void> setPlaybackParams({required double speed, required bool pitchShift}) async {
-    try {
-      await _ch.invokeMethod('setPlaybackParams', {
-        'speed': speed,
-        'pitchShift': pitchShift,
-      });
-    } catch (_) {}
-  }
-
   static Future<void> setStereoVolume(double left, double right) async {
     try {
       await _ch.invokeMethod('setStereoVolume', {
@@ -296,22 +243,6 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<void> updateBackground({
-    required bool playing,
-    int? positionMs,
-    int? durationMs,
-    String? title,
-  }) async {
-    try {
-      await _ch.invokeMethod('updateBackground', {
-        'playing': playing,
-        if (positionMs != null) 'positionMs': positionMs,
-        if (durationMs != null) 'durationMs': durationMs,
-        if (title != null) 'title': title,
-      });
-    } catch (_) {}
-  }
-
   static Future<void> stopBackground() async {
     try {
       await _ch.invokeMethod('stopBackground');
@@ -324,29 +255,6 @@ class AndroidBridge {
         'title': title ?? 'frame',
         if (path != null) 'path': path,
         'positionMs': positionMs,
-      });
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<String?> screenshot({required String path, required int positionMs, String? title}) async {
-    try {
-      return await _ch.invokeMethod<String>('screenshot', {
-        'path': path,
-        'positionMs': positionMs,
-        'title': title ?? 'frame',
-      });
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<String?> saveScreenshotBytes(Uint8List bytes, {String? title}) async {
-    try {
-      return await _ch.invokeMethod<String>('saveScreenshotBytes', {
-        'bytes': bytes,
-        'title': title ?? 'frame',
       });
     } catch (_) {
       return null;
@@ -404,32 +312,6 @@ class AndroidBridge {
       return await _ch.invokeMethod<String>('lastCrash');
     } catch (_) {
       return null;
-    }
-  }
-
-  static Future<String?> pickVideo() async {
-    try {
-      return await _ch.invokeMethod<String>('pickVideo');
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> extractCaptions(String path) async {
-    try {
-      final raw = await _ch.invokeMethod<List<dynamic>>('extractCaptions', {'path': path}) ?? [];
-      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> transcribeVideo(String path) async {
-    try {
-      final raw = await _ch.invokeMethod<List<dynamic>>('transcribeVideo', {'path': path}) ?? [];
-      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (_) {
-      return [];
     }
   }
 

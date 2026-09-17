@@ -3,22 +3,13 @@ package com.mounsokdara.video_player
 object NativeConstants {
     const val CHANNEL = "app.videoplayer/android"
     const val EVENTS = "app.videoplayer/events"
-    const val PICK_VIDEO_CODE = 47
     const val EQ_RETRY_MS = 450L
     const val HIDE_RETRY_MS = 120L
     const val EQ_BANDS = 10
-    const val EQ_MIN = -1500
-    const val EQ_MAX = 1500
     const val BASS_MAX = 1000
-    const val PREVIEW_W = 180
-    const val PREVIEW_H = 102
     const val SCAN_BUDGET = 2500
     const val HIDDEN_SCAN_BUDGET = 4000
     const val INDEXED_CAP = 5000
-    const val JPEG_QUALITY = 95
-    const val PREVIEW_JPEG_QUALITY = 40
-    const val PIXEL_DARK = 48
-    const val STT_TIMEOUT_MS = 12000L
     const val FILE_CRASH = "last_crash.txt"
     const val FILE_DIRTY = "session_dirty.txt"
     const val FILE_ACTION = "last_action.txt"

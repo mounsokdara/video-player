@@ -43,7 +43,7 @@ class PictureLooks {
     return PictureLooks(
       mirror: mirror ?? s.mirror,
       invert: invert ?? s.invertColors,
-      grayscale: s.grayscale || s.monochrome,
+      grayscale: s.grayscale,
       colorCorrection: s.colorCorrection,
       contrast: s.contrast,
       saturation: s.saturation,

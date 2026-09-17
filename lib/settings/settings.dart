@@ -19,16 +19,12 @@ class AppSettings {
   bool scanOnStart = true;
   bool autoRefresh = true;
   bool showHiddenFolders = false;
-  int thumbnailQuality = 2;
-  bool vibrateOnLongPress = true;
 
   // Display in playback
   bool showRemaining = true;
   bool showClock = true;
   bool showBattery = true;
   bool showSeekPreview = true;
-  bool showBrightnessOverlay = true;
-  bool showVolumeOverlay = true;
 
   // Orientation
   RotationLock rotation = RotationLock.none;
@@ -54,7 +50,6 @@ class AppSettings {
   bool autoPlayNext = true;
   bool gestureControl = true;
   bool allowZoom = true;
-  String preferredAudio = 'auto';
   bool rememberHdr = false;
   bool hdrOn = true;
   bool pitchShift = false;
@@ -63,7 +58,6 @@ class AppSettings {
 
   // Accessibility
   bool captions = false;
-  double captionSize = 1;
   bool highContrast = false;
   bool reduceMotion = false;
   bool largeControls = false;
@@ -74,23 +68,15 @@ class AppSettings {
   bool invertColors = false;
   bool nightMode = false;
   double nightWarmth = 0.35;
-  bool monochrome = false;
   bool extraDim = false;
   bool boldText = false;
   double uiScale = 1;
-  bool hapticFeedback = true;
-  bool audioDescription = false;
-  bool liveCaptions = false;
-  bool focusHighlight = false;
-  bool stereoFix = false;
-  double subtitleBgOpacity = 0.45;
 
   // Filters
   double contrast = 1;
   double saturation = 1;
   double gamma = 1;
   double hueRotate = 0;
-  double sharpness = 0;
   bool mirror = false;
   bool colorCorrection = false;
   bool alwaysHideNavBar = false;
@@ -216,14 +202,10 @@ class AppSettings {
       autoRefresh = p.getBool('autoRefresh') ?? true;
     }
     showHiddenFolders = p.getBool('showHiddenFolders') ?? false;
-    vibrateOnLongPress = p.getBool('vibrateOnLongPress') ?? true;
-    thumbnailQuality = p.getInt('thumbnailQuality') ?? 2;
     showRemaining = p.getBool('showRemaining') ?? true;
     showClock = p.getBool('showClock') ?? true;
     showBattery = p.getBool('showBattery') ?? true;
     showSeekPreview = p.getBool('showSeekPreview') ?? true;
-    showBrightnessOverlay = p.getBool('showBrightnessOverlay') ?? true;
-    showVolumeOverlay = p.getBool('showVolumeOverlay') ?? true;
     if (p.getBool('rotationNoneV3') != true) {
       rotation = RotationLock.none;
       await p.setInt('rotation', RotationLock.none.index);
@@ -256,13 +238,11 @@ class AppSettings {
     autoPlayNext = p.getBool('autoPlayNext') ?? true;
     gestureControl = p.getBool('gestureControl') ?? true;
     allowZoom = p.getBool('allowZoom') ?? true;
-    preferredAudio = p.getString('preferredAudio') ?? 'auto';
     rememberHdr = p.getBool('rememberHdr') ?? false;
     hdrOn = p.getBool('hdrOn') ?? true;
     pitchShift = p.getBool('pitchShift') ?? false;
     playMode = PlayMode.values[(p.getInt('playMode') ?? 0).clamp(0, PlayMode.values.length - 1)];
     captions = p.getBool('captions') ?? false;
-    captionSize = p.getDouble('captionSize') ?? 1;
     highContrast = p.getBool('highContrast') ?? false;
     reduceMotion = p.getBool('reduceMotion') ?? false;
     largeControls = p.getBool('largeControls') ?? false;
@@ -276,17 +256,10 @@ class AppSettings {
     extraDim = p.getBool('extraDim') ?? false;
     boldText = p.getBool('boldText') ?? false;
     uiScale = p.getDouble('uiScale') ?? 1;
-    hapticFeedback = p.getBool('hapticFeedback') ?? true;
-    liveCaptions = p.getBool('liveCaptions') ?? false;
-    audioDescription = p.getBool('audioDescription') ?? false;
-    focusHighlight = p.getBool('focusHighlight') ?? false;
-    stereoFix = p.getBool('stereoFix') ?? false;
-    monochrome = p.getBool('monochrome') ?? false;
     contrast = p.getDouble('contrast') ?? 1;
     saturation = p.getDouble('saturation') ?? 1;
     gamma = p.getDouble('gamma') ?? 1;
     hueRotate = p.getDouble('hueRotate') ?? 0;
-    sharpness = p.getDouble('sharpness') ?? 0;
     mirror = p.getBool('mirror') ?? false;
     colorCorrection = p.getBool('colorCorrection') ?? false;
     alwaysHideNavBar = p.getBool('alwaysHideNavBar') ?? false;
@@ -358,14 +331,10 @@ class AppSettings {
     await p.setBool('scanOnStart', scanOnStart);
     await p.setBool('autoRefresh', autoRefresh);
     await p.setBool('showHiddenFolders', showHiddenFolders);
-    await p.setBool('vibrateOnLongPress', vibrateOnLongPress);
-    await p.setInt('thumbnailQuality', thumbnailQuality);
     await p.setBool('showRemaining', showRemaining);
     await p.setBool('showClock', showClock);
     await p.setBool('showBattery', showBattery);
     await p.setBool('showSeekPreview', showSeekPreview);
-    await p.setBool('showBrightnessOverlay', showBrightnessOverlay);
-    await p.setBool('showVolumeOverlay', showVolumeOverlay);
     await p.setInt('rotation', rotation.index);
     await p.setInt('decoder', decoder.index);
     await p.setBool('hwPriority', hwPriority);
@@ -387,13 +356,11 @@ class AppSettings {
     await p.setBool('autoPlayNext', autoPlayNext);
     await p.setBool('gestureControl', gestureControl);
     await p.setBool('allowZoom', allowZoom);
-    await p.setString('preferredAudio', preferredAudio);
     await p.setBool('rememberHdr', rememberHdr);
     await p.setBool('hdrOn', hdrOn);
     await p.setBool('pitchShift', pitchShift);
     await p.setInt('playMode', playMode.index);
     await p.setBool('captions', captions);
-    await p.setDouble('captionSize', captionSize);
     await p.setBool('highContrast', highContrast);
     await p.setBool('reduceMotion', reduceMotion);
     await p.setBool('largeControls', largeControls);
@@ -407,17 +374,10 @@ class AppSettings {
     await p.setBool('extraDim', extraDim);
     await p.setBool('boldText', boldText);
     await p.setDouble('uiScale', uiScale);
-    await p.setBool('hapticFeedback', hapticFeedback);
-    await p.setBool('liveCaptions', liveCaptions);
-    await p.setBool('audioDescription', audioDescription);
-    await p.setBool('focusHighlight', focusHighlight);
-    await p.setBool('stereoFix', stereoFix);
-    await p.setBool('monochrome', monochrome);
     await p.setDouble('contrast', contrast);
     await p.setDouble('saturation', saturation);
     await p.setDouble('gamma', gamma);
     await p.setDouble('hueRotate', hueRotate);
-    await p.setDouble('sharpness', sharpness);
     await p.setBool('mirror', mirror);
     await p.setBool('colorCorrection', colorCorrection);
     await p.setBool('alwaysHideNavBar', alwaysHideNavBar);

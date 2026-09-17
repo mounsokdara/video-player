@@ -35,19 +35,6 @@ class EqualizerController(
         }
     }
 
-    fun emptyFx(session: Int): Map<String, Any> {
-        val map = HashMap<String, Any>()
-        map["bands"] = NativeConstants.EQ_BANDS
-        map["deviceBands"] = 0
-        map["min"] = NativeConstants.EQ_MIN
-        map["max"] = NativeConstants.EQ_MAX
-        map["freqs"] = tenBandHz.toList()
-        map["levels"] = tenBandLevels.toList()
-        map["sessionId"] = session
-        map["presets"] = emptyList<String>()
-        return map
-    }
-
     fun audioSessionId(): Int {
         val exo = findExoPlayer() ?: return 0
         return try {
@@ -69,47 +56,6 @@ class EqualizerController(
         bassBoostFx = null
         virtualizerFx = null
         fxSession = 0
-    }
-
-    fun initAndDescribe(): Map<String, Any> {
-        val session = audioSessionId()
-        val ok = if (session > 0) ensureFx(session) else false
-        breadcrumb("initEqualizer session=$session ok=$ok blocked=$blocked")
-        return emptyFx(session)
-    }
-
-    fun setBand(band: Int, level: Int) {
-        if (band in 0 until NativeConstants.EQ_BANDS) tenBandLevels[band] = level
-        applyStored()
-    }
-
-    fun setBands(levels: List<Int>) {
-        for (i in 0 until minOf(NativeConstants.EQ_BANDS, levels.size)) tenBandLevels[i] = levels[i]
-        applyStored()
-    }
-
-    fun setEnabled(on: Boolean) {
-        if (!on) {
-            try { equalizer?.enabled = false } catch (_: Throwable) {}
-            try { bassBoostFx?.enabled = false } catch (_: Throwable) {}
-            try { virtualizerFx?.enabled = false } catch (_: Throwable) {}
-        } else {
-            applyStored()
-        }
-    }
-
-    fun setBass(on: Boolean, strength: Int) {
-        try {
-            bassBoostFx?.setStrength(strength.coerceIn(0, NativeConstants.BASS_MAX).toShort())
-            bassBoostFx?.enabled = on
-        } catch (_: Throwable) {}
-    }
-
-    fun setVirtualizer(on: Boolean, strength: Int) {
-        try {
-            virtualizerFx?.setStrength(strength.coerceIn(0, NativeConstants.BASS_MAX).toShort())
-            virtualizerFx?.enabled = on
-        } catch (_: Throwable) {}
     }
 
     fun apply(
@@ -179,17 +125,6 @@ class EqualizerController(
         return 0
     }
 
-    private fun applyStored() {
-        applyEq(
-            true,
-            tenBandLevels.toList(),
-            bassBoostFx?.enabled == true,
-            (bassBoostFx?.roundedStrength ?: 0).toInt(),
-            virtualizerFx?.enabled == true,
-            (virtualizerFx?.roundedStrength ?: 0).toInt()
-        )
-    }
-
     private fun applyEq(
         enabled: Boolean,
         bands: List<Int>,
@@ -230,21 +165,6 @@ class EqualizerController(
             virtualizerFx?.setStrength(surround.coerceIn(0, NativeConstants.BASS_MAX).toShort())
             virtualizerFx?.enabled = surroundOn
         } catch (_: Throwable) {
-        }
-    }
-
-    fun applyPlaybackParams(speed: Float, pitchShift: Boolean) {
-        val pitch = if (pitchShift) speed else 1f
-        val exo = findExoPlayer() ?: return
-        val params = playbackParameters(speed, pitch) ?: return
-        try {
-            val method = exo.javaClass.methods.firstOrNull {
-                it.name == "setPlaybackParameters" && it.parameterTypes.size == 1
-            } ?: return
-            method.invoke(exo, params)
-            breadcrumb("setPlaybackParams speed=$speed pitch=$pitch")
-        } catch (t: Throwable) {
-            writeCrash("setPlaybackParams: ${t.message}\n${android.util.Log.getStackTraceString(t)}")
         }
     }
 
@@ -292,23 +212,6 @@ class EqualizerController(
         }
     }
 
-    private fun playbackParameters(speed: Float, pitch: Float): Any? {
-        val names = arrayOf(
-            "androidx.media3.common.PlaybackParameters",
-            "com.google.android.exoplayer2.PlaybackParameters"
-        )
-        for (name in names) {
-            try {
-                val cls = Class.forName(name)
-                val ctor = cls.getConstructor(Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
-                return ctor.newInstance(speed, pitch)
-            } catch (_: Throwable) {
-            }
-        }
-        return null
-    }
-
-    @Suppress("UNCHECKED_CAST")
     private fun findExoPlayer(): Any? {
         val engine = engine() ?: return null
         return try {

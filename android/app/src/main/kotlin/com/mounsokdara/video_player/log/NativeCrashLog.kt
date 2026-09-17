@@ -76,7 +76,6 @@ object NativeCrashLog {
         val interesting = action.contains("Open video", ignoreCase = true) ||
             action.contains("Play ", ignoreCase = true) ||
             action.contains("equalizer", ignoreCase = true) ||
-            action.contains("initEqualizer", ignoreCase = true) ||
             action.contains("audiofx", ignoreCase = true)
         val buf = StringBuilder()
         if (action.isNotBlank()) buf.append("Last action: ").append(action).append('\n')

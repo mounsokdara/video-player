@@ -129,17 +129,6 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <provider
-            android:name=".VideoDocumentsProvider"
-            android:authorities="${applicationId}.documents"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="android.permission.MANAGE_DOCUMENTS">
-            <intent-filter>
-                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
-            </intent-filter>
-        </provider>
-
-        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
@@ -172,16 +161,6 @@
         </intent>
         <intent>
             <action android:name="android.settings.REQUEST_MANAGE_MEDIA" />
-        </intent>
-        <intent>
-            <action android:name="android.speech.RecognitionService" />
-        </intent>
-        <intent>
-            <action android:name="android.provider.action.PICK_IMAGES" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.OPEN_DOCUMENT" />
-            <data android:mimeType="video/*" />
         </intent>
     </queries>
 </manifest>

@@ -173,7 +173,6 @@ class _GeneralSettingsState extends State<GeneralSettings> {
               }());
             },
           ),
-          SwitchListTile(title: const Text('Haptic feedback'), value: s.hapticFeedback, onChanged: (v) => set(() => s.hapticFeedback = v)),
           ListTile(
             title: const Text('Visible tabs'),
             subtitle: Text('Showing ${s.visibleTabs.map((t) => AppSettings.tabLabels[t]).join(', ')}'),
@@ -410,9 +409,6 @@ class _AccessSettingsState extends State<AccessSettings> {
           SwitchListTile(title: const Text('Reduce motion'), value: s.reduceMotion, onChanged: (v) => set(() => s.reduceMotion = v)),
           SwitchListTile(title: const Text('Large controls'), value: s.largeControls, onChanged: (v) => set(() => s.largeControls = v)),
           SwitchListTile(title: const Text('Bold text'), value: s.boldText, onChanged: (v) => set(() => s.boldText = v)),
-          SwitchListTile(title: const Text('Focus highlight'), value: s.focusHighlight, onChanged: (v) => set(() => s.focusHighlight = v)),
-          SwitchListTile(title: const Text('Audio description'), value: s.audioDescription, onChanged: (v) => set(() => s.audioDescription = v)),
-          SwitchListTile(title: const Text('Stereo fix'), value: s.stereoFix, onChanged: (v) => set(() => s.stereoFix = v)),
           ListTile(
             title: const Text('Interface scale'),
             subtitle: Slider(min: 0.85, max: 1.35, value: s.uiScale, onChanged: (v) => set(() => s.uiScale = v)),

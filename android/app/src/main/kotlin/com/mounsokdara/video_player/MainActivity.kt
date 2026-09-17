@@ -9,8 +9,6 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.AudioFormat
-import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
@@ -21,14 +19,10 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.util.Log
 import android.util.Rational
 import android.view.PixelCopy
@@ -62,8 +56,6 @@ open class MainActivity : FlutterActivity() {
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
     private var previewRetriever: MediaMetadataRetriever? = null
     private var previewBoundPath: String? = null
-    private var pickResult: MethodChannel.Result? = null
-    private val pickVideoCode = NativeConstants.PICK_VIDEO_CODE
     private lateinit var systemBars: SystemBarController
     private lateinit var audioFocus: AudioFocusController
     private lateinit var equalizer: EqualizerController
@@ -126,24 +118,6 @@ open class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncoming(intent)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickVideoCode) return
-        val reply = pickResult
-        pickResult = null
-        if (resultCode != Activity.RESULT_OK || data?.data == null) {
-            reply?.success(null)
-            return
-        }
-        val uri = data.data!!
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: Exception) {
-        }
-        reply?.success(uri.toString())
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -270,43 +244,9 @@ open class MainActivity : FlutterActivity() {
                             result.success(wantPip)
                         }
                         "isPip" -> result.success(Build.VERSION.SDK_INT >= 26 && isInPictureInPictureMode)
-                        "initEqualizer" -> result.success(equalizer.initAndDescribe())
-                        "setEqBand" -> {
-                            equalizer.setBand(call.argument<Int>("band") ?: 0, call.argument<Int>("level") ?: 0)
-                            result.success(true)
-                        }
-                        "setEqBands" -> {
-                            equalizer.setBands(call.argument<List<Int>>("levels") ?: emptyList())
-                            result.success(true)
-                        }
-                        "setEqPreset" -> result.success(true)
-                        "setEqEnabled" -> {
-                            equalizer.setEnabled(call.argument<Boolean>("on") ?: false)
-                            result.success(true)
-                        }
-                        "setBassBoost" -> {
-                            equalizer.setBass(
-                                call.argument<Boolean>("on") ?: false,
-                                call.argument<Int>("strength") ?: 0
-                            )
-                            result.success(true)
-                        }
-                        "setVirtualizer" -> {
-                            equalizer.setVirtualizer(
-                                call.argument<Boolean>("on") ?: false,
-                                call.argument<Int>("strength") ?: 0
-                            )
-                            result.success(true)
-                        }
                         "preparePreview" -> {
                             val path = call.argument<String>("path")
                             io.execute { bindPreview(path) }
-                            result.success(true)
-                        }
-                        "setPlaybackParams" -> {
-                            val speed = (call.argument<Double>("speed") ?: 1.0).toFloat()
-                            val pitchShift = call.argument<Boolean>("pitchShift") ?: false
-                            equalizer.applyPlaybackParams(speed, pitchShift)
                             result.success(true)
                         }
                         "setStereoVolume" -> {
@@ -350,30 +290,9 @@ open class MainActivity : FlutterActivity() {
                             }
                             result.success(true)
                         }
-                        "updateBackground" -> {
-                            val intent = Intent(this, PlaybackService::class.java).apply {
-                                action = PlaybackService.ACTION_UPDATE
-                                putExtra("playing", call.argument<Boolean>("playing") ?: true)
-                                call.argument<Int>("positionMs")?.let { putExtra("positionMs", it) }
-                                call.argument<Int>("durationMs")?.let { putExtra("durationMs", it) }
-                                call.argument<String>("title")?.let { putExtra("title", it) }
-                            }
-                            startService(intent)
-                            result.success(true)
-                        }
                         "stopBackground" -> {
                             stopService(Intent(this, PlaybackService::class.java))
                             result.success(true)
-                        }
-                        "screenshot" -> {
-                            val path = call.argument<String>("path")
-                                ?: return@setMethodCallHandler result.error("ARG", "path", null)
-                            val positionMs = call.argument<Int>("positionMs") ?: 0
-                            val title = call.argument<String>("title") ?: "frame"
-                            io.execute {
-                                val saved = captureFrame(path, positionMs.toLong(), title)
-                                mainHandler.post { result.success(saved) }
-                            }
                         }
                         "previewFrame" -> {
                             val path = call.argument<String>("path")
@@ -391,15 +310,6 @@ open class MainActivity : FlutterActivity() {
                             io.execute {
                                 val bytes = LibraryScanner.thumbnailJpeg(path, size)
                                 mainHandler.post { result.success(bytes) }
-                            }
-                        }
-                        "saveScreenshotBytes" -> {
-                            val bytes = call.argument<ByteArray>("bytes")
-                                ?: return@setMethodCallHandler result.error("ARG", "bytes", null)
-                            val title = call.argument<String>("title") ?: "frame"
-                            io.execute {
-                                val saved = saveJpegBytes(bytes, title)
-                                mainHandler.post { result.success(saved) }
                             }
                         }
                         "screenshotWindow" -> {
@@ -450,14 +360,6 @@ open class MainActivity : FlutterActivity() {
                             NativeCrashLog.breadcrumb(this, call.argument<String>("action") ?: "")
                             result.success(true)
                         }
-                        "pickVideo" -> {
-                            if (pickResult != null) {
-                                result.success(null)
-                            } else {
-                                pickResult = result
-                                launchPickVideo()
-                            }
-                        }
                         "pickerAllowMultiple" -> {
                             result.success(intent?.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false) == true)
                         }
@@ -469,17 +371,6 @@ open class MainActivity : FlutterActivity() {
                         "cancelPick" -> {
                             cancelPick()
                             result.success(true)
-                        }
-                        "extractCaptions" -> {
-                            val path = call.argument<String>("path") ?: ""
-                            io.execute {
-                                val cues = extractCaptions(path)
-                                mainHandler.post { result.success(cues) }
-                            }
-                        }
-                        "transcribeVideo" -> {
-                            val path = call.argument<String>("path") ?: ""
-                            transcribeVideo(path, result)
                         }
                         else -> result.notImplemented()
                     }
@@ -1169,348 +1060,6 @@ open class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             null
         }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun launchPickVideo() {
-        val candidates = ArrayList<Intent>()
-        if (Build.VERSION.SDK_INT >= 33) {
-            candidates.add(Intent(MediaStore.ACTION_PICK_IMAGES).apply { type = "video/*" })
-        }
-        candidates.add(
-            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "video/*"
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-            }
-        )
-        for (intent in candidates) {
-            try {
-                startActivityForResult(intent, pickVideoCode)
-                return
-            } catch (_: Exception) {
-            }
-        }
-        pickResult?.success(null)
-        pickResult = null
-    }
-
-    private fun extractCaptions(path: String): List<Map<String, Any?>> {
-        val out = ArrayList<Map<String, Any?>>()
-        if (path.isEmpty()) return out
-        val extractor = MediaExtractor()
-        try {
-            if (path.startsWith("content:")) extractor.setDataSource(this, Uri.parse(path), null)
-            else extractor.setDataSource(path)
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = (format.getString(MediaFormat.KEY_MIME) ?: "").lowercase()
-                val isText = mime.startsWith("text/") || mime.contains("cea") || mime.contains("vtt") ||
-                    mime.contains("tx3g") || mime.contains("subrip") || mime.contains("wvtt")
-                if (!isText) continue
-                extractor.selectTrack(i)
-                val buf = java.nio.ByteBuffer.allocate(64 * 1024)
-                var n = 0
-                while (n < 400) {
-                    buf.clear()
-                    val size = extractor.readSampleData(buf, 0)
-                    if (size < 0) break
-                    val time = (extractor.sampleTime / 1000).coerceAtLeast(0)
-                    val bytes = ByteArray(size)
-                    buf.position(0)
-                    buf.get(bytes)
-                    val text = decodeCue(bytes)
-                    if (text.isNotBlank()) {
-                        out.add(mapOf("startMs" to time, "endMs" to time + 2500, "text" to text))
-                    }
-                    extractor.advance()
-                    n++
-                }
-                extractor.unselectTrack(i)
-            }
-        } catch (_: Throwable) {
-        } finally {
-            try {
-                extractor.release()
-            } catch (_: Exception) {
-            }
-        }
-        return out
-    }
-
-    private fun decodeCue(bytes: ByteArray): String {
-        if (bytes.isEmpty()) return ""
-        var start = 0
-        if (bytes.size >= 2) {
-            val len = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)
-            if (len in 1 until bytes.size) start = 2
-        }
-        val raw = try {
-            String(bytes, start, bytes.size - start, Charsets.UTF_8)
-        } catch (_: Exception) {
-            String(bytes, start, bytes.size - start, Charsets.ISO_8859_1)
-        }
-        return raw.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
-    }
-
-    private fun transcribeVideo(path: String, result: MethodChannel.Result) {
-        io.execute {
-            val wav = extractPcmWav(path)
-            if (wav == null) {
-                mainHandler.post { result.success(emptyList<Map<String, Any?>>()) }
-                return@execute
-            }
-            mainHandler.post { startFileStt(wav, result) }
-        }
-    }
-
-    private fun startFileStt(wav: File, result: MethodChannel.Result) {
-        if (Build.VERSION.SDK_INT < 33 || !SpeechRecognizer.isRecognitionAvailable(this)) {
-            result.success(emptyList<Map<String, Any?>>())
-            return
-        }
-        val replied = java.util.concurrent.atomic.AtomicBoolean(false)
-        fun finish(cues: List<Map<String, Any?>>) {
-            if (replied.compareAndSet(false, true)) result.success(cues)
-        }
-        val pfd: ParcelFileDescriptor
-        try {
-            pfd = ParcelFileDescriptor.open(wav, ParcelFileDescriptor.MODE_READ_ONLY)
-        } catch (_: Exception) {
-            finish(emptyList())
-            return
-        }
-        val rec = SpeechRecognizer.createSpeechRecognizer(this)
-        val timeout = Runnable {
-            try {
-                rec.cancel()
-            } catch (_: Exception) {
-            }
-            try {
-                rec.destroy()
-            } catch (_: Exception) {
-            }
-            try {
-                pfd.close()
-            } catch (_: Exception) {
-            }
-            finish(emptyList())
-        }
-        mainHandler.postDelayed(timeout, 12000)
-        rec.setRecognitionListener(object : RecognitionListener {
-            override fun onResults(results: Bundle?) {
-                mainHandler.removeCallbacks(timeout)
-                val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: arrayListOf()
-                val cues = ArrayList<Map<String, Any?>>()
-                if (texts.isNotEmpty()) {
-                    cues.add(mapOf("startMs" to 0, "endMs" to 25000, "text" to texts.first()))
-                }
-                try {
-                    rec.destroy()
-                } catch (_: Exception) {
-                }
-                try {
-                    pfd.close()
-                } catch (_: Exception) {
-                }
-                finish(cues)
-            }
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!texts.isNullOrEmpty() && !replied.get()) {
-                    // Some OEMs only deliver file STT here.
-                }
-            }
-
-            override fun onError(error: Int) {
-                mainHandler.removeCallbacks(timeout)
-                try {
-                    rec.destroy()
-                } catch (_: Exception) {
-                }
-                try {
-                    pfd.close()
-                } catch (_: Exception) {
-                }
-                finish(emptyList())
-            }
-
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pfd)
-            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
-            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
-            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, 16000)
-            rec.startListening(intent)
-        } catch (_: Exception) {
-            mainHandler.removeCallbacks(timeout)
-            try {
-                rec.destroy()
-            } catch (_: Exception) {
-            }
-            try {
-                pfd.close()
-            } catch (_: Exception) {
-            }
-            finish(emptyList())
-        }
-    }
-
-    private fun extractPcmWav(path: String): File? {
-        val extractor = MediaExtractor()
-        var codec: MediaCodec? = null
-        return try {
-            if (path.startsWith("content:")) extractor.setDataSource(this, Uri.parse(path), null)
-            else extractor.setDataSource(path)
-            var audio = -1
-            var format: MediaFormat? = null
-            for (i in 0 until extractor.trackCount) {
-                val f = extractor.getTrackFormat(i)
-                val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
-                if (mime.startsWith("audio/")) {
-                    audio = i
-                    format = f
-                    break
-                }
-            }
-            if (audio < 0 || format == null) return null
-            extractor.selectTrack(audio)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
-            codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(format, null, null, 0)
-            codec.start()
-            val pcm = java.io.ByteArrayOutputStream()
-            val info = MediaCodec.BufferInfo()
-            var inputDone = false
-            var outputDone = false
-            var inSample = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
-            if (inSample <= 0) inSample = 44100
-            val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
-            val maxBytes = 16000 * 2 * 25 * maxOf(1, channels) * maxOf(1, inSample / 16000)
-            var loops = 0
-            while (!outputDone && pcm.size() < maxBytes && loops < 8000) {
-                loops++
-                if (!inputDone) {
-                    val inIx = codec.dequeueInputBuffer(8_000)
-                    if (inIx >= 0) {
-                        val buf = codec.getInputBuffer(inIx)!!
-                        val size = extractor.readSampleData(buf, 0)
-                        if (size < 0) {
-                            codec.queueInputBuffer(inIx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                        } else {
-                            codec.queueInputBuffer(inIx, 0, size, extractor.sampleTime, 0)
-                            extractor.advance()
-                        }
-                    }
-                }
-                val outIx = codec.dequeueOutputBuffer(info, 8_000)
-                if (outIx >= 0) {
-                    val out = codec.getOutputBuffer(outIx)
-                    if (out != null && info.size > 0) {
-                        val chunk = ByteArray(info.size)
-                        out.position(info.offset)
-                        out.get(chunk)
-                        pcm.write(chunk)
-                    }
-                    codec.releaseOutputBuffer(outIx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
-                }
-            }
-            val mono = resampleTo16kMono(pcm.toByteArray(), inSample, channels)
-            val wav = File(cacheDir, "stt.wav")
-            writeWav(wav, mono, 16000)
-            wav
-        } catch (_: Throwable) {
-            null
-        } finally {
-            try {
-                codec?.stop()
-            } catch (_: Exception) {
-            }
-            try {
-                codec?.release()
-            } catch (_: Exception) {
-            }
-            try {
-                extractor.release()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun resampleTo16kMono(pcm: ByteArray, sampleRate: Int, channels: Int): ByteArray {
-        if (pcm.size < 4) return pcm
-        val ch = channels.coerceAtLeast(1)
-        val inFrames = pcm.size / (2 * ch)
-        if (inFrames <= 0) return ByteArray(0)
-        val outRate = 16000
-        val outFrames = maxOf(1, (inFrames.toLong() * outRate / sampleRate).toInt())
-        val out = ByteArray(outFrames * 2)
-        var i = 0
-        while (i < outFrames) {
-            val src = ((i.toLong() * inFrames) / outFrames).toInt().coerceIn(0, inFrames - 1)
-            var acc = 0
-            var c = 0
-            while (c < ch) {
-                val ix = (src * ch + c) * 2
-                if (ix + 1 < pcm.size) {
-                    val lo = pcm[ix].toInt() and 0xFF
-                    val hi = pcm[ix + 1].toInt()
-                    acc += (hi shl 8) or lo
-                }
-                c++
-            }
-            val sample = (acc / ch).toShort()
-            out[i * 2] = (sample.toInt() and 0xFF).toByte()
-            out[i * 2 + 1] = ((sample.toInt() shr 8) and 0xFF).toByte()
-            i++
-        }
-        return out
-    }
-
-    private fun writeWav(file: File, pcm: ByteArray, sampleRate: Int) {
-        val dataSize = pcm.size
-        val bos = java.io.DataOutputStream(java.io.FileOutputStream(file))
-        bos.writeBytes("RIFF")
-        writeLeInt(bos, 36 + dataSize)
-        bos.writeBytes("WAVE")
-        bos.writeBytes("fmt ")
-        writeLeInt(bos, 16)
-        writeLeShort(bos, 1)
-        writeLeShort(bos, 1)
-        writeLeInt(bos, sampleRate)
-        writeLeInt(bos, sampleRate * 2)
-        writeLeShort(bos, 2)
-        writeLeShort(bos, 16)
-        bos.writeBytes("data")
-        writeLeInt(bos, dataSize)
-        bos.write(pcm)
-        bos.close()
-    }
-
-    private fun writeLeInt(out: java.io.DataOutputStream, v: Int) {
-        out.write(v and 0xFF)
-        out.write((v shr 8) and 0xFF)
-        out.write((v shr 16) and 0xFF)
-        out.write((v shr 24) and 0xFF)
-    }
-
-    private fun writeLeShort(out: java.io.DataOutputStream, v: Int) {
-        out.write(v and 0xFF)
-        out.write((v shr 8) and 0xFF)
     }
 
     private fun isPickerIntent(): Boolean {
