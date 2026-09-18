@@ -815,6 +815,7 @@ open class MainActivity : FlutterActivity() {
                     val path = if (iData >= 0) c.getString(iData) else null
                     if (path.isNullOrBlank()) continue
                     val file = File(path)
+                    if (file.exists() && file.isFile && !isVideoFile(file)) continue
                     var size = if (iSize >= 0) c.getLong(iSize) else 0L
                     if (size <= 0 && file.exists()) size = file.length()
                     val name = if (iName >= 0) c.getString(iName) ?: file.name else file.name
@@ -1151,8 +1152,9 @@ open class MainActivity : FlutterActivity() {
             if (name.endsWith(".d.ts")) return false
             val ext = f.extension.lowercase()
             if (ext == "ts") return isMpegTs(f)
-            if (ext in NativeConstants.VIDEO_EXT) return true
             if (ext in NativeConstants.SKIP_EXT) return false
+            if (isPlainText(f)) return false
+            if (ext in NativeConstants.VIDEO_EXT) return true
             if (isNonVideoMagic(f)) return false
             if (hasVideoMagic(f)) return true
             if (f.length() < 8192L) return false
@@ -1166,6 +1168,75 @@ open class MainActivity : FlutterActivity() {
             } catch (_: Exception) {
                 false
             }
+        }
+
+        private fun isPlainText(f: File): Boolean {
+            return try {
+                f.inputStream().use { ins ->
+                    val b = ByteArray(512)
+                    val n = ins.read(b)
+                    if (n <= 0) return false
+                    bytesArePlainText(b, n)
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        private fun bytesArePlainText(b: ByteArray, n: Int): Boolean {
+            if (n <= 0) return false
+            val b0 = b[0].toInt() and 0xFF
+            val b1 = if (n > 1) b[1].toInt() and 0xFF else 0
+            if (n >= 2 && ((b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF))) return true
+            var i = 0
+            if (n >= 3 && b0 == 0xEF && b1 == 0xBB && (b[2].toInt() and 0xFF) == 0xBF) {
+                i = 3
+                if (i >= n) return true
+            }
+            var nul = 0
+            var ctrl = 0
+            var text = 0
+            var high = 0
+            var j = i
+            while (j < n) {
+                val u = b[j].toInt() and 0xFF
+                when {
+                    u == 0 -> nul++
+                    u == 0x09 || u == 0x0A || u == 0x0D -> text++
+                    u in 0x20..0x7E -> text++
+                    u < 0x20 || u == 0x7F -> ctrl++
+                    else -> high++
+                }
+                j++
+            }
+            val len = n - i
+            if (len <= 0) return true
+            if (nul > 0) return nul * 5 >= len * 2 && text * 5 >= len * 2
+            if (ctrl * 20 > len) return false
+            if (text * 100 >= len * 85) return true
+            return ctrl == 0 && high > 0 && text + high == len && utf8LooksValid(b, i, n)
+        }
+
+        private fun utf8LooksValid(b: ByteArray, start: Int, n: Int): Boolean {
+            var i = start
+            while (i < n) {
+                val c = b[i].toInt() and 0xFF
+                val need = when {
+                    c < 0x80 -> 0
+                    c in 0xC2..0xDF -> 1
+                    c in 0xE0..0xEF -> 2
+                    c in 0xF0..0xF4 -> 3
+                    else -> return false
+                }
+                if (i + need >= n) return true
+                var k = 1
+                while (k <= need) {
+                    if (b[i + k].toInt() and 0xC0 != 0x80) return false
+                    k++
+                }
+                i += 1 + need
+            }
+            return true
         }
 
         private fun isNonVideoMagic(f: File): Boolean {

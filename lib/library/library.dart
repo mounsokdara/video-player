@@ -611,12 +611,14 @@ bool looksLikeVideo(String path, {String? mime}) {
     if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
       return _isMpegTsFile(path);
     }
+    if (_isPlainTextFile(path)) return false;
     return true;
   }
   if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('text/')) return false;
   if (ext == '.ts') return _isMpegTsFile(path);
-  if (videoExtensions.contains(ext)) return true;
   if (skipExtensions.contains(ext)) return false;
+  if (_isPlainTextFile(path)) return false;
+  if (videoExtensions.contains(ext)) return true;
   return _hasVideoMagic(path);
 }
 
@@ -655,6 +657,79 @@ bool _isMpegTsFile(String path) {
   } catch (_) {
     return false;
   }
+}
+
+bool _isPlainTextFile(String path) {
+  try {
+    final f = File(path);
+    if (!f.existsSync()) return false;
+    final len = f.lengthSync();
+    if (len <= 0) return false;
+    final raf = f.openSync();
+    final b = raf.readSync(len < 512 ? len : 512);
+    raf.closeSync();
+    return _bytesArePlainText(b);
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _bytesArePlainText(List<int> b) {
+  final n = b.length;
+  if (n <= 0) return false;
+  final b0 = b[0] & 0xFF;
+  final b1 = n > 1 ? b[1] & 0xFF : 0;
+  if (n >= 2 && ((b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF))) return true;
+  var i = 0;
+  if (n >= 3 && b0 == 0xEF && b1 == 0xBB && (b[2] & 0xFF) == 0xBF) {
+    i = 3;
+    if (i >= n) return true;
+  }
+  var nul = 0;
+  var ctrl = 0;
+  var text = 0;
+  var high = 0;
+  for (var j = i; j < n; j++) {
+    final u = b[j] & 0xFF;
+    if (u == 0) {
+      nul++;
+    } else if (u == 0x09 || u == 0x0A || u == 0x0D || (u >= 0x20 && u <= 0x7E)) {
+      text++;
+    } else if (u < 0x20 || u == 0x7F) {
+      ctrl++;
+    } else {
+      high++;
+    }
+  }
+  final len = n - i;
+  if (len <= 0) return true;
+  if (nul > 0) return nul * 5 >= len * 2 && text * 5 >= len * 2;
+  if (ctrl * 20 > len) return false;
+  if (text * 100 >= len * 85) return true;
+  return ctrl == 0 && high > 0 && text + high == len && _utf8LooksValid(b, i);
+}
+
+bool _utf8LooksValid(List<int> b, int start) {
+  var i = start;
+  while (i < b.length) {
+    final c = b[i] & 0xFF;
+    final need = c < 0x80
+        ? 0
+        : (c >= 0xC2 && c <= 0xDF)
+            ? 1
+            : (c >= 0xE0 && c <= 0xEF)
+                ? 2
+                : (c >= 0xF0 && c <= 0xF4)
+                    ? 3
+                    : -1;
+    if (need < 0) return false;
+    if (i + need >= b.length) return true;
+    for (var k = 1; k <= need; k++) {
+      if (b[i + k] & 0xC0 != 0x80) return false;
+    }
+    i += 1 + need;
+  }
+  return true;
 }
 
 String formatBytes(int n) {
