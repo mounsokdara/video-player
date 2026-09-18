@@ -173,6 +173,21 @@ class _GeneralSettingsState extends State<GeneralSettings> {
               }());
             },
           ),
+          SwitchListTile(
+            title: const Text('Skip .nomedia folder'),
+            subtitle: const Text('Ignore folders that contain a .nomedia file'),
+            value: s.skipNomedia,
+            onChanged: (v) {
+              set(() => s.skipNomedia = v);
+              unawaited(() async {
+                while (library.scanning) {
+                  await Future<void>.delayed(const Duration(milliseconds: 40));
+                }
+                await library.scan();
+                widget.onChanged();
+              }());
+            },
+          ),
           ListTile(
             title: const Text('Visible tabs'),
             subtitle: Text('Showing ${s.visibleTabs.map((t) => AppSettings.tabLabels[t]).join(', ')}'),

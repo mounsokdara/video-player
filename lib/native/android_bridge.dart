@@ -73,12 +73,18 @@ class AndroidBridge {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> listVideoFiles(String path, {bool includeHidden = false, bool hiddenOnly = false}) async {
+  static Future<List<Map<String, dynamic>>> listVideoFiles(
+    String path, {
+    bool includeHidden = false,
+    bool hiddenOnly = false,
+    bool skipNomedia = true,
+  }) async {
     try {
       final raw = await _ch.invokeMethod<List<dynamic>>('listVideoFiles', {
         'path': path,
         'includeHidden': includeHidden,
         'hiddenOnly': hiddenOnly,
+        'skipNomedia': skipNomedia,
       }) ?? [];
       return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {

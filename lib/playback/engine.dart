@@ -299,6 +299,12 @@ class PlaybackEngine extends ChangeNotifier {
     try {
       await p.pause();
     } catch (_) {}
+    try {
+      final platform = p.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty('vo', 'null');
+      }
+    } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 40));
     try {
       await p.stop();

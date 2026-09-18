@@ -183,11 +183,12 @@ open class MainActivity : FlutterActivity() {
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
                             val hidden = call.argument<Boolean>("includeHidden") ?: false
                             val hiddenOnly = call.argument<Boolean>("hiddenOnly") ?: false
+                            val skipNomedia = call.argument<Boolean>("skipNomedia") ?: true
                             val depth = if (hiddenOnly) 8 else 4
                             val budget = if (hiddenOnly) NativeConstants.HIDDEN_SCAN_BUDGET else NativeConstants.SCAN_BUDGET
                             io.execute {
                                 try {
-                                    val data = LibraryScanner.scan(File(root), depth, hidden, budget, hiddenOnly)
+                                    val data = LibraryScanner.scan(File(root), depth, hidden, budget, hiddenOnly, skipNomedia)
                                     mainHandler.post { result.success(data) }
                                 } catch (t: Throwable) {
                                     mainHandler.post { result.error("SCAN", t.message, null) }

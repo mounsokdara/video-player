@@ -96,8 +96,12 @@ object NativeCrashLog {
 
     fun installHook(context: Context, emit: (Map<String, Any?>) -> Unit) {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
             write(context, "${e.javaClass.name}: ${e.message}\n${Log.getStackTraceString(e)}")
+            if (isDetachedFlutterJni(e)) {
+                Log.w("VideoPlayer", "ignored FlutterJNI detach", e)
+                return@setDefaultUncaughtExceptionHandler
+            }
             try {
                 emit(
                     mapOf(
@@ -108,7 +112,19 @@ object NativeCrashLog {
                 )
             } catch (_: Exception) {
             }
-            prev?.uncaughtException(Thread.currentThread(), e)
+            prev?.uncaughtException(t, e)
         }
+    }
+
+    private fun isDetachedFlutterJni(e: Throwable): Boolean {
+        var cur: Throwable? = e
+        var hops = 0
+        while (cur != null && hops < 8) {
+            val msg = cur.message ?: ""
+            if (msg.contains("FlutterJNI is not attached to native", ignoreCase = true)) return true
+            cur = cur.cause
+            hops++
+        }
+        return false
     }
 }

@@ -21,6 +21,7 @@ class LibraryService {
   bool manageMedia = false;
 
   bool _scanning = false;
+  bool get scanning => _scanning;
   final Map<String, Uint8List?> _thumbs = {};
   final Map<String, DateTime> _thumbMiss = {};
   String? clipPath;
@@ -185,6 +186,7 @@ class LibraryService {
         if (path.isEmpty || seen.contains(path)) continue;
         if (!looksLikeVideo(path, mime: m['mime'] as String?)) continue;
         if (!hidden && _isHiddenPath(path)) continue;
+        if (settings.skipNomedia && _underNomedia(path)) continue;
         seen.add(path);
         final durMs = (m['durationMs'] as num?)?.toInt() ?? 0;
         next.add(
@@ -224,6 +226,7 @@ class LibraryService {
               if (path == null || path.isEmpty || seen.contains(path)) continue;
               if (!looksLikeVideo(path, mime: a.mimeType)) continue;
               if (!hidden && _isHiddenPath(path)) continue;
+              if (settings.skipNomedia && _underNomedia(path)) continue;
               seen.add(path);
               next.add(
                 VideoItem(
@@ -255,7 +258,11 @@ class LibraryService {
     ];
     for (final vol in nativeTargets) {
       if (vol.path.isEmpty) continue;
-      final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: hidden);
+      final extra = await AndroidBridge.listVideoFiles(
+        vol.path,
+        includeHidden: hidden,
+        skipNomedia: settings.skipNomedia,
+      );
       _mergeNative(next, seen, extra);
     }
     if (hidden) {
@@ -273,7 +280,12 @@ class LibraryService {
   Future<void> _collectHidden(List<VideoItem> into, Set<String> seen) async {
     for (final vol in volumes) {
       if (vol.path.isEmpty) continue;
-      final extra = await AndroidBridge.listVideoFiles(vol.path, includeHidden: true, hiddenOnly: true);
+      final extra = await AndroidBridge.listVideoFiles(
+        vol.path,
+        includeHidden: true,
+        hiddenOnly: true,
+        skipNomedia: settings.skipNomedia,
+      );
       _mergeNative(into, seen, extra);
     }
   }
@@ -284,6 +296,7 @@ class LibraryService {
       if (path.isEmpty || seen.contains(path)) continue;
       if (!looksLikeVideo(path)) continue;
       if (!settings.showHiddenFolders && _isHiddenPath(path)) continue;
+      if (settings.skipNomedia && _underNomedia(path)) continue;
       seen.add(path);
       final name = m['name'] as String? ?? p.basename(path);
       into.add(
@@ -316,6 +329,21 @@ class LibraryService {
 
   bool _isHiddenPath(String path) {
     return p.split(path).any((s) => s.startsWith('.'));
+  }
+
+  bool _underNomedia(String path) {
+    try {
+      var dir = p.dirname(path);
+      var hops = 0;
+      while (dir.isNotEmpty && hops < 16) {
+        if (File(p.join(dir, '.nomedia')).existsSync()) return true;
+        final parent = p.dirname(dir);
+        if (parent == dir) break;
+        dir = parent;
+        hops++;
+      }
+    } catch (_) {}
+    return false;
   }
 
   void _rebuildFolders() {
@@ -461,7 +489,11 @@ class LibraryService {
       return ents.where((e) {
         final name = p.basename(e.path);
         if (!settings.showHiddenFolders && name.startsWith('.')) return false;
-        if (e is Directory) return true;
+        if (e is Directory) {
+          if (settings.skipNomedia && File(p.join(e.path, '.nomedia')).existsSync()) return false;
+          return true;
+        }
+        if (settings.skipNomedia && _underNomedia(e.path)) return false;
         return looksLikeVideo(e.path);
       }).toList();
     } catch (_) {

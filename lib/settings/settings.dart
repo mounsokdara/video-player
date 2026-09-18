@@ -19,6 +19,7 @@ class AppSettings {
   bool scanOnStart = true;
   bool autoRefresh = true;
   bool showHiddenFolders = false;
+  bool skipNomedia = true;
 
   // Display in playback
   bool showRemaining = true;
@@ -200,6 +201,7 @@ class AppSettings {
       autoRefresh = p.getBool('autoRefresh') ?? true;
     }
     showHiddenFolders = p.getBool('showHiddenFolders') ?? false;
+    skipNomedia = p.getBool('skipNomedia') ?? true;
     showRemaining = p.getBool('showRemaining') ?? true;
     showClock = p.getBool('showClock') ?? true;
     showBattery = p.getBool('showBattery') ?? true;
@@ -329,6 +331,7 @@ class AppSettings {
     await p.setBool('scanOnStart', scanOnStart);
     await p.setBool('autoRefresh', autoRefresh);
     await p.setBool('showHiddenFolders', showHiddenFolders);
+    await p.setBool('skipNomedia', skipNomedia);
     await p.setBool('showRemaining', showRemaining);
     await p.setBool('showClock', showClock);
     await p.setBool('showBattery', showBattery);

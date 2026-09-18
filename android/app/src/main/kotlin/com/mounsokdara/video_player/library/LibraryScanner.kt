@@ -14,10 +14,11 @@ object LibraryScanner {
         depth: Int,
         includeHidden: Boolean,
         budget: Int,
-        hiddenOnly: Boolean
+        hiddenOnly: Boolean,
+        skipNomedia: Boolean = true
     ): List<Map<String, Any?>> {
         val out = ArrayList<Map<String, Any?>>()
-        walk(root, depth, includeHidden, hiddenOnly, isHiddenPath(root.absolutePath), out, intArrayOf(budget))
+        walk(root, depth, includeHidden, hiddenOnly, skipNomedia, isHiddenPath(root.absolutePath), out, intArrayOf(budget))
         return out
     }
 
@@ -74,19 +75,22 @@ object LibraryScanner {
         depth: Int,
         includeHidden: Boolean,
         hiddenOnly: Boolean,
+        skipNomedia: Boolean,
         insideHidden: Boolean,
         out: ArrayList<Map<String, Any?>>,
         budget: IntArray
     ) {
         if (budget[0] <= 0 || depth < 0 || !dir.exists() || !dir.canRead()) return
+        if (skipNomedia && File(dir, ".nomedia").exists()) return
         val files = dir.listFiles() ?: return
         for (f in files) {
             if (budget[0] <= 0) return
             if (f.isDirectory) {
                 if (shouldSkipDir(f, includeHidden)) continue
+                if (skipNomedia && File(f, ".nomedia").exists()) continue
                 val childHidden = insideHidden || f.name.startsWith(".")
                 if (!includeHidden && childHidden) continue
-                walk(f, depth - 1, includeHidden, hiddenOnly, childHidden, out, budget)
+                walk(f, depth - 1, includeHidden, hiddenOnly, skipNomedia, childHidden, out, budget)
             } else {
                 val fileHidden = insideHidden || f.name.startsWith(".") || isHiddenPath(f.absolutePath)
                 if (!includeHidden && fileHidden) continue
