@@ -126,7 +126,11 @@ class CrashLog {
       if (low.contains('no active player') ||
           low.contains('no active stream to cancel') ||
           low.contains('source error') ||
-          low.contains('exoplaybackexception')) {
+          low.contains('exoplaybackexception') ||
+          low.contains('process_died') ||
+          low.contains('flutterjni is not attached') ||
+          low.contains('flutterjni is not attached to native') ||
+          low.contains('cannot execute operation because flutterjni')) {
         return;
       }
       scheduleShow();

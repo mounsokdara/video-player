@@ -67,23 +67,23 @@ object NativeCrashLog {
         val dirty = File(context.filesDir, NativeConstants.FILE_DIRTY)
         val actionFile = File(context.filesDir, NativeConstants.FILE_ACTION)
         val hasCrash = crash.exists()
-        val died = dirty.exists()
         val action = try {
             if (actionFile.exists()) actionFile.readText() else ""
         } catch (_: Exception) {
             ""
         }
-        val interesting = action.contains("Open video", ignoreCase = true) ||
-            action.contains("Play ", ignoreCase = true) ||
-            action.contains("equalizer", ignoreCase = true) ||
-            action.contains("audiofx", ignoreCase = true)
         val buf = StringBuilder()
         if (action.isNotBlank()) buf.append("Last action: ").append(action).append('\n')
         if (hasCrash) {
-            buf.append(crash.readText())
+            val body = try {
+                crash.readText()
+            } catch (_: Exception) {
+                ""
+            }
             crash.delete()
-        } else if (died && interesting) {
-            buf.append("===== PROCESS_DIED =====\nThe app process was killed during the last action (native crash / SIGSEGV). No Java stack trace.\n")
+            if (body.isNotBlank() && !isDetachedFlutterJniMessage(body)) {
+                buf.append(body)
+            }
         }
         try {
             dirty.delete()
@@ -91,17 +91,18 @@ object NativeCrashLog {
         } catch (_: Exception) {
         }
         val out = buf.toString().trim()
-        return if (out.isEmpty() || (!hasCrash && !(died && interesting))) null else out
+        if (out.isEmpty() || !out.contains("=====")) return null
+        return out
     }
 
     fun installHook(context: Context, emit: (Map<String, Any?>) -> Unit) {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            write(context, "${e.javaClass.name}: ${e.message}\n${Log.getStackTraceString(e)}")
             if (isDetachedFlutterJni(e)) {
                 Log.w("VideoPlayer", "ignored FlutterJNI detach", e)
                 return@setDefaultUncaughtExceptionHandler
             }
+            write(context, "${e.javaClass.name}: ${e.message}\n${Log.getStackTraceString(e)}")
             try {
                 emit(
                     mapOf(
@@ -120,11 +121,16 @@ object NativeCrashLog {
         var cur: Throwable? = e
         var hops = 0
         while (cur != null && hops < 8) {
-            val msg = cur.message ?: ""
-            if (msg.contains("FlutterJNI is not attached to native", ignoreCase = true)) return true
+            if (isDetachedFlutterJniMessage("${cur.javaClass.name} ${cur.message}")) return true
             cur = cur.cause
             hops++
         }
         return false
+    }
+
+    private fun isDetachedFlutterJniMessage(text: String): Boolean {
+        val low = text.lowercase()
+        return low.contains("flutterjni is not attached to native") ||
+            low.contains("cannot execute operation because flutterjni")
     }
 }

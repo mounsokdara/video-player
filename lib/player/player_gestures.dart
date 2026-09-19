@@ -35,7 +35,7 @@ extension PlayerGestures on _PlayerPageState {
     if (locked || _watch || _gesture == 'hold') return;
     final two = d.pointerCount >= 2 || _fingers >= 2;
     if (two) _sawTwo = true;
-    final wantPinch = appSettings.allowZoom && (two || (d.scale - 1).abs() > 0.04);
+    final wantPinch = appSettings.allowZoom && two;
 
     if (_gesture == 'pinch' || _pinching) {
       if (appSettings.allowZoom) _applyPinch(d, size);
@@ -154,13 +154,7 @@ extension PlayerGestures on _PlayerPageState {
     if (panKind.isEmpty) {
       final slop = appSettings.allowZoom ? 36.0 : 24.0;
       if (Offset(dx, dy).distance <= slop) return;
-      if (_zoomScale > 1.02) {
-        _gesture = 'pan';
-        _ateTap = true;
-        panKind = 'frame';
-        _pinchBasePan = _zoomPan;
-        _pinchStartFocal = start;
-      } else if (dx.abs() > dy.abs()) {
+      if (dx.abs() > dy.abs()) {
         if (!appSettings.gestureControl) return;
         _gesture = 'pan';
         _ateTap = true;
@@ -175,15 +169,7 @@ extension PlayerGestures on _PlayerPageState {
       }
     }
     if (_gesture != 'pan') return;
-    if (panKind == 'frame') {
-      final nextPan = _pinchBasePan + (focal - _pinchStartFocal);
-      final maxX = (_zoomScale - 1) * size.width / 2 + 48;
-      final maxY = (_zoomScale - 1) * size.height / 2 + 48;
-      setState(() {
-        _zoomPan = Offset(nextPan.dx.clamp(-maxX, maxX), nextPan.dy.clamp(-maxY, maxY));
-        _showZoomHud = true;
-      });
-    } else if (panKind == 'seek') {
+    if (panKind == 'seek') {
       final dur = c.value.duration.inMilliseconds.toDouble().clamp(1, double.infinity);
       final delta = (dx / size.width) * dur * 0.6;
       final next = (panBase + delta).clamp(0, dur);
