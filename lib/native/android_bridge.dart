@@ -249,6 +249,24 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<void> updateBackground({
+    required String title,
+    String? artist,
+    bool playing = true,
+    int positionMs = 0,
+    int durationMs = 0,
+  }) async {
+    try {
+      await _ch.invokeMethod('updateBackground', {
+        'title': title,
+        'artist': artist ?? 'Video Player',
+        'playing': playing,
+        'positionMs': positionMs,
+        'durationMs': durationMs,
+      });
+    } catch (_) {}
+  }
+
   static Future<void> stopBackground() async {
     try {
       await _ch.invokeMethod('stopBackground');

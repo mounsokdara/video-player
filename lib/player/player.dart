@@ -182,6 +182,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       });
       unawaited(AndroidBridge.requestAudioFocus());
       unawaited(_applyEq());
+      _syncPip();
       _applySystemUi();
       _applyRotation();
       _applySpeed();
@@ -479,7 +480,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
+        PlaybackSession.notePlayback(c, title: item.title, artist: item.folderName, force: true);
         if (mounted) setState(() {});
+      } else if (PlaybackSession.away) {
+        PlaybackSession.notePlayback(c, title: item.title, artist: item.folderName);
       }
       if (!_endedLatch &&
           (c.value.completed ||
@@ -1964,6 +1968,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       unawaited(AndroidBridge.requestAudioFocus());
       c.play();
     }
+    PlaybackSession.notePlayback(c, title: item.title, artist: item.folderName, force: true);
     setState(() {});
     _armHide();
   }

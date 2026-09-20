@@ -45,6 +45,9 @@ class PlaybackSession {
   static int _failStreak = 0;
   static VoidCallback? _hook;
   static bool _away = false;
+  static DateTime _notifyAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static bool _notifyPlaying = false;
+  static String _notifyTitle = '';
 
   static const _endSlop = Duration(milliseconds: 400);
   static const _replayAfter = Duration(seconds: 3);
@@ -132,6 +135,7 @@ class PlaybackSession {
       if (dur > Duration.zero && c.value.position >= dur - _endSlop && !c.value.isPlaying) {
         unawaited(onEnded());
       }
+      if (_away) notePlayback(c);
     } catch (e, s) {
       CrashLog.record('SESSION', '$e', s);
     }
@@ -199,6 +203,9 @@ class PlaybackSession {
     sleepTimer = null;
     sleepLeft = null;
     MiniMemory.reset();
+    _notifyAt = DateTime.fromMillisecondsSinceEpoch(0);
+    _notifyPlaying = false;
+    _notifyTitle = '';
     final dying = controller;
     controller = null;
     item = null;
@@ -291,10 +298,21 @@ class PlaybackSession {
   static Future<void> onBack({PlaybackEngine? engine}) async {
     if (!_away) return;
     _away = false;
+    _notifyAt = DateTime.fromMillisecondsSinceEpoch(0);
     await AndroidBridge.stopBackground();
   }
 
-  static Future<void> syncNotification({PlaybackEngine? engine, String? title, String? artist}) async {
+  static void notePlayback(PlaybackEngine c, {String? title, String? artist, bool force = false}) {
+    if (!_away || !appSettings.backgroundPlay) return;
+    unawaited(syncNotification(engine: c, title: title, artist: artist, force: force));
+  }
+
+  static Future<void> syncNotification({
+    PlaybackEngine? engine,
+    String? title,
+    String? artist,
+    bool force = false,
+  }) async {
     if (!appSettings.backgroundPlay) {
       await AndroidBridge.stopBackground();
       return;
@@ -305,10 +323,20 @@ class PlaybackSession {
       await AndroidBridge.stopBackground();
       return;
     }
-    await AndroidBridge.startBackground(
-      title: title ?? item?.title ?? 'Video Player',
+    final playing = c.wantPlay;
+    final name = title ?? item?.title ?? 'Video Player';
+    final now = DateTime.now();
+    final changed = playing != _notifyPlaying || name != _notifyTitle;
+    if (!force && !changed && now.difference(_notifyAt) < const Duration(milliseconds: 800)) {
+      return;
+    }
+    _notifyAt = now;
+    _notifyPlaying = playing;
+    _notifyTitle = name;
+    await AndroidBridge.updateBackground(
+      title: name,
       artist: artist ?? item?.folderName ?? 'Video Player',
-      playing: c.wantPlay,
+      playing: playing,
       positionMs: c.value.position.inMilliseconds,
       durationMs: c.value.duration.inMilliseconds,
     );
@@ -331,7 +359,7 @@ class PlaybackSession {
     );
     await AndroidBridge.setStereoVolume(appSettings.audioBalanceLeft, appSettings.audioBalanceRight);
     if (_away && appSettings.backgroundPlay) {
-      await syncNotification(engine: c, title: next.title, artist: next.folderName);
+      await syncNotification(engine: c, title: next.title, artist: next.folderName, force: true);
     }
   }
 

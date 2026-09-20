@@ -29,12 +29,15 @@ class PlaybackService : Service() {
     private var durationMs: Int = 0
     private var wakeLock: PowerManager.WakeLock? = null
     private val ticker = Handler(Looper.getMainLooper())
+    private var tickCount = 0
     private val tickRunnable = object : Runnable {
         override fun run() {
             if (!playing) return
             positionMs += 500
             if (durationMs > 0 && positionMs > durationMs) positionMs = durationMs
             publishState()
+            tickCount++
+            if (tickCount % 2 == 0) postNotification()
             ticker.postDelayed(this, 500)
         }
     }
@@ -124,23 +127,26 @@ class PlaybackService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            else -> {
-                intent?.getStringExtra("title")?.let { title = it }
-                intent?.getStringExtra("artist")?.let { artist = it }
-                if (intent?.hasExtra("playing") == true) {
-                    playing = intent.getBooleanExtra("playing", playing)
-                }
-                if (intent?.hasExtra("positionMs") == true) {
-                    positionMs = intent.getIntExtra("positionMs", positionMs)
-                }
-                if (intent?.hasExtra("durationMs") == true) {
-                    durationMs = intent.getIntExtra("durationMs", durationMs)
-                }
-            }
+            ACTION_START, ACTION_UPDATE -> applyExtras(intent)
+            else -> applyExtras(intent)
         }
         if (playing) acquireWake() else releaseWake()
         showForeground()
         return START_STICKY
+    }
+
+    private fun applyExtras(intent: Intent?) {
+        intent?.getStringExtra("title")?.let { title = it }
+        intent?.getStringExtra("artist")?.let { artist = it }
+        if (intent?.hasExtra("playing") == true) {
+            playing = intent.getBooleanExtra("playing", playing)
+        }
+        if (intent?.hasExtra("positionMs") == true) {
+            positionMs = intent.getIntExtra("positionMs", positionMs)
+        }
+        if (intent?.hasExtra("durationMs") == true) {
+            durationMs = intent.getIntExtra("durationMs", durationMs)
+        }
     }
 
     private fun buildState(): PlaybackStateCompat {
@@ -177,7 +183,12 @@ class PlaybackService : Service() {
         )
         publishState()
         stopTicker()
+        tickCount = 0
         if (playing) ticker.postDelayed(tickRunnable, 500)
+        postNotification()
+    }
+
+    private fun postNotification() {
         val notification = buildNotification()
         try {
             ServiceCompat.startForeground(
@@ -192,18 +203,18 @@ class PlaybackService : Service() {
             try {
                 startForeground(42, notification)
             } catch (_: Throwable) {
+                try {
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(42, notification)
+                } catch (_: Throwable) {
+                }
             }
         }
     }
 
     private fun buildNotification(): Notification {
         val launch = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-            },
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         fun action(id: Int, icon: Int, label: String, action: String): NotificationCompat.Action {
@@ -227,6 +238,7 @@ class PlaybackService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setProgress(durationMs.coerceAtLeast(0), positionMs.coerceAtLeast(0), durationMs <= 0)
             .addAction(action(2, android.R.drawable.ic_media_previous, "Previous", ACTION_PREV))
             .addAction(playPause)
             .addAction(action(3, android.R.drawable.ic_media_next, "Next", ACTION_NEXT))

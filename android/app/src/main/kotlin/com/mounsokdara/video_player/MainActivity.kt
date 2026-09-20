@@ -43,6 +43,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 
 open class MainActivity : FlutterActivity() {
     private val channelName = NativeConstants.CHANNEL
@@ -74,7 +75,7 @@ open class MainActivity : FlutterActivity() {
         audioFocus = AudioFocusController(
             this,
             mainHandler,
-            { MainActivity.emitMedia(it) },
+            { action -> emit(mapOf("type" to "media", "action" to action)) },
             { NativeCrashLog.breadcrumb(this, it) },
             isPlaying
         ) { isPlaying = it }
@@ -126,7 +127,7 @@ open class MainActivity : FlutterActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
-                    eventsSink = events
+                    if (events != null) addMediaSink(events)
                     val pending = pendingOpen
                     pendingOpen = null
                     if (pending != null) emit(mapOf("type" to "open", "path" to pending))
@@ -134,8 +135,8 @@ open class MainActivity : FlutterActivity() {
                 }
 
                 override fun onCancel(arguments: Any?) {
+                    eventSink?.let { removeMediaSink(it) }
                     eventSink = null
-                    eventsSink = null
                 }
             })
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
@@ -228,6 +229,7 @@ open class MainActivity : FlutterActivity() {
                         "setPlaying" -> {
                             isPlaying = call.argument<Boolean>("on") ?: false
                             audioFocus.setPlaying(isPlaying)
+                            if (isPlaying) claimPlayback(eventSink)
                             result.success(true)
                         }
                         "enterPip" -> {
@@ -261,34 +263,32 @@ open class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                         "startBackground" -> {
-                            val title = call.argument<String>("title") ?: "Video Player"
-                            val artist = call.argument<String>("artist") ?: "Video Player"
                             val playing = call.argument<Boolean>("playing") ?: true
-                            val positionMs = call.argument<Int>("positionMs") ?: 0
-                            val durationMs = call.argument<Int>("durationMs") ?: 0
-                            val intent = Intent(this, PlaybackService::class.java).apply {
-                                action = PlaybackService.ACTION_START
-                                putExtra("title", title)
-                                putExtra("artist", artist)
-                                putExtra("playing", playing)
-                                putExtra("positionMs", positionMs)
-                                putExtra("durationMs", durationMs)
+                            if (playing) claimPlayback(eventSink)
+                            else ownerSink = eventSink ?: ownerSink
+                            startPlaybackService(
+                                if (PlaybackService.isRunning) PlaybackService.ACTION_UPDATE else PlaybackService.ACTION_START,
+                                call.argument<String>("title") ?: "Video Player",
+                                call.argument<String>("artist") ?: "Video Player",
+                                playing,
+                                call.argument<Int>("positionMs") ?: 0,
+                                call.argument<Int>("durationMs") ?: 0
+                            )
+                            result.success(true)
+                        }
+                        "updateBackground" -> {
+                            val playing = call.argument<Boolean>("playing") ?: true
+                            if (ownerSink == null) {
+                                if (playing) claimPlayback(eventSink) else ownerSink = eventSink
                             }
-                            try {
-                                if (PlaybackService.isRunning) {
-                                    startService(intent)
-                                } else if (Build.VERSION.SDK_INT >= 26) {
-                                    startForegroundService(intent)
-                                } else {
-                                    startService(intent)
-                                }
-                            } catch (t: Throwable) {
-                                try {
-                                    startService(intent)
-                                } catch (t2: Throwable) {
-                                    NativeCrashLog.write(this, "startBackground: ${t2.message}\n${Log.getStackTraceString(t2)}")
-                                }
-                            }
+                            startPlaybackService(
+                                if (PlaybackService.isRunning) PlaybackService.ACTION_UPDATE else PlaybackService.ACTION_START,
+                                call.argument<String>("title") ?: "Video Player",
+                                call.argument<String>("artist") ?: "Video Player",
+                                playing,
+                                call.argument<Int>("positionMs") ?: 0,
+                                call.argument<Int>("durationMs") ?: 0
+                            )
                             result.success(true)
                         }
                         "stopBackground" -> {
@@ -654,7 +654,7 @@ open class MainActivity : FlutterActivity() {
         val path = resolveUri(uri)
         if (path != null) {
             pendingOpen = path
-            val listening = eventSink != null || eventsSink != null
+            val listening = eventSink != null
             emit(mapOf("type" to "open", "path" to path))
             if (listening) pendingOpen = null
         }
@@ -688,10 +688,45 @@ open class MainActivity : FlutterActivity() {
         return uri.lastPathSegment
     }
 
+    private fun startPlaybackService(
+        action: String,
+        title: String,
+        artist: String,
+        playing: Boolean,
+        positionMs: Int,
+        durationMs: Int
+    ) {
+        val intent = Intent(this, PlaybackService::class.java).apply {
+            this.action = action
+            putExtra("title", title)
+            putExtra("artist", artist)
+            putExtra("playing", playing)
+            putExtra("positionMs", positionMs)
+            putExtra("durationMs", durationMs)
+        }
+        try {
+            if (PlaybackService.isRunning) {
+                startService(intent)
+            } else if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (t: Throwable) {
+            try {
+                startService(intent)
+            } catch (t2: Throwable) {
+                NativeCrashLog.write(this, "playback service: ${t2.message}\n${Log.getStackTraceString(t2)}")
+            }
+        }
+    }
+
     private fun emit(payload: Map<String, Any?>) {
         mainHandler.post {
-            val sink = eventSink ?: eventsSink
-            sink?.success(payload)
+            try {
+                eventSink?.success(payload)
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -1136,14 +1171,59 @@ open class MainActivity : FlutterActivity() {
 
     companion object {
         var eventsSink: EventChannel.EventSink? = null
+        private val mediaSinks = CopyOnWriteArrayList<EventChannel.EventSink>()
         private val emitHandler = Handler(Looper.getMainLooper())
+        @Volatile
+        var ownerSink: EventChannel.EventSink? = null
+
+        fun addMediaSink(sink: EventChannel.EventSink) {
+            if (!mediaSinks.contains(sink)) mediaSinks.add(sink)
+            eventsSink = sink
+        }
+
+        fun removeMediaSink(sink: EventChannel.EventSink) {
+            mediaSinks.remove(sink)
+            if (eventsSink === sink) eventsSink = mediaSinks.lastOrNull()
+            if (ownerSink === sink) ownerSink = mediaSinks.lastOrNull()
+        }
+
+        fun claimPlayback(sink: EventChannel.EventSink?) {
+            ownerSink = sink
+            if (sink != null) pauseOthers(sink)
+        }
+
+        fun pauseOthers(except: EventChannel.EventSink?) {
+            val payload = hashMapOf<String, Any?>("type" to "media", "action" to "pause")
+            val send = Runnable {
+                for (s in mediaSinks) {
+                    if (s === except) continue
+                    try {
+                        s.success(payload)
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) send.run() else emitHandler.post(send)
+        }
 
         fun emitMedia(action: String, extra: Map<String, Any?> = emptyMap()) {
             val payload = HashMap<String, Any?>(extra.size + 2)
             payload["type"] = "media"
             payload["action"] = action
             payload.putAll(extra)
-            val send = Runnable { eventsSink?.success(payload) }
+            val send = Runnable {
+                val targets: List<EventChannel.EventSink> = when {
+                    action == "refresh" || action == "pause" -> mediaSinks.toList()
+                    ownerSink != null -> listOf(ownerSink!!)
+                    else -> mediaSinks.toList()
+                }
+                for (s in targets) {
+                    try {
+                        s.success(payload)
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
             if (Looper.myLooper() == Looper.getMainLooper()) send.run() else emitHandler.post(send)
         }
 

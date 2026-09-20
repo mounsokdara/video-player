@@ -31,6 +31,8 @@ class EngineValue {
 }
 
 class PlaybackEngine extends ChangeNotifier {
+  static final _alive = <PlaybackEngine>{};
+
   Player? _player;
   VideoController? video;
   final _subs = <StreamSubscription<dynamic>>[];
@@ -66,6 +68,8 @@ class PlaybackEngine extends ChangeNotifier {
 
   Future<void> _openBody(String path, {required String hwdec}) async {
     _closed = false;
+    _alive.add(this);
+    await _pauseOthers();
     final wantHw = hwdec != 'no';
     final hadHw = _hwdec != null && _hwdec != 'no';
     if (_player != null && wantHw != hadHw) {
@@ -245,12 +249,24 @@ class PlaybackEngine extends ChangeNotifier {
 
   Future<void> play() async {
     wantPlay = true;
+    _alive.add(this);
+    await _pauseOthers();
     await _player?.play();
   }
 
   Future<void> pause() async {
     wantPlay = false;
     await _player?.pause();
+  }
+
+  Future<void> _pauseOthers() async {
+    final others = _alive.where((e) => !identical(e, this) && !e._closed).toList();
+    for (final e in others) {
+      e.wantPlay = false;
+      try {
+        await e._player?.pause();
+      } catch (_) {}
+    }
   }
 
   Future<void> seekTo(Duration d) async {
@@ -273,6 +289,7 @@ class PlaybackEngine extends ChangeNotifier {
     if (_closed) return;
     _closed = true;
     wantPlay = false;
+    _alive.remove(this);
     await _disposePlayer();
     super.dispose();
   }
@@ -283,6 +300,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> _disposePlayer() async {
+    _alive.remove(this);
     for (final s in _subs) {
       try {
         await s.cancel();
