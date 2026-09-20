@@ -130,7 +130,10 @@ class CrashLog {
           low.contains('process_died') ||
           low.contains('flutterjni is not attached') ||
           low.contains('flutterjni is not attached to native') ||
-          low.contains('cannot execute operation because flutterjni')) {
+          low.contains('cannot execute operation because flutterjni') ||
+          low.contains('startforegroundservice() did not then call') ||
+          low.contains('did not then call service.startforeground') ||
+          low.contains('remoteserviceexception')) {
         return;
       }
       scheduleShow();

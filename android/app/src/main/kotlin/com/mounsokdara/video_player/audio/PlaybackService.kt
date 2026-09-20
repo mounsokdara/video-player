@@ -47,16 +47,9 @@ class PlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        if (Build.VERSION.SDK_INT >= 26) {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW).apply {
-                    description = getString(R.string.playback_channel_desc)
-                    setSound(null, null)
-                    setShowBadge(false)
-                }
-            )
-        }
+        starting = false
+        ensureChannel()
+        postNotification()
         acquireWake()
         session = MediaSessionCompat(this, "video_player").apply {
             setCallback(object : MediaSessionCompat.Callback() {
@@ -93,6 +86,7 @@ class PlaybackService : Service() {
                 override fun onStop() {
                     playing = false
                     MainActivity.emitMedia("pause")
+                    postNotification()
                     stopSelf()
                 }
             })
@@ -103,6 +97,7 @@ class PlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isRunning = true
+        starting = false
         when (intent?.action) {
             ACTION_PLAY -> {
                 if (!playing) {
@@ -124,6 +119,7 @@ class PlaybackService : Service() {
                 playing = false
                 stopTicker()
                 releaseWake()
+                postNotification()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -188,28 +184,58 @@ class PlaybackService : Service() {
         postNotification()
     }
 
-    private fun postNotification() {
-        val notification = buildNotification()
+    private fun ensureChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
         try {
-            ServiceCompat.startForeground(
-                this,
-                42,
-                notification,
-                if (Build.VERSION.SDK_INT >= 29)
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                else 0
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL, getString(R.string.playback_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                    description = getString(R.string.playback_channel_desc)
+                    setSound(null, null)
+                    setShowBadge(false)
+                }
             )
         } catch (_: Throwable) {
+        }
+    }
+
+    private fun postNotification() {
+        val notification = try {
+            buildNotification()
+        } catch (_: Throwable) {
+            fallbackNotification()
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
             try {
-                startForeground(42, notification)
+                ServiceCompat.startForeground(
+                    this,
+                    42,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+                return
             } catch (_: Throwable) {
-                try {
-                    val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                    nm.notify(42, notification)
-                } catch (_: Throwable) {
-                }
             }
         }
+        try {
+            startForeground(42, notification)
+        } catch (_: Throwable) {
+            try {
+                startForeground(42, fallbackNotification())
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun fallbackNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL)
+            .setContentTitle("Video Player")
+            .setContentText(artist)
+            .setSmallIcon(R.drawable.ic_stat_play)
+            .setOngoing(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
     }
 
     private fun buildNotification(): Notification {
@@ -281,11 +307,13 @@ class PlaybackService : Service() {
             showForeground()
             return
         }
+        postNotification()
         stopSelf()
     }
 
     override fun onDestroy() {
         isRunning = false
+        starting = false
         stopTicker()
         releaseWake()
         session?.isActive = false
@@ -311,5 +339,9 @@ class PlaybackService : Service() {
         const val ACTION_STOP = "app.videoplayer.STOP"
         @Volatile
         var isRunning: Boolean = false
+        @Volatile
+        var starting: Boolean = false
+
+        fun live(): Boolean = isRunning || starting
     }
 }

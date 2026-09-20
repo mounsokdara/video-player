@@ -81,7 +81,7 @@ object NativeCrashLog {
                 ""
             }
             crash.delete()
-            if (body.isNotBlank() && !isDetachedFlutterJniMessage(body)) {
+            if (body.isNotBlank() && !isDetachedFlutterJniMessage(body) && !isForegroundTimeoutMessage(body)) {
                 buf.append(body)
             }
         }
@@ -132,5 +132,11 @@ object NativeCrashLog {
         val low = text.lowercase()
         return low.contains("flutterjni is not attached to native") ||
             low.contains("cannot execute operation because flutterjni")
+    }
+
+    private fun isForegroundTimeoutMessage(text: String): Boolean {
+        val low = text.lowercase()
+        return low.contains("startforegroundservice() did not then call") ||
+            low.contains("did not then call service.startforeground")
     }
 }

@@ -267,7 +267,7 @@ open class MainActivity : FlutterActivity() {
                             if (playing) claimPlayback(eventSink)
                             else ownerSink = eventSink ?: ownerSink
                             startPlaybackService(
-                                if (PlaybackService.isRunning) PlaybackService.ACTION_UPDATE else PlaybackService.ACTION_START,
+                                if (PlaybackService.live()) PlaybackService.ACTION_UPDATE else PlaybackService.ACTION_START,
                                 call.argument<String>("title") ?: "Video Player",
                                 call.argument<String>("artist") ?: "Video Player",
                                 playing,
@@ -277,12 +277,16 @@ open class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                         "updateBackground" -> {
+                            if (!PlaybackService.live()) {
+                                result.success(false)
+                                return@setMethodCallHandler
+                            }
                             val playing = call.argument<Boolean>("playing") ?: true
                             if (ownerSink == null) {
                                 if (playing) claimPlayback(eventSink) else ownerSink = eventSink
                             }
                             startPlaybackService(
-                                if (PlaybackService.isRunning) PlaybackService.ACTION_UPDATE else PlaybackService.ACTION_START,
+                                PlaybackService.ACTION_UPDATE,
                                 call.argument<String>("title") ?: "Video Player",
                                 call.argument<String>("artist") ?: "Video Player",
                                 playing,
@@ -292,7 +296,7 @@ open class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                         "stopBackground" -> {
-                            stopService(Intent(this, PlaybackService::class.java))
+                            stopPlaybackService()
                             result.success(true)
                         }
                         "previewFrame" -> {
@@ -705,18 +709,41 @@ open class MainActivity : FlutterActivity() {
             putExtra("durationMs", durationMs)
         }
         try {
-            if (PlaybackService.isRunning) {
+            if (PlaybackService.live()) {
                 startService(intent)
             } else if (Build.VERSION.SDK_INT >= 26) {
-                startForegroundService(intent)
+                PlaybackService.starting = true
+                try {
+                    startForegroundService(intent)
+                } catch (t: Throwable) {
+                    PlaybackService.starting = false
+                    startService(intent)
+                }
             } else {
                 startService(intent)
             }
         } catch (t: Throwable) {
+            PlaybackService.starting = false
             try {
                 startService(intent)
             } catch (t2: Throwable) {
                 NativeCrashLog.write(this, "playback service: ${t2.message}\n${Log.getStackTraceString(t2)}")
+            }
+        }
+    }
+
+    private fun stopPlaybackService() {
+        val stop = Intent(this, PlaybackService::class.java).setAction(PlaybackService.ACTION_STOP)
+        try {
+            if (PlaybackService.live()) {
+                startService(stop)
+            } else {
+                stopService(Intent(this, PlaybackService::class.java))
+            }
+        } catch (_: Throwable) {
+            try {
+                stopService(Intent(this, PlaybackService::class.java))
+            } catch (_: Throwable) {
             }
         }
     }
