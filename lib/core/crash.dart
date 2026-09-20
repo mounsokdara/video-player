@@ -133,7 +133,9 @@ class CrashLog {
           low.contains('cannot execute operation because flutterjni') ||
           low.contains('startforegroundservice() did not then call') ||
           low.contains('did not then call service.startforeground') ||
-          low.contains('remoteserviceexception')) {
+          low.contains('remoteserviceexception') ||
+          low.contains('_youtubewide') ||
+          (low.contains('invalid argument(s):') && low.contains('player.dart'))) {
         return;
       }
       scheduleShow();

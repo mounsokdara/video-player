@@ -778,8 +778,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   double _ytMaxAnimT() => Curves.easeInOutCubic.transform(_ytMaxAnim.value);
 
+  double _fit(double v, double a, double b) {
+    final lo = math.min(a, b);
+    final hi = math.max(a, b);
+    return v.clamp(lo, hi);
+  }
+
   double _ytPaneMaxH(Size screen, double topGap, double t) {
-    final usable = (screen.height - topGap).clamp(120.0, screen.height);
+    final usable = _fit(screen.height - topGap, 1.0, math.max(1.0, screen.height));
     final w = screen.width;
     final src = _sourceVideoSize();
     final ar = src.width / math.max(src.height, 1.0);
@@ -789,7 +795,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         : (_portraitVideo ? w * 16 / 9 : w * 9 / 16);
     final cap916 = w * 16 / 9;
     final leave = ui.lerpDouble(math.min(128.0, usable * 0.18), 0, t)!;
-    final watchH = math.min(natural, math.min(cap916, usable - leave)).clamp(120.0, usable);
+    final watchH = _fit(
+      math.min(natural, math.min(cap916, usable - leave)),
+      math.min(120.0, usable),
+      usable,
+    );
     return ui.lerpDouble(watchH, screen.height, t)!;
   }
 
@@ -888,7 +898,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           if (topGap > 0.5) SizedBox(height: topGap),
           SizedBox(
             width: size.width,
-            height: paneH.clamp(96.0, math.max(96.0, size.height - topGap)),
+            height: _fit(paneH, 96.0, math.max(96.0, size.height - topGap)),
             child: _stage(c, Size(size.width, paneH), stagePad, watch: t < 0.85),
           ),
           if (rest > 1)
@@ -908,12 +918,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Widget _youtubeWide(PlaybackEngine? c, Size size, EdgeInsets pad) {
     final t = _ytMaxAnimT();
     final watchLike = t < 0.85;
-    final listW = ui.lerpDouble(
-      math.min(400.0, size.width * 0.36).clamp(240.0, size.width * 0.42),
-      0,
-      t,
-    )!;
-    final leftW = math.max(200.0, size.width - listW);
+    final hi = math.min(400.0, math.max(0.0, size.width * 0.42));
+    final lo = math.min(240.0, hi);
+    final listW = ui.lerpDouble(_fit(size.width * 0.36, lo, hi), 0, t)!;
+    final leftW = _fit(size.width - listW, 0.0, size.width);
     final detailsKeep = ui.lerpDouble(148, 0, t)!;
     final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
     final inset = ui.lerpDouble(12, 0, t)!;
@@ -937,7 +945,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   aspect == AspectMode.original ? fromVideo : w * 9 / 16,
                   math.min(w * 16 / 9, math.max(120.0, box.maxHeight - detailsKeep)),
                 );
-                final videoH = ui.lerpDouble(watchH, box.maxHeight, t)!.clamp(96.0, box.maxHeight);
+                final videoH = _fit(
+                  ui.lerpDouble(watchH, box.maxHeight, t)!,
+                  math.min(96.0, box.maxHeight),
+                  math.max(1.0, box.maxHeight),
+                );
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
