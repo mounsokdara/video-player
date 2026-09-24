@@ -877,12 +877,14 @@ open class MainActivity : FlutterActivity() {
                 while (c.moveToNext() && out.size < NativeConstants.INDEXED_CAP) {
                     val path = if (iData >= 0) c.getString(iData) else null
                     if (path.isNullOrBlank()) continue
+                    val mime = if (iMime >= 0) c.getString(iMime) else null
                     val file = File(path)
-                    if (file.exists() && file.isFile && !isVideoFile(file)) continue
+                    val ext = file.extension.lowercase()
+                    if (ext in NativeConstants.SKIP_EXT) continue
+                    if ((mime.isNullOrBlank() || !mime.startsWith("video/")) && !isVideoFile(file)) continue
                     var size = if (iSize >= 0) c.getLong(iSize) else 0L
-                    if (size <= 0 && file.exists()) size = file.length()
                     val name = if (iName >= 0) c.getString(iName) ?: file.name else file.name
-                    val modified = if (iMod >= 0) c.getLong(iMod) * 1000 else file.lastModified()
+                    val modified = if (iMod >= 0) c.getLong(iMod) * 1000 else 0L
                     out.add(
                         mapOf(
                             "id" to if (iId >= 0) c.getLong(iId).toString() else path,
@@ -1259,14 +1261,11 @@ open class MainActivity : FlutterActivity() {
             val name = f.name.lowercase()
             if (name.endsWith(".d.ts")) return false
             val ext = f.extension.lowercase()
-            if (ext == "ts") return isMpegTs(f)
             if (ext in NativeConstants.SKIP_EXT) return false
-            if (isPlainText(f)) return false
-            if (ext in NativeConstants.VIDEO_EXT) return true
+            if (ext == "ts") return isMpegTs(f)
+            if (ext in NativeConstants.VIDEO_EXT) return !isPlainText(f)
             if (isNonVideoMagic(f)) return false
-            if (hasVideoMagic(f)) return true
-            if (f.length() < 8192L) return false
-            return hasVideoTrack(f)
+            return hasVideoMagic(f)
         }
 
         private fun isMpegTs(f: File): Boolean {

@@ -2,12 +2,14 @@
 
 Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files stay on the device.
 
-[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.1/com.mounsokdara.video_player.apk)
+[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.2/com.mounsokdara.video_player.apk)
+
+[Changelog](CHANGELOG.md)
 
 
 ## Library
 
-- Scans internal storage, SD cards, and USB / OTG drives
+- Scans internal storage, SD cards, and USB / OTG drives (system list first, then extra folders)
 - Optional hidden files (dot-folders and hidden videos)
 - Auto-refresh when videos are added, changed, or deleted
 - Scan on start (optional)

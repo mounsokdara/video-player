@@ -144,7 +144,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     try {
       await library.requestPermissions();
       if (appSettings.scanOnStart || appSettings.autoRefresh || !spinner) {
-        await library.scan();
+        await library.scan(
+          onPartial: () {
+            if (mounted) setState(() => loading = false);
+          },
+        );
       }
     } catch (e, s) {
       error = '$e';
@@ -159,7 +163,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (_busy) return;
     _busy = true;
     try {
-      await library.scan();
+      await library.scan(
+        onPartial: () {
+          if (mounted) setState(() {});
+        },
+      );
     } catch (e, s) {
       CrashLog.record('LIBRARY', '$e', s);
     }

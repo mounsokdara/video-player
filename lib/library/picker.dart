@@ -37,7 +37,11 @@ class _VideoPickerPageState extends State<VideoPickerPage> {
     _allowMultiple = await AndroidBridge.pickerAllowMultiple();
     try {
       await library.requestPermissions();
-      await library.scan();
+      await library.scan(
+        onPartial: () {
+          if (mounted) setState(() => _loading = false);
+        },
+      );
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }

@@ -13,7 +13,7 @@ class AboutInfo {
   AboutInfo._();
   static const name = 'Video Player';
   static const author = 'Moun Sokdara';
-  static const displayVersion = '1.0.1';
+  static const displayVersion = '1.0.2';
   static const legalese = 'Local-only Android player. Material 3.';
 }
 

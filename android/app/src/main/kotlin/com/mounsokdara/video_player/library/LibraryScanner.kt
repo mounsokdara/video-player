@@ -97,7 +97,6 @@ object LibraryScanner {
                 if (hiddenOnly && !fileHidden) continue
                 if (!MainActivity.isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
-                val meta = probeMeta(f.absolutePath)
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,
@@ -105,10 +104,10 @@ object LibraryScanner {
                         "size" to f.length(),
                         "modified" to f.lastModified(),
                         "folder" to (f.parent ?: ""),
-                        "durationMs" to (meta["durationMs"] ?: 0L),
-                        "width" to (meta["width"] ?: 0),
-                        "height" to (meta["height"] ?: 0),
-                        "mime" to meta["mime"]
+                        "durationMs" to 0L,
+                        "width" to 0,
+                        "height" to 0,
+                        "mime" to null
                     )
                 )
             }

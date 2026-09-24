@@ -135,11 +135,11 @@ class LibraryService {
     }
   }
 
-  Future<void> scan() async {
+  Future<void> scan({void Function()? onPartial}) async {
     if (_scanning) return;
     _scanning = true;
     try {
-      await _scanBody();
+      await _scanBody(onPartial: onPartial);
     } finally {
       _scanning = false;
     }
@@ -170,7 +170,7 @@ class LibraryService {
     }
   }
 
-  Future<void> _scanBody() async {
+  Future<void> _scanBody({void Function()? onPartial}) async {
     final next = <VideoItem>[];
     final seen = <String>{};
     final hidden = settings.showHiddenFolders;
@@ -186,7 +186,6 @@ class LibraryService {
         if (path.isEmpty || seen.contains(path)) continue;
         if (!looksLikeVideo(path, mime: m['mime'] as String?)) continue;
         if (!hidden && _isHiddenPath(path)) continue;
-        if (settings.skipNomedia && _underNomedia(path)) continue;
         seen.add(path);
         final durMs = (m['durationMs'] as num?)?.toInt() ?? 0;
         next.add(
@@ -226,7 +225,6 @@ class LibraryService {
               if (path == null || path.isEmpty || seen.contains(path)) continue;
               if (!looksLikeVideo(path, mime: a.mimeType)) continue;
               if (!hidden && _isHiddenPath(path)) continue;
-              if (settings.skipNomedia && _underNomedia(path)) continue;
               seen.add(path);
               next.add(
                 VideoItem(
@@ -252,18 +250,31 @@ class LibraryService {
       } catch (_) {}
     }
 
+    if (next.isNotEmpty) {
+      videos
+        ..clear()
+        ..addAll(next);
+      _rebuildFolders();
+      onPartial?.call();
+    }
+
     final nativeTargets = <StorageVolumeInfo>[
       ...volumes.where((v) => v.path.isNotEmpty && !v.isPrimary),
       if (next.isEmpty) ...volumes.where((v) => v.path.isNotEmpty && v.isPrimary),
     ];
-    for (final vol in nativeTargets) {
-      if (vol.path.isEmpty) continue;
-      final extra = await AndroidBridge.listVideoFiles(
-        vol.path,
-        includeHidden: hidden,
-        skipNomedia: settings.skipNomedia,
+    if (nativeTargets.isNotEmpty) {
+      final extras = await Future.wait(
+        nativeTargets.map(
+          (vol) => AndroidBridge.listVideoFiles(
+            vol.path,
+            includeHidden: hidden,
+            skipNomedia: settings.skipNomedia,
+          ),
+        ),
       );
-      _mergeNative(next, seen, extra);
+      for (final extra in extras) {
+        _mergeNative(next, seen, extra);
+      }
     }
     if (hidden) {
       await _collectHidden(next, seen);
@@ -278,14 +289,19 @@ class LibraryService {
   }
 
   Future<void> _collectHidden(List<VideoItem> into, Set<String> seen) async {
-    for (final vol in volumes) {
-      if (vol.path.isEmpty) continue;
-      final extra = await AndroidBridge.listVideoFiles(
-        vol.path,
-        includeHidden: true,
-        hiddenOnly: true,
-        skipNomedia: settings.skipNomedia,
-      );
+    final roots = volumes.where((v) => v.path.isNotEmpty).toList();
+    if (roots.isEmpty) return;
+    final extras = await Future.wait(
+      roots.map(
+        (vol) => AndroidBridge.listVideoFiles(
+          vol.path,
+          includeHidden: true,
+          hiddenOnly: true,
+          skipNomedia: settings.skipNomedia,
+        ),
+      ),
+    );
+    for (final extra in extras) {
       _mergeNative(into, seen, extra);
     }
   }
@@ -296,7 +312,6 @@ class LibraryService {
       if (path.isEmpty || seen.contains(path)) continue;
       if (!looksLikeVideo(path)) continue;
       if (!settings.showHiddenFolders && _isHiddenPath(path)) continue;
-      if (settings.skipNomedia && _underNomedia(path)) continue;
       seen.add(path);
       final name = m['name'] as String? ?? p.basename(path);
       into.add(
@@ -633,24 +648,18 @@ bool looksLikeVideo(String path, {String? mime}) {
   }
   final name = p.basename(path).toLowerCase();
   if (name.endsWith('.d.ts')) return false;
-  try {
-    final f = File(path);
-    if (f.existsSync() && f.lengthSync() <= 0) return false;
-  } catch (_) {}
   final ext = p.extension(name).toLowerCase();
   final m = (mime ?? '').toLowerCase();
   if (m.startsWith('video/')) {
     if (ext == '.ts' && !m.contains('mp2t') && m != 'video/mp2t') {
       return _isMpegTsFile(path);
     }
-    if (_isPlainTextFile(path)) return false;
-    return true;
+    return !skipExtensions.contains(ext);
   }
   if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('text/')) return false;
-  if (ext == '.ts') return _isMpegTsFile(path);
   if (skipExtensions.contains(ext)) return false;
-  if (_isPlainTextFile(path)) return false;
-  if (videoExtensions.contains(ext)) return true;
+  if (ext == '.ts') return _isMpegTsFile(path);
+  if (videoExtensions.contains(ext)) return !_isPlainTextFile(path);
   return _hasVideoMagic(path);
 }
 
