@@ -92,6 +92,18 @@ class AndroidBridge {
     }
   }
 
+  /// True if the video's stream is HDR (HLG/PQ transfer, BT.2020 color) or an
+  /// HEVC Main10 (10-bit) profile. Checked from container metadata only - no
+  /// frames are decoded - so it's cheap enough to call before every open.
+  static Future<bool> isHdrVideo(String path) async {
+    try {
+      final raw = await _ch.invokeMethod<Map>('colorInfo', {'path': path});
+      return (raw?['isHdr'] as bool?) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> deletePath(String path) async {
     try {
       return await _ch.invokeMethod<bool>('deletePath', {'path': path}) ?? false;
