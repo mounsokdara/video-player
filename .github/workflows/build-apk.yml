@@ -34,15 +34,15 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: Video Player v1.0.1
+          tag_name: v1.0.2
+          name: Video Player v1.0.2
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           fail_on_unmatched_files: true
           prerelease: false
           make_latest: true
           generate_release_notes: false
           body: |
-            Changelog — v1.0.1
+            Changelog — v1.0.2
 
             Library
             - Videos tab: the whole row is tappable again (not only the thumbnail)
