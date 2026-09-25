@@ -9,6 +9,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
@@ -39,6 +40,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -355,6 +357,14 @@ open class MainActivity : FlutterActivity() {
                                 ?: return@setMethodCallHandler result.error("ARG", "path", null)
                             result.success(readMediaInfo(path))
                         }
+                        "probePlayback" -> {
+                            val path = call.argument<String>("path")
+                                ?: return@setMethodCallHandler result.error("ARG", "path", null)
+                            io.execute {
+                                val info = probePlayback(path)
+                                mainHandler.post { result.success(info) }
+                            }
+                        }
                         "pendingOpen" -> {
                             val path = pendingOpen
                             pendingOpen = null
@@ -556,6 +566,120 @@ open class MainActivity : FlutterActivity() {
             file.absolutePath
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun probePlayback(path: String): Map<String, Any?> {
+        val map = HashMap<String, Any?>()
+        map["hdr"] = false
+        map["tenBit"] = false
+        map["codec"] = ""
+        val extractor = MediaExtractor()
+        try {
+            if (path.startsWith("content:")) extractor.setDataSource(this, Uri.parse(path), null)
+            else extractor.setDataSource(path)
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/")) continue
+                map["codec"] = mime
+                val profile = if (format.containsKey(MediaFormat.KEY_PROFILE)) format.getInteger(MediaFormat.KEY_PROFILE) else 0
+                map["profile"] = profile
+                val hevc = mime.contains("hevc") || mime.contains("h265")
+                val av1 = mime.contains("av01") || mime.contains("av1")
+                val tenBit = when {
+                    hevc ->
+                        profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 ||
+                            profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10 ||
+                            (Build.VERSION.SDK_INT >= 29 && profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus) ||
+                            profile == 2 ||
+                            profile == 4096 ||
+                            profile == 8192
+                    av1 -> profile == 2 || profile == 4096 || profile == 16384
+                    mime.contains("avc") -> profile == 110 || profile == 122
+                    else -> false
+                }
+                var hdr = profile == 4096 || profile == 8192 ||
+                    (Build.VERSION.SDK_INT >= 29 && hevc && profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus)
+                if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER)) {
+                    val transfer = format.getInteger(MediaFormat.KEY_COLOR_TRANSFER)
+                    map["transfer"] = transfer
+                    hdr = hdr ||
+                        transfer == MediaFormat.COLOR_TRANSFER_HLG ||
+                        transfer == MediaFormat.COLOR_TRANSFER_ST2084
+                }
+                if (format.containsKey(MediaFormat.KEY_COLOR_STANDARD)) {
+                    val standard = format.getInteger(MediaFormat.KEY_COLOR_STANDARD)
+                    map["standard"] = standard
+                    hdr = hdr || standard == MediaFormat.COLOR_STANDARD_BT2020
+                }
+                map["tenBit"] = tenBit
+                map["hdr"] = hdr
+                break
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+        if (map["hdr"] != true && map["tenBit"] != true) {
+            scanMp4Hdr(path, map)
+        }
+        return map
+    }
+
+    private fun scanMp4Hdr(path: String, map: HashMap<String, Any?>) {
+        if (path.startsWith("content:")) return
+        try {
+            FileInputStream(path).use { fis ->
+                val buf = ByteArray(256 * 1024)
+                val n = fis.read(buf)
+                if (n <= 8) return
+                fun indexOf(sig: String): Int {
+                    val bytes = sig.toByteArray(Charsets.US_ASCII)
+                    val last = n - bytes.size
+                    var i = 0
+                    while (i <= last) {
+                        var ok = true
+                        var j = 0
+                        while (j < bytes.size) {
+                            if (buf[i + j] != bytes[j]) {
+                                ok = false
+                                break
+                            }
+                            j++
+                        }
+                        if (ok) return i
+                        i++
+                    }
+                    return -1
+                }
+                val hvc = indexOf("hvcC")
+                if (hvc >= 0 && hvc + 6 < n) {
+                    map["codec"] = "video/hevc"
+                    val profileIdc = buf[hvc + 5].toInt() and 0x1F
+                    map["profile"] = profileIdc
+                    if (profileIdc == 2 || profileIdc == 4) map["tenBit"] = true
+                }
+                val colr = indexOf("nclx")
+                if (colr >= 0 && colr + 7 < n) {
+                    val prim = ((buf[colr + 4].toInt() and 0xFF) shl 8) or (buf[colr + 5].toInt() and 0xFF)
+                    val transfer = ((buf[colr + 6].toInt() and 0xFF) shl 8) or (buf[colr + 7].toInt() and 0xFF)
+                    map["primaries"] = prim
+                    map["transfer"] = transfer
+                    if (transfer == 16 || transfer == 18 || prim == 9) {
+                        map["hdr"] = true
+                        map["tenBit"] = true
+                    }
+                }
+                if (indexOf("dvhe") >= 0 || indexOf("dvh1") >= 0 || indexOf("dby1") >= 0) {
+                    map["hdr"] = true
+                    map["tenBit"] = true
+                }
+            }
+        } catch (_: Exception) {
         }
     }
 

@@ -317,6 +317,21 @@ class AndroidBridge {
     return null;
   }
 
+  static Future<({bool hdr, bool tenBit, String codec})> probePlayback(String path) async {
+    try {
+      final raw = await _ch.invokeMethod('probePlayback', {'path': path});
+      if (raw is Map) {
+        final m = Map<String, dynamic>.from(raw);
+        return (
+          hdr: m['hdr'] == true,
+          tenBit: m['tenBit'] == true,
+          codec: '${m['codec'] ?? ''}',
+        );
+      }
+    } catch (_) {}
+    return (hdr: false, tenBit: false, codec: '');
+  }
+
   static Future<String?> pendingOpen() async {
     try {
       return await _ch.invokeMethod<String>('pendingOpen');

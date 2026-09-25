@@ -73,13 +73,23 @@ class PlaybackSession {
     bool forceSoftware = false,
     bool? hdr,
   }) async {
-    final chain = decoderChain(forceSoftware: forceSoftware);
+    var software = forceSoftware;
+    if (!software) {
+      try {
+        final probe = await AndroidBridge.probePlayback(path);
+        if (probe.hdr || probe.tenBit) software = true;
+      } catch (_) {}
+    }
+    final chain = decoderChain(forceSoftware: software);
     Object? last;
     for (var i = 0; i < chain.length; i++) {
       try {
         await engine.open(path, hwdec: chain[i], hdr: hdr);
         if (engine.value.hasError) {
           throw StateError(engine.value.errorDescription ?? 'Source error');
+        }
+        if (!engine.value.isInitialized) {
+          throw StateError('No picture');
         }
         return;
       } catch (e, s) {

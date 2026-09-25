@@ -9,6 +9,7 @@
 ### Changed
 - Hardware decode uses MediaCodec direct instead of copy (10-bit HEVC was stalling)
 - Library scan lists the system videos first, then SD / USB in parallel, without opening every file in a decoder
+- 10-bit / HDR clips decode with FFmpeg so the picture is tone-mapped onto the screen (Flutter cannot pass HDR through)
 
 ### Fixed
 - Only one video plays at a time, even with more than one window
@@ -17,6 +18,7 @@
 - YouTube landscape no longer crashes on a narrow or split-screen window
 - Picture pan and pinch need two fingers; one finger stays seek / brightness / volume
 - Sitting unused no longer shows a false crash report
+- HDR / 10-bit H.265 clips no longer finish with a black frame (hardware was reporting success with no picture)
 
 ## 1.0.1
 

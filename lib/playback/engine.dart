@@ -91,6 +91,8 @@ class PlaybackEngine extends ChangeNotifier {
         configuration: VideoControllerConfiguration(
           enableHardwareAcceleration: wantHw,
           hwdec: hwdec,
+          vo: wantHw ? null : 'gpu',
+          androidAttachSurfaceAfterVideoParameters: true,
         ),
       );
       _bind(player);
@@ -101,11 +103,15 @@ class PlaybackEngine extends ChangeNotifier {
     await _applyHdr(player, _hdr);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
-    await _waitReady(player);
+    await _waitReady(player, timeout: wantHw ? const Duration(seconds: 5) : const Duration(seconds: 12));
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
+    if (_closed) return;
     if (value.hasError) {
       throw StateError(value.errorDescription ?? 'Source error');
+    }
+    if (_pixels(player) <= 0) {
+      throw StateError('No picture');
     }
   }
 
@@ -166,7 +172,7 @@ class PlaybackEngine extends ChangeNotifier {
       if (platform is! NativePlayer) return;
       await _setNative(platform, 'target-prim', 'bt.709');
       await _setNative(platform, 'target-trc', on ? 'srgb' : 'bt.1886');
-      await _setNative(platform, 'tone-mapping', on ? 'auto' : 'clip');
+      await _setNative(platform, 'tone-mapping', on ? 'hable' : 'clip');
       await _setNative(platform, 'tone-mapping-mode', 'auto');
       await _setNative(platform, 'gamut-mapping-mode', on ? 'perceptual' : 'clip');
       await _setNative(platform, 'hdr-compute-peak', on ? 'yes' : 'no');
@@ -174,6 +180,12 @@ class PlaybackEngine extends ChangeNotifier {
       await _setNative(platform, 'target-peak', on ? '203' : '100');
       await _setNative(platform, 'target-colorspace-hint', 'no');
       await _setNative(platform, 'icc-profile-auto', 'no');
+      await _setNative(platform, 'video-output-levels', 'full');
+      if (on) {
+        await _setNative(platform, 'vf', '');
+      } else {
+        await _setNative(platform, 'vf', 'format:fmt=yuv420p:colormatrix=bt.709:primaries=bt.709');
+      }
     } catch (_) {}
   }
 
@@ -195,15 +207,13 @@ class PlaybackEngine extends ChangeNotifier {
     return Uri.file(path).toString();
   }
 
-  Future<void> _waitReady(Player player) async {
+  Future<void> _waitReady(Player player, {Duration timeout = const Duration(seconds: 12)}) async {
     final start = DateTime.now();
-    while (DateTime.now().difference(start) < const Duration(seconds: 12)) {
+    while (DateTime.now().difference(start) < timeout) {
       if (_closed) return;
       _emit(player);
       if (value.hasError) return;
-      if (player.state.duration > Duration.zero || _pixels(player) > 0 || player.state.playing) {
-        return;
-      }
+      if (_pixels(player) > 0) return;
       await Future<void>.delayed(const Duration(milliseconds: 40));
     }
   }
