@@ -55,40 +55,52 @@ class PlaybackSession {
   static bool get active => keepAlive && controller != null && item != null;
   static bool get away => _away;
 
-  static String hwdecName({bool forceSoftware = false}) => _hwdec(forceSoftware: forceSoftware);
+  static String hwdecName({bool forceSoftware = false}) => decoderChain(forceSoftware: forceSoftware).first;
 
-  static String _hwdec({bool forceSoftware = false}) {
+  static List<String> decoderChain({bool forceSoftware = false}) {
     if (forceSoftware || appSettings.decoder == DecoderMode.sw || !appSettings.hwPriority) {
-      return 'no';
+      return const ['no'];
     }
-    if (appSettings.decoder == DecoderMode.hw) return 'mediacodec-copy';
-    return 'auto-copy';
+    if (appSettings.decoder == DecoderMode.hw) {
+      return const ['mediacodec', 'mediacodec-copy', 'no'];
+    }
+    return const ['auto', 'mediacodec', 'no'];
   }
 
-  static Future<PlaybackEngine> openWithFallback(VideoItem next, {bool forceSoftware = false}) async {
-    try {
-      return await _openOnce(next.path, hwdec: _hwdec(forceSoftware: forceSoftware));
-    } catch (e, s) {
-      if (forceSoftware || _hwdec(forceSoftware: forceSoftware) == 'no') {
-        CrashLog.record('PLAY', '$e', s);
-        rethrow;
-      }
+  static Future<void> openOn(
+    PlaybackEngine engine,
+    String path, {
+    bool forceSoftware = false,
+    bool? hdr,
+  }) async {
+    final chain = decoderChain(forceSoftware: forceSoftware);
+    Object? last;
+    for (var i = 0; i < chain.length; i++) {
       try {
-        return await _openOnce(next.path, hwdec: 'no');
-      } catch (e2, s2) {
-        CrashLog.record('PLAY', '$e2', s2);
-        rethrow;
+        await engine.open(path, hwdec: chain[i], hdr: hdr);
+        if (engine.value.hasError) {
+          throw StateError(engine.value.errorDescription ?? 'Source error');
+        }
+        return;
+      } catch (e, s) {
+        last = e;
+        if (i == chain.length - 1) {
+          CrashLog.record('PLAY', '$e', s);
+          rethrow;
+        }
       }
     }
+    throw last ?? StateError('Source error');
   }
 
-  static Future<PlaybackEngine> _openOnce(String path, {required String hwdec}) async {
+  static Future<PlaybackEngine> openWithFallback(
+    VideoItem next, {
+    bool forceSoftware = false,
+    bool? hdr,
+  }) async {
     final c = PlaybackEngine();
     try {
-      await c.open(path, hwdec: hwdec);
-      if (c.value.hasError) {
-        throw StateError(c.value.errorDescription ?? 'Source error');
-      }
+      await openOn(c, next.path, forceSoftware: forceSoftware, hdr: hdr);
       return c;
     } catch (e) {
       try {
@@ -145,7 +157,7 @@ class PlaybackSession {
     if (_busy || !keepAlive) return;
     final current = item;
     final text = desc ?? '';
-    if (current != null && _hwdec() != 'no') {
+    if (current != null && decoderChain().first != 'no') {
       await CrashLog.breadcrumb('Retry software decoder ${current.path}');
       final list = playlist;
       final at = index;
@@ -451,12 +463,7 @@ class PlaybackSession {
       late final PlaybackEngine engine;
       if (existing != null && existing.hasPlayer) {
         engine = existing;
-        try {
-          await engine.open(next.path, hwdec: _hwdec(forceSoftware: forceSoftware));
-        } catch (_) {
-          if (forceSoftware || _hwdec(forceSoftware: forceSoftware) == 'no') rethrow;
-          await engine.open(next.path, hwdec: 'no');
-        }
+        await openOn(engine, next.path, forceSoftware: forceSoftware);
       } else {
         engine = await openWithFallback(next, forceSoftware: forceSoftware);
         created = engine;

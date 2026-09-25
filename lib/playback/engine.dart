@@ -39,6 +39,7 @@ class PlaybackEngine extends ChangeNotifier {
   EngineValue value = const EngineValue();
   bool _closed = false;
   String? _hwdec;
+  bool _hdr = true;
   Future<void>? _inFlight;
   double _rate = 1;
   bool _pitchShift = false;
@@ -46,7 +47,8 @@ class PlaybackEngine extends ChangeNotifier {
 
   bool get hasPlayer => _player != null && !_closed;
 
-  Future<void> open(String path, {required String hwdec}) async {
+  Future<void> open(String path, {required String hwdec, bool? hdr}) async {
+    if (hdr != null) _hdr = hdr;
     await _queue(() => _openBody(path, hwdec: hwdec));
   }
 
@@ -70,13 +72,12 @@ class PlaybackEngine extends ChangeNotifier {
     _closed = false;
     _alive.add(this);
     await _pauseOthers();
-    final wantHw = hwdec != 'no';
-    final hadHw = _hwdec != null && _hwdec != 'no';
-    if (_player != null && wantHw != hadHw) {
+    if (_player != null && _hwdec != null && _hwdec != hwdec) {
       await _disposePlayer();
     }
     value = const EngineValue();
     notifyListeners();
+    final wantHw = hwdec != 'no';
     if (_player == null) {
       final player = Player(
         configuration: const PlayerConfiguration(
@@ -97,6 +98,7 @@ class PlaybackEngine extends ChangeNotifier {
     final player = _player!;
     _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
+    await _applyHdr(player, _hdr);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
@@ -118,6 +120,13 @@ class PlaybackEngine extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> applyHdr(bool on) async {
+    _hdr = on;
+    final player = _player;
+    if (player == null) return;
+    await _applyHdr(player, on);
+  }
+
   Future<void> _applyPitchCorrection(Player player, bool pitchShift) async {
     try {
       final platform = player.platform;
@@ -131,19 +140,46 @@ class PlaybackEngine extends ChangeNotifier {
     try {
       final platform = player.platform;
       if (platform is NativePlayer) {
-        await platform.setProperty('hwdec', hwdec);
-        try {
-          await platform.setProperty('hwdec-codecs', 'h264,hevc,vp8,vp9,av1,mpeg4,mpeg2video');
-        } catch (_) {}
-        try {
-          await platform.setProperty('video-sync', 'audio');
-        } catch (_) {}
-        try {
-          await platform.setProperty('vd-lavc-dr', 'no');
-        } catch (_) {}
+        await _setNative(platform, 'hwdec', hwdec);
+        await _setNative(platform, 'hwdec-codecs', 'h264,hevc,vp8,vp9,av1,mpeg4,mpeg2video,mjpeg');
+        await _setNative(platform, 'hwdec-extra-frames', '8');
+        await _setNative(platform, 'hwdec-software-fallback', '1');
+        await _setNative(platform, 'gpu-hwdec-interop', 'auto');
+        await _setNative(platform, 'video-sync', 'audio');
+        await _setNative(platform, 'vd-lavc-dr', 'no');
+        await _setNative(platform, 'vd-lavc-threads', '0');
+        await _setNative(platform, 'scale', 'bilinear');
+        await _setNative(platform, 'cscale', 'bilinear');
+        await _setNative(platform, 'dscale', 'bilinear');
+        await _setNative(platform, 'dither', 'no');
+        await _setNative(platform, 'deband', 'no');
+        await _setNative(platform, 'video-output-levels', 'full');
         return;
       }
       await (platform as dynamic).setProperty('hwdec', hwdec);
+    } catch (_) {}
+  }
+
+  Future<void> _applyHdr(Player player, bool on) async {
+    try {
+      final platform = player.platform;
+      if (platform is! NativePlayer) return;
+      await _setNative(platform, 'target-prim', 'bt.709');
+      await _setNative(platform, 'target-trc', on ? 'srgb' : 'bt.1886');
+      await _setNative(platform, 'tone-mapping', on ? 'auto' : 'clip');
+      await _setNative(platform, 'tone-mapping-mode', 'auto');
+      await _setNative(platform, 'gamut-mapping-mode', on ? 'perceptual' : 'clip');
+      await _setNative(platform, 'hdr-compute-peak', on ? 'yes' : 'no');
+      await _setNative(platform, 'allow-delayed-peak-detect', on ? 'yes' : 'no');
+      await _setNative(platform, 'target-peak', on ? '203' : '100');
+      await _setNative(platform, 'target-colorspace-hint', 'no');
+      await _setNative(platform, 'icc-profile-auto', 'no');
+    } catch (_) {}
+  }
+
+  Future<void> _setNative(NativePlayer platform, String key, String value) async {
+    try {
+      await platform.setProperty(key, value);
     } catch (_) {}
   }
 

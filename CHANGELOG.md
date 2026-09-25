@@ -2,16 +2,17 @@
 
 ## 1.0.2
 
-Library
-- Video scan is much faster: the system video list shows first, then SD / USB folders fill in
-- Scan no longer opens every file in a decoder just to list it
-- SD and USB volumes are scanned together
-- Text files named like videos are still skipped
-- `.nomedia` folders are still skipped by default
+### Added
+- H.265 / HEVC Main 10 hardware decode (MediaCodec), with FFmpeg software fallback
+- HDR tone-mapping for HLG / PQ / BT.2020; the HDR/SDR button now drives the player
 
-Player
+### Changed
+- Hardware decode uses MediaCodec direct instead of copy (10-bit HEVC was stalling)
+- Library scan lists the system videos first, then SD / USB in parallel, without opening every file in a decoder
+
+### Fixed
 - Only one video plays at a time, even with more than one window
-- The playback notification keeps title, play/pause, and position in sync
+- Playback notification title, play/pause, and position stay in sync
 - Leaving a video no longer crashes when the notification starts
 - YouTube landscape no longer crashes on a narrow or split-screen window
 - Picture pan and pinch need two fingers; one finger stays seek / brightness / volume
@@ -19,31 +20,17 @@ Player
 
 ## 1.0.1
 
-Library
-- Videos tab: the whole row is tappable again (not only the thumbnail)
-- Videos tab: checkbox sits on the right while selecting, like Folders
-- Other apps' Open-from / Get content / Pick opens the in-app video picker instead of a Files folder
+### Added
+- Playlist UI style: bottom dialog sheet (default) or YouTube watch page
+- In-app video picker for other apps' Open-from / Get content / Pick
 
-Player style
-- Playlist UI style is now Player style: bottom dialog sheet (default) or YouTube watch page
-- YouTube style is a watch page, not a bottom sheet
-- Watch page: video on top, details under the frame, Up next list below (or on the right in landscape)
-- Portrait watch frame grows and shrinks with scroll, up to 9:16
-- Landscape / wide: video top-left, details under it, list on the right
-- Animated maximize and minimize
-- Title-bar buttons stay available on the minimized YouTube frame
-- No playlist button on YouTube style
-- Maximize only shows with the player controls (no floating maximize)
-- Filter chips scroll horizontally
+### Changed
+- Videos tab: whole row is tappable; checkbox sits on the right while selecting
+- YouTube style is a watch page (video, details, Up next), not a bottom sheet
+- Maximize only shows with the player controls
+- Mini player window scales to the screen (16:9 landscape, 9:16 portrait)
 
-Gestures and picture
-- Only one gesture at a time: pinch zoom no longer starts seek
-- Quick gestures stay off while the YouTube frame is minimized
-- Double-tap seek works on the minimized watch frame, with Material 3 ripples
-- Zoom resets when minimizing
+### Fixed
+- Pinch zoom no longer starts seek at the same time
 - Original size uses the video's real pixels and never upscales
-
-Mini player
-- Window scales to the screen
-- Landscape docks at 16:9, portrait at 9:16
-- Pinch resize no longer loops or resets
+- Pinch resize on the mini player no longer loops or resets

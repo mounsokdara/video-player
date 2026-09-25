@@ -186,6 +186,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       _applySystemUi();
       _applyRotation();
       _applySpeed();
+      unawaited(vc?.applyHdr(hdr));
       _armHide();
     } else {
       unawaited(_startNew());
@@ -352,6 +353,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     }
   }
 
+  Future<void> _toggleHdr() async {
+    setState(() => hdr = !hdr);
+    appSettings.hdrOn = hdr;
+    if (appSettings.rememberHdr) await appSettings.save();
+    try {
+      await vc?.applyHdr(hdr);
+    } catch (e, s) {
+      CrashLog.record('HDR', '$e', s);
+    }
+    _flash(hdr ? 'HDR' : 'SDR');
+  }
+
   Future<void> _persistProgress() async {
     final c = vc;
     if (c == null || !c.value.isInitialized) return;
@@ -383,13 +396,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       late final PlaybackEngine engine;
       if (existing != null && existing.hasPlayer) {
         engine = existing;
-        try {
-          await engine.open(item.path, hwdec: PlaybackSession.hwdecName());
-        } catch (_) {
-          await engine.open(item.path, hwdec: 'no');
-        }
+        await PlaybackSession.openOn(engine, item.path, hdr: hdr);
       } else {
-        engine = await PlaybackSession.openWithFallback(item);
+        engine = await PlaybackSession.openWithFallback(item, hdr: hdr);
         opened = engine;
         if (!mounted || gen != _playerGen) {
           try {
@@ -422,6 +431,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       PlaybackSession.bind(engine, item);
       _openFails = 0;
       _endedLatch = false;
+      await engine.applyHdr(hdr);
       await AndroidBridge.requestAudioFocus();
       await engine.play();
       _lastPlaying = true;
@@ -1461,7 +1471,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     switch (id) {
       case 'hdr':
         return TextButton(
-          onPressed: () => setState(() => hdr = !hdr),
+          onPressed: () => unawaited(_toggleHdr()),
           child: Text(hdr ? 'HDR' : 'SDR', style: TextStyle(color: hdr ? Colors.white : Colors.white54, fontWeight: FontWeight.w700)),
         );
       case 'eq':
@@ -1792,6 +1802,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   Future<void> _runAction(String id) async {
     switch (id) {
+      case 'hdr':
+        await _toggleHdr();
       case 'lock':
         setState(() {
           locked = true;

@@ -36,6 +36,8 @@ Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files st
 ## Player
 
 - libmpv playback, one video at a time
+- H.265 / HEVC (including 10-bit) hardware decode, FFmpeg software fallback
+- HDR tone-mapping (HLG / PQ / BT.2020); HDR/SDR title button drives the player
 - Hardware, software, or auto decoder (HW priority optional)
 - Player style:
   - Bottom dialog sheet (default): fullscreen player, playlist as a Material sheet
