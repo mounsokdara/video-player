@@ -1025,7 +1025,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     final box = videoBox ?? size;
     Widget videoChild() {
       try {
-        if (c != null && c.video != null) {
+        if (c != null && c.hasPlayer) {
           final w = box.width <= 0 ? 1.0 : box.width;
           final h = box.height <= 0 ? 1.0 : box.height;
           return _video(c, Size(w, h));
@@ -1428,7 +1428,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Widget _video(PlaybackEngine c, Size screen) {
     if (_handedOff) return const ColoredBox(color: Colors.black);
     try {
-      if (!c.hasPlayer || c.video == null) {
+      if (!c.hasPlayer) {
         return const SizedBox.expand(child: Center(child: CircularProgressIndicator()));
       }
     } catch (_) {

@@ -560,7 +560,7 @@ class _MiniPlayerOverlayState extends State<MiniPlayerOverlay>
 
     Widget frame;
     try {
-      if (c != null && c.video != null) {
+      if (c != null && c.hasPlayer) {
         frame = VideoPicture(
           looks: PictureLooks.current(),
           child: ColoredBox(

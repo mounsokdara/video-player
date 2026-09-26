@@ -2,6 +2,7 @@ package com.mounsokdara.video_player
 
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.content.pm.ActivityInfo
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ContentUris
@@ -83,6 +84,9 @@ open class MainActivity : FlutterActivity() {
         ) { isPlaying = it }
         appNative = AppNative(this, systemBars, audioFocus, equalizer)
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 26) {
+            window.colorMode = ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+        }
         systemBars.enableEdgeToEdge()
         NativeCrashLog.installHook(this) { emit(it) }
         handleIncoming(intent)

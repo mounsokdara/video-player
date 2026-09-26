@@ -45,6 +45,7 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
+            android:colorMode="wideColorGamut"
             android:windowSoftInputMode="adjustResize"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
@@ -56,6 +57,9 @@
             <meta-data
                 android:name="flutter_deeplinking_enabled"
                 android:value="false" />
+            <meta-data
+                android:name="io.flutter.embedded_views_preview"
+                android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -99,6 +103,7 @@
             android:documentLaunchMode="never"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
+            android:colorMode="wideColorGamut"
             android:windowSoftInputMode="adjustResize"
             android:screenOrientation="unspecified">
             <meta-data

@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player_hdr/video_player_hdr.dart';
 
 class EngineValue {
   const EngineValue({
@@ -35,17 +37,19 @@ class PlaybackEngine extends ChangeNotifier {
 
   Player? _player;
   VideoController? video;
+  VideoPlayerHdrController? hdrPlayer;
   final _subs = <StreamSubscription<dynamic>>[];
   EngineValue value = const EngineValue();
   bool _closed = false;
   String? _hwdec;
   bool _hdr = true;
+  String? _path;
   Future<void>? _inFlight;
   double _rate = 1;
   bool _pitchShift = false;
   bool wantPlay = false;
 
-  bool get hasPlayer => _player != null && !_closed;
+  bool get hasPlayer => !_closed && (_player != null || hdrPlayer != null);
 
   Future<void> open(String path, {required String hwdec, bool? hdr}) async {
     if (hdr != null) _hdr = hdr;
@@ -72,11 +76,77 @@ class PlaybackEngine extends ChangeNotifier {
     _closed = false;
     _alive.add(this);
     await _pauseOthers();
-    if (_player != null && _hwdec != null && _hwdec != hwdec) {
-      await _disposePlayer();
-    }
+    _path = path;
     value = const EngineValue();
     notifyListeners();
+    if (_hdr) {
+      _hwdec = hwdec;
+      await _openHdr(path);
+      return;
+    }
+    await _openMpv(path, hwdec);
+  }
+
+  Future<void> _openHdr(String path) async {
+    await _disposeMpv();
+    await _disposeHdr();
+    final controller = _hdrControllerFor(path);
+    hdrPlayer = controller;
+    notifyListeners();
+    controller.addListener(_onHdr);
+    await controller.initialize(viewType: VideoViewType.platformView);
+    if (_closed) {
+      await _disposeHdr();
+      return;
+    }
+    try {
+      await controller.setPlaybackSpeed(_rate <= 0 ? 1 : _rate);
+    } catch (_) {}
+    _onHdr();
+    if (value.hasError) {
+      throw StateError(value.errorDescription ?? 'Source error');
+    }
+    if (!value.isInitialized) {
+      throw StateError('Source error');
+    }
+  }
+
+  VideoPlayerHdrController _hdrControllerFor(String path) {
+    if (path.startsWith('content:')) {
+      return VideoPlayerHdrController.contentUri(Uri.parse(path));
+    }
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return VideoPlayerHdrController.networkUrl(Uri.parse(path));
+    }
+    if (path.startsWith('file:')) {
+      return VideoPlayerHdrController.file(File(Uri.parse(path).toFilePath()));
+    }
+    return VideoPlayerHdrController.file(File(path));
+  }
+
+  void _onHdr() {
+    final c = hdrPlayer;
+    if (c == null) return;
+    final v = c.value;
+    value = EngineValue(
+      isInitialized: v.isInitialized,
+      isPlaying: v.isPlaying,
+      isBuffering: v.isBuffering,
+      hasError: v.hasError,
+      completed: v.isCompleted,
+      errorDescription: v.errorDescription,
+      position: v.position,
+      duration: v.duration,
+      size: v.size,
+    );
+    notifyListeners();
+  }
+
+  Future<void> _openMpv(String path, String hwdec) async {
+    await _disposeHdr();
+    if (_player != null && _hwdec != null && _hwdec != hwdec) {
+      await _disposeMpv();
+    }
     final wantHw = hwdec != 'no';
     if (_player == null) {
       final player = Player(
@@ -91,8 +161,6 @@ class PlaybackEngine extends ChangeNotifier {
         configuration: VideoControllerConfiguration(
           enableHardwareAcceleration: wantHw,
           hwdec: hwdec,
-          vo: wantHw ? null : 'gpu',
-          androidAttachSurfaceAfterVideoParameters: true,
         ),
       );
       _bind(player);
@@ -100,24 +168,27 @@ class PlaybackEngine extends ChangeNotifier {
     final player = _player!;
     _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
-    await _applyHdr(player, _hdr);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
-    await _waitReady(player, timeout: wantHw ? const Duration(seconds: 5) : const Duration(seconds: 12));
+    await _waitReady(player);
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (_closed) return;
     if (value.hasError) {
       throw StateError(value.errorDescription ?? 'Source error');
     }
-    if (_pixels(player) <= 0) {
-      throw StateError('No picture');
-    }
   }
 
   Future<void> applyTempo({required double rate, required bool pitchShift}) async {
     _rate = rate.clamp(0.25, 8.0).toDouble();
     _pitchShift = pitchShift;
+    final hdr = hdrPlayer;
+    if (hdr != null) {
+      try {
+        await hdr.setPlaybackSpeed(_rate);
+      } catch (_) {}
+      return;
+    }
     final player = _player;
     if (player == null) return;
     await _applyPitchCorrection(player, pitchShift);
@@ -127,10 +198,23 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> applyHdr(bool on) async {
+    if (_hdr == on) return;
     _hdr = on;
-    final player = _player;
-    if (player == null) return;
-    await _applyHdr(player, on);
+    final path = _path;
+    if (path == null) return;
+    final pos = value.position;
+    final playing = wantPlay;
+    await open(path, hwdec: _hwdec ?? 'mediacodec', hdr: on);
+    if (pos > Duration.zero) {
+      try {
+        await seekTo(pos);
+      } catch (_) {}
+    }
+    if (playing) {
+      await play();
+    } else {
+      await pause();
+    }
   }
 
   Future<void> _applyPitchCorrection(Player player, bool pitchShift) async {
@@ -148,44 +232,11 @@ class PlaybackEngine extends ChangeNotifier {
       if (platform is NativePlayer) {
         await _setNative(platform, 'hwdec', hwdec);
         await _setNative(platform, 'hwdec-codecs', 'h264,hevc,vp8,vp9,av1,mpeg4,mpeg2video,mjpeg');
-        await _setNative(platform, 'hwdec-extra-frames', '8');
-        await _setNative(platform, 'hwdec-software-fallback', '1');
-        await _setNative(platform, 'gpu-hwdec-interop', 'auto');
         await _setNative(platform, 'video-sync', 'audio');
         await _setNative(platform, 'vd-lavc-dr', 'no');
-        await _setNative(platform, 'vd-lavc-threads', '0');
-        await _setNative(platform, 'scale', 'bilinear');
-        await _setNative(platform, 'cscale', 'bilinear');
-        await _setNative(platform, 'dscale', 'bilinear');
-        await _setNative(platform, 'dither', 'no');
-        await _setNative(platform, 'deband', 'no');
-        await _setNative(platform, 'video-output-levels', 'full');
         return;
       }
       await (platform as dynamic).setProperty('hwdec', hwdec);
-    } catch (_) {}
-  }
-
-  Future<void> _applyHdr(Player player, bool on) async {
-    try {
-      final platform = player.platform;
-      if (platform is! NativePlayer) return;
-      await _setNative(platform, 'target-prim', 'bt.709');
-      await _setNative(platform, 'target-trc', on ? 'srgb' : 'bt.1886');
-      await _setNative(platform, 'tone-mapping', on ? 'hable' : 'clip');
-      await _setNative(platform, 'tone-mapping-mode', 'auto');
-      await _setNative(platform, 'gamut-mapping-mode', on ? 'perceptual' : 'clip');
-      await _setNative(platform, 'hdr-compute-peak', on ? 'yes' : 'no');
-      await _setNative(platform, 'allow-delayed-peak-detect', on ? 'yes' : 'no');
-      await _setNative(platform, 'target-peak', on ? '203' : '100');
-      await _setNative(platform, 'target-colorspace-hint', 'no');
-      await _setNative(platform, 'icc-profile-auto', 'no');
-      await _setNative(platform, 'video-output-levels', 'full');
-      if (on) {
-        await _setNative(platform, 'vf', '');
-      } else {
-        await _setNative(platform, 'vf', 'format:fmt=yuv420p:colormatrix=bt.709:primaries=bt.709');
-      }
     } catch (_) {}
   }
 
@@ -207,13 +258,15 @@ class PlaybackEngine extends ChangeNotifier {
     return Uri.file(path).toString();
   }
 
-  Future<void> _waitReady(Player player, {Duration timeout = const Duration(seconds: 12)}) async {
+  Future<void> _waitReady(Player player) async {
     final start = DateTime.now();
-    while (DateTime.now().difference(start) < timeout) {
+    while (DateTime.now().difference(start) < const Duration(seconds: 12)) {
       if (_closed) return;
       _emit(player);
       if (value.hasError) return;
-      if (_pixels(player) > 0) return;
+      if (player.state.duration > Duration.zero || _pixels(player) > 0 || player.state.playing) {
+        return;
+      }
       await Future<void>.delayed(const Duration(milliseconds: 40));
     }
   }
@@ -297,11 +350,19 @@ class PlaybackEngine extends ChangeNotifier {
     wantPlay = true;
     _alive.add(this);
     await _pauseOthers();
+    if (hdrPlayer != null) {
+      await hdrPlayer!.play();
+      return;
+    }
     await _player?.play();
   }
 
   Future<void> pause() async {
     wantPlay = false;
+    if (hdrPlayer != null) {
+      await hdrPlayer!.pause();
+      return;
+    }
     await _player?.pause();
   }
 
@@ -310,17 +371,29 @@ class PlaybackEngine extends ChangeNotifier {
     for (final e in others) {
       e.wantPlay = false;
       try {
+        await e.hdrPlayer?.pause();
+      } catch (_) {}
+      try {
         await e._player?.pause();
       } catch (_) {}
     }
   }
 
   Future<void> seekTo(Duration d) async {
+    if (hdrPlayer != null) {
+      await hdrPlayer!.seekTo(d);
+      return;
+    }
     await _player?.seek(d);
   }
 
   Future<void> setVolume(double v) async {
-    await _player?.setVolume((v.clamp(0.0, 1.0) * 100).toDouble());
+    final vol = v.clamp(0.0, 1.0).toDouble();
+    if (hdrPlayer != null) {
+      await hdrPlayer!.setVolume(vol);
+      return;
+    }
+    await _player?.setVolume(vol * 100);
   }
 
   Future<void> setPlaybackSpeed(double r) async {
@@ -328,6 +401,10 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> setLooping(bool on) async {
+    if (hdrPlayer != null) {
+      await hdrPlayer!.setLooping(on);
+      return;
+    }
     await _player?.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
   }
 
@@ -336,7 +413,8 @@ class PlaybackEngine extends ChangeNotifier {
     _closed = true;
     wantPlay = false;
     _alive.remove(this);
-    await _disposePlayer();
+    await _disposeHdr();
+    await _disposeMpv();
     super.dispose();
   }
 
@@ -345,8 +423,22 @@ class PlaybackEngine extends ChangeNotifier {
     unawaited(close());
   }
 
-  Future<void> _disposePlayer() async {
-    _alive.remove(this);
+  Future<void> _disposeHdr() async {
+    final c = hdrPlayer;
+    hdrPlayer = null;
+    if (c == null) return;
+    try {
+      c.removeListener(_onHdr);
+    } catch (_) {}
+    try {
+      await c.pause();
+    } catch (_) {}
+    try {
+      await c.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _disposeMpv() async {
     for (final s in _subs) {
       try {
         await s.cancel();
@@ -356,9 +448,10 @@ class PlaybackEngine extends ChangeNotifier {
     final p = _player;
     _player = null;
     video = null;
-    _hwdec = null;
-    value = const EngineValue();
-    notifyListeners();
+    if (hdrPlayer == null) {
+      value = const EngineValue();
+      notifyListeners();
+    }
     if (p == null) return;
     try {
       await p.pause();
@@ -390,11 +483,13 @@ class AppVideo extends StatefulWidget {
 
 class _AppVideoState extends State<AppVideo> {
   VideoController? _controller;
+  VideoPlayerHdrController? _hdr;
 
   @override
   void initState() {
     super.initState();
     _controller = widget.engine.video;
+    _hdr = widget.engine.hdrPlayer;
     widget.engine.addListener(_onEngine);
   }
 
@@ -405,6 +500,7 @@ class _AppVideoState extends State<AppVideo> {
       oldWidget.engine.removeListener(_onEngine);
       widget.engine.addListener(_onEngine);
       _controller = widget.engine.video;
+      _hdr = widget.engine.hdrPlayer;
     }
   }
 
@@ -416,13 +512,26 @@ class _AppVideoState extends State<AppVideo> {
 
   void _onEngine() {
     final next = widget.engine.video;
-    if (!identical(next, _controller) && mounted) {
-      setState(() => _controller = next);
+    final hdr = widget.engine.hdrPlayer;
+    if ((!identical(next, _controller) || !identical(hdr, _hdr)) && mounted) {
+      setState(() {
+        _controller = next;
+        _hdr = hdr;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final hdr = _hdr;
+    if (hdr != null) {
+      Widget child = VideoPlayerHdr(hdr);
+      final rot = hdr.value.rotationCorrection;
+      if (rot == 90 || rot == 180 || rot == 270) {
+        child = RotatedBox(quarterTurns: rot ~/ 90, child: child);
+      }
+      return ColoredBox(color: Colors.black, child: child);
+    }
     final c = _controller;
     if (c == null) return const ColoredBox(color: Colors.black);
     return Video(

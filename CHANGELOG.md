@@ -3,13 +3,13 @@
 ## 1.0.2
 
 ### Added
-- H.265 / HEVC Main 10 hardware decode (MediaCodec), with FFmpeg software fallback
-- HDR tone-mapping for HLG / PQ / BT.2020; the HDR/SDR button now drives the player
+- HDR playback through a platform view (`video_player_hdr` / ExoPlayer) so HLG and 10-bit H.265 can show on screen
+- H.265 / HEVC remains enabled for the libmpv path (SDR)
 
 ### Changed
-- Hardware decode uses MediaCodec direct instead of copy (10-bit HEVC was stalling)
+- HDR/SDR now switches between the platform-view HDR player and libmpv (the old HDR tone-map path was a black frame)
+- Hardware decode uses MediaCodec direct instead of copy
 - Library scan lists the system videos first, then SD / USB in parallel, without opening every file in a decoder
-- 10-bit / HDR clips decode with FFmpeg so the picture is tone-mapped onto the screen (Flutter cannot pass HDR through)
 
 ### Fixed
 - Only one video plays at a time, even with more than one window
@@ -18,7 +18,6 @@
 - YouTube landscape no longer crashes on a narrow or split-screen window
 - Picture pan and pinch need two fingers; one finger stays seek / brightness / volume
 - Sitting unused no longer shows a false crash report
-- HDR / 10-bit H.265 clips no longer finish with a black frame (hardware was reporting success with no picture)
 
 ## 1.0.1
 
