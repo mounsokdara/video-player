@@ -42,8 +42,6 @@ class RenderSettings {
   ResMode resMode = ResMode.autoVideo;
   int resValue = 1080;
 
-  bool fastDecode = true;
-
   int peakHdr = defaultPeakHdr;
   int gammaHdr = 0;
   int peakSdr = defaultPeakSdr;
@@ -86,7 +84,6 @@ class RenderSettings {
       final p = await SharedPreferences.getInstance();
       resMode = ResMode.values[(p.getInt('rs_resMode') ?? 0).clamp(0, ResMode.values.length - 1)];
       resValue = (p.getInt('rs_resValue') ?? 1080).clamp(resMin, resMax);
-      fastDecode = p.getBool('rs_fastDecode') ?? true;
       peakHdr = (p.getInt('rs_peakHdr') ?? p.getInt('hdrPeak') ?? defaultPeakHdr).clamp(50, 2000);
       gammaHdr = (p.getInt('rs_gammaHdr') ?? p.getInt('hdrGamma') ?? 0).clamp(-100, 100);
       peakSdr = (p.getInt('rs_peakSdr') ?? defaultPeakSdr).clamp(50, 2000);
@@ -99,7 +96,6 @@ class RenderSettings {
       final p = await SharedPreferences.getInstance();
       await p.setInt('rs_resMode', resMode.index);
       await p.setInt('rs_resValue', resValue);
-      await p.setBool('rs_fastDecode', fastDecode);
       await p.setInt('rs_peakHdr', peakHdr);
       await p.setInt('rs_gammaHdr', gammaHdr);
       await p.setInt('rs_peakSdr', peakSdr);
@@ -184,14 +180,6 @@ class RenderCaps {
   }
 }
 
-class RenderExtra {
-  const RenderExtra(this.token, this.filter);
-
-  final String token;
-
-  final String filter;
-}
-
 class RenderPlan {
   const RenderPlan({
     required this.baseline,
@@ -202,12 +190,12 @@ class RenderPlan {
 
   final String baseline;
 
-  final List<RenderExtra> extras;
+  final List<String> extras;
 
   final int? outW;
   final int? outH;
 
-  String get key => [...extras.map((e) => e.filter), if (baseline.isNotEmpty) baseline].join(',');
+  String get key => [...extras, if (baseline.isNotEmpty) baseline].join(',');
 
   String describe(SourceInfo src) {
     final size = outW != null ? '${src.w}x${src.h}->${outW}x$outH' : '${src.w}x${src.h}';
@@ -223,7 +211,7 @@ class RenderProfile {
     required SourceInfo src,
     required ScreenInfo screen,
   }) {
-    final extras = <RenderExtra>[];
+    final extras = <String>[];
 
     int? limit;
     switch (settings.resMode) {
@@ -242,7 +230,7 @@ class RenderProfile {
         final f = limit / short;
         outW = _even(src.w * f);
         outH = _even(src.h * f);
-        extras.add(RenderExtra('scale', 'lavfi=[scale=w=$outW:h=$outH]'));
+        extras.add('lavfi=[scale=w=$outW:h=$outH]');
       }
     }
 
