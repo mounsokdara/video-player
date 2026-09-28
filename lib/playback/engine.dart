@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'package:video_player_app/core/developer_log.dart';
+
 class EngineValue {
   const EngineValue({
     this.isInitialized = false,
@@ -43,6 +45,7 @@ class PlaybackEngine extends ChangeNotifier {
   double _rate = 1;
   bool _pitchShift = false;
   bool wantPlay = false;
+  bool _eightBit = false;
 
   bool get hasPlayer => _player != null && !_closed;
 
@@ -82,6 +85,7 @@ class PlaybackEngine extends ChangeNotifier {
         configuration: const PlayerConfiguration(
           pitch: false,
           title: 'Video Player',
+          logLevel: MPVLogLevel.warn,
         ),
       );
       _player = player;
@@ -97,9 +101,11 @@ class PlaybackEngine extends ChangeNotifier {
     final player = _player!;
     _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
+    await _applyHdrPipeline(player);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
+    await _adaptForDeepColor(player);
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (value.hasError) {
@@ -145,6 +151,58 @@ class PlaybackEngine extends ChangeNotifier {
       }
       await (platform as dynamic).setProperty('hwdec', hwdec);
     } catch (_) {}
+  }
+
+  Future<void> _setProp(Player player, String name, String value) async {
+    try {
+      final platform = player.platform;
+      if (platform is NativePlayer) await platform.setProperty(name, value);
+    } catch (_) {}
+  }
+
+  Future<String> _getProp(Player player, String name) async {
+    try {
+      final platform = player.platform;
+      if (platform is NativePlayer) {
+        return (await platform.getProperty(name)).trim().toLowerCase();
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  /// Flutter shows the video through an SDR surface, so HDR (PQ / HLG,
+  /// BT.2020) has to be tone-mapped down to SDR by mpv's GPU renderer.
+  /// Resets per-file state and sets tone-mapping options that work on GLES.
+  Future<void> _applyHdrPipeline(Player player) async {
+    _eightBit = false;
+    await _setProp(player, 'vf', '');
+    await _setProp(player, 'target-prim', 'bt.709');
+    await _setProp(player, 'target-trc', 'srgb');
+    await _setProp(player, 'tone-mapping', 'hable');
+    // Peak detection needs compute shaders, which most GLES 3.0 GPUs lack.
+    await _setProp(player, 'hdr-compute-peak', 'no');
+  }
+
+  /// Many Android GPUs cannot sample 10-bit (16-bit unorm) textures from the
+  /// GLES renderer, which shows up as a black picture with working audio.
+  /// If the decoded frames are HDR or >8-bit, convert them to 8-bit on the
+  /// CPU first; the colour tags survive, so tone-mapping still happens.
+  Future<void> _adaptForDeepColor(Player player) async {
+    if (_closed || _hwdec == null || _hwdec == 'no' || _eightBit) return;
+    var pix = '';
+    for (var i = 0; i < 25 && !_closed; i++) {
+      pix = await _getProp(player, 'video-params/pixelformat');
+      if (pix.isNotEmpty) break;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
+    final gamma = await _getProp(player, 'video-params/gamma');
+    final hdr = gamma == 'pq' || gamma == 'hlg';
+    final deep = RegExp(r'p0(10|12|16)|p(10|12|14|16)(le|be)?$').hasMatch(pix);
+    DeveloperLog.append('video pixfmt=$pix gamma=$gamma hdr=$hdr deep=$deep hwdec=$_hwdec');
+    if (!hdr && !deep) return;
+    _eightBit = true;
+    await _setProp(player, 'vf', 'format=yuv420p');
+    DeveloperLog.append('HDR/10-bit source: forcing 8-bit yuv420p before GL upload');
   }
 
   String _mediaUri(String path) {
@@ -213,6 +271,7 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.buffering.listen((_) => push()),
       player.stream.width.listen((_) => push()),
       player.stream.height.listen((_) => push()),
+      player.stream.log.listen((e) => DeveloperLog.append('mpv[${e.prefix}] ${e.text.trim()}')),
       player.stream.error.listen((e) {
         value = EngineValue(
           isInitialized: value.isInitialized,
