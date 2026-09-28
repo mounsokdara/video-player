@@ -151,9 +151,7 @@ class PlaybackEngine extends ChangeNotifier {
           await platform.setProperty('video-sync', 'audio');
         } catch (_) {}
         try {
-          // Keep decoder frames zero-copy where possible. Disabling direct rendering
-          // forces expensive frame copies and is especially costly for 10-bit HDR.
-          await platform.setProperty('vd-lavc-dr', 'yes');
+          await platform.setProperty('vd-lavc-dr', 'no');
         } catch (_) {}
         return;
       }
@@ -221,9 +219,7 @@ class PlaybackEngine extends ChangeNotifier {
     return matrix.contains('2020');
   }
 
-  // HDR should stay on the hardware decoder when one is available. Forcing
-  // software decode here makes 10-bit HEVC/H.264 HDR unnecessarily expensive.
-  static const _hdrSoftwareDecode = false;
+  static const _hdrSoftwareDecode = true;
 
   /// HDR brightness tuning (saved, adjustable live from the HDR button).
   /// hdrPeak: nits mpv treats as the screen's white. Higher = darker picture,
@@ -268,8 +264,8 @@ class PlaybackEngine extends ChangeNotifier {
     }
   }
 
-  /// HDR / >8-bit sources: keep the selected hardware decoder when possible
-  /// and let the GL renderer handle native 10-bit frames and tone mapping.
+  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
+  /// HDR test player (which plays these files), keeping the GL renderer.
   Future<bool> _adaptForDeepColor(Player player) async {
     await _loadTuning();
     if (_closed || _eightBit) {
@@ -300,12 +296,10 @@ class PlaybackEngine extends ChangeNotifier {
       return decoded;
     }
     _eightBit = true;
-    // Keep HDR frames in their native 10-bit format and let the GPU renderer
-    // perform the colour conversion/tone mapping. The old path forced software
-    // decode plus `format=yuv420p`, which copied/converts every HDR frame and
-    // causes severe playback lag on high-resolution 10-bit video.
+    // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
+    // Only the white level is set explicitly; mpv's own tone-mapping is kept.
     if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
-    await _setProp(player, 'vf', '');
+    await _setProp(player, 'vf', 'format=yuv420p');
     await _pushTuning(player);
     debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
