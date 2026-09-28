@@ -200,9 +200,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'gamma', '0');
     await _setProp(player, 'video-output-levels', 'auto');
     await _setProp(player, 'dither-depth', 'no');
-    await _setProp(player, 'framedrop', 'vo');
-    await _setProp(player, 'vd-lavc-fast', 'no');
-    await _setProp(player, 'vd-lavc-skiploopfilter', 'default');
   }
 
   Future<SourceInfo> _probeSource(Player player) async {
@@ -238,7 +235,6 @@ class PlaybackEngine extends ChangeNotifier {
     DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
     if (_convert) {
       await _setProp(player, 'hwdec', 'no');
-      await _applyFastDecode(player);
     }
     await _applyRender(player);
     if (_convert) {
@@ -247,13 +243,6 @@ class PlaybackEngine extends ChangeNotifier {
       } catch (_) {}
     }
     return src.decoded;
-  }
-
-  Future<void> _applyFastDecode(Player player) async {
-    if (!RenderSettings.instance.fastDecode) return;
-    await _setProp(player, 'framedrop', 'decoder+vo');
-    await _setProp(player, 'vd-lavc-fast', 'yes');
-    await _setProp(player, 'vd-lavc-skiploopfilter', 'nonref');
   }
 
   Future<void> _applyRender(Player player) async {
