@@ -249,7 +249,7 @@ class PlaybackEngine extends ChangeNotifier {
     final src = await _probeSource(player);
     _src = src;
     _convert = src.needsConvert;
-    _sdrMode = rs.autoSdr || (appSettings.rememberHdr && !appSettings.hdrOn);
+    _sdrMode = appSettings.rememberHdr && !appSettings.hdrOn;
     DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
     if (_convert) {
       await _setProp(player, 'hwdec', 'no');
