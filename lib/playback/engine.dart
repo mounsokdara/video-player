@@ -75,11 +75,6 @@ class PlaybackEngine extends ChangeNotifier {
     _closed = false;
     _alive.add(this);
     await _pauseOthers();
-    final wantHw = hwdec != 'no';
-    final hadHw = _hwdec != null && _hwdec != 'no';
-    if (_player != null && wantHw != hadHw) {
-      await _disposePlayer();
-    }
     value = const EngineValue();
     notifyListeners();
     if (_player == null) {
@@ -94,7 +89,7 @@ class PlaybackEngine extends ChangeNotifier {
       video = VideoController(
         player,
         configuration: VideoControllerConfiguration(
-          enableHardwareAcceleration: wantHw,
+          enableHardwareAcceleration: true,
           hwdec: hwdec,
           androidAttachSurfaceAfterVideoParameters: true,
         ),
@@ -220,7 +215,12 @@ class PlaybackEngine extends ChangeNotifier {
   /// HDR / >8-bit sources: software decode + the exact mpv settings from the
   /// HDR test player (which plays these files), keeping the GL renderer.
   Future<void> _adaptForDeepColor(Player player) async {
-    if (_closed || _hwdec == null || _hwdec == 'no' || _eightBit) return;
+    if (_closed || _eightBit) {
+      debugInfo = 'adapt skipped: closed=$_closed eightBit=$_eightBit hwdec=$_hwdec';
+      DeveloperLog.append(debugInfo);
+      notifyListeners();
+      return;
+    }
     var pix = '';
     var gamma = '';
     for (var i = 0; i < 30 && !_closed; i++) {
