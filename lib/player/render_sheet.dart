@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:video_player_app/playback/engine.dart';
 import 'package:video_player_app/playback/render_profile.dart';
@@ -24,8 +23,6 @@ class _RenderSheet extends StatefulWidget {
 
 class _RenderSheetState extends State<_RenderSheet> {
   final _rs = RenderSettings.instance;
-  final _resCtl = TextEditingController();
-  late bool _resCustom;
   late bool _sdr;
 
   PlaybackEngine? get _e => widget.engine;
@@ -33,45 +30,12 @@ class _RenderSheetState extends State<_RenderSheet> {
   @override
   void initState() {
     super.initState();
-    _resCustom = _rs.resMode == ResMode.fixed && !RenderSettings.resPresets.any((r) => r.p == _rs.resValue);
     _sdr = _e?.sdrMode ?? false;
-    if (_resCustom) _resCtl.text = '${_rs.resValue}';
-  }
-
-  @override
-  void dispose() {
-    _resCtl.dispose();
-    super.dispose();
   }
 
   Future<void> _commit() async {
     await _rs.save();
     await _e?.reapplyRender();
-  }
-
-  void _setRes(ResMode mode, {int? value}) {
-    setState(() {
-      _resCustom = false;
-      _rs.resMode = mode;
-      if (value != null) _rs.resValue = value;
-    });
-    _commit();
-  }
-
-  void _applyCustomRes() {
-    final n = int.tryParse(_resCtl.text.trim());
-    if (n == null) return;
-    setState(() {
-      _rs.resMode = ResMode.fixed;
-      _rs.resValue = n.clamp(RenderSettings.resMin, RenderSettings.resMax);
-      _resCtl.text = '${_rs.resValue}';
-    });
-    FocusScope.of(context).unfocus();
-    _commit();
-  }
-
-  Widget _chip(String label, bool selected, VoidCallback onTap) {
-    return ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onTap());
   }
 
   Widget _title(String text) {
@@ -88,44 +52,11 @@ class _RenderSheetState extends State<_RenderSheet> {
     );
   }
 
-  Widget _warn(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
-      ),
-    );
-  }
-
-  Widget _numberField(TextEditingController controller, String label, VoidCallback onApply) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder()),
-              onSubmitted: (_) => onApply(),
-            ),
-          ),
-          const SizedBox(width: 8),
-          FilledButton(onPressed: onApply, child: const Text('Set')),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final e = _e;
     final active = e?.hdrActive ?? false;
-    final src = e?.source;
     final tune = _rs.tuning(sdr: _sdr);
-    final hz = ScreenInfo.current().hz.round();
 
     return SafeArea(
       child: Padding(
@@ -189,38 +120,6 @@ class _RenderSheetState extends State<_RenderSheet> {
                     e?.retune();
                   },
                   child: const Text('Reset brightness'),
-                ),
-              ),
-
-              _title('Resolution limit'),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  _chip('Auto · video', _rs.resMode == ResMode.autoVideo, () => _setRes(ResMode.autoVideo)),
-                  _chip('Auto · screen', _rs.resMode == ResMode.autoScreen, () => _setRes(ResMode.autoScreen)),
-                  for (final r in RenderSettings.resPresets)
-                    _chip(r.label, _rs.resMode == ResMode.fixed && !_resCustom && _rs.resValue == r.p,
-                        () => _setRes(ResMode.fixed, value: r.p)),
-                  _chip('Custom P', _resCustom, () => setState(() => _resCustom = true)),
-                ],
-              ),
-              if (_resCustom) _numberField(_resCtl, 'P (${RenderSettings.resMin}-${RenderSettings.resMax})', _applyCustomRes),
-              _hint('Shrinks the picture before it is drawn. The limit is the shorter side (720p = 1280×720 or 720×1280) and it never upscales. Auto · video keeps the original size, Auto · screen fits your display.'
-                  '${src != null && src.w > 0 ? ' This video: ${src.w}×${src.h}.' : ''}'),
-              if (RenderCaps.scale == false) _warn('The video engine in this build has no scaling filter, so this limit has no effect.'),
-
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _rs.resetLimits();
-                      _resCustom = false;
-                    });
-                    _commit();
-                  },
-                  child: const Text('Reset resolution limit'),
                 ),
               ),
             ],
