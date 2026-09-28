@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:video_player_app/core/developer_log.dart';
 import 'package:video_player_app/settings/settings.dart';
@@ -168,6 +169,8 @@ class PlaybackEngine extends ChangeNotifier {
     return '';
   }
 
+  /// Neutral colour settings for every new file. The player is reused between
+  /// files, so anything the HDR path changed has to be undone here.
   Future<void> _applyHdrPipeline(Player player) async {
     _eightBit = false;
     debugInfo = '';
@@ -183,6 +186,8 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'dither-depth', 'no');
   }
 
+  /// Same detection as the working HDR test player: transfer function,
+  /// primaries, matrix, peak and bit depth are all checked.
   bool _looksHdr({
     required String gamma,
     required String primaries,
@@ -208,9 +213,53 @@ class PlaybackEngine extends ChangeNotifier {
 
   static const _hdrSoftwareDecode = true;
 
-  static const _hdrTargetPeak = 0;
+  /// HDR brightness tuning (saved, adjustable live from the HDR button).
+  /// hdrPeak: nits mpv treats as the screen's white. Higher = darker picture,
+  /// lower = brighter. 203 is plain HDR reference white; the phone gallery
+  /// measured about twice as dark as that, so the default is 400.
+  /// hdrGamma: extra mid-tone shift, -100..100 (negative = darker).
+  static const hdrPeakDefault = 400;
+  static int hdrPeak = hdrPeakDefault;
+  static int hdrGamma = 0;
+  static bool _tuningLoaded = false;
 
+  bool get hdrActive => _eightBit;
+
+  static Future<void> _loadTuning() async {
+    if (_tuningLoaded) return;
+    _tuningLoaded = true;
+    try {
+      final p = await SharedPreferences.getInstance();
+      hdrPeak = (p.getInt('hdrPeak') ?? hdrPeakDefault).clamp(50, 2000);
+      hdrGamma = (p.getInt('hdrGamma') ?? 0).clamp(-100, 100);
+    } catch (_) {}
+  }
+
+  Future<void> _pushTuning(Player player) async {
+    await _setProp(player, 'target-peak', '$hdrPeak');
+    await _setProp(player, 'gamma', '$hdrGamma');
+  }
+
+  /// Live update from the HDR sheet. Only touches the picture while the HDR
+  /// path is active for the current video.
+  Future<void> setHdrTuning({required int peak, required int gamma, bool save = false}) async {
+    hdrPeak = peak.clamp(50, 2000);
+    hdrGamma = gamma.clamp(-100, 100);
+    final player = _player;
+    if (player != null && _eightBit) await _pushTuning(player);
+    if (save) {
+      try {
+        final p = await SharedPreferences.getInstance();
+        await p.setInt('hdrPeak', hdrPeak);
+        await p.setInt('hdrGamma', hdrGamma);
+      } catch (_) {}
+    }
+  }
+
+  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
+  /// HDR test player (which plays these files), keeping the GL renderer.
   Future<void> _adaptForDeepColor(Player player) async {
+    await _loadTuning();
     if (_closed || _eightBit) {
       debugInfo = 'adapt skipped: closed=$_closed eightBit=$_eightBit hwdec=$_hwdec';
       DeveloperLog.append(debugInfo);
@@ -238,9 +287,11 @@ class PlaybackEngine extends ChangeNotifier {
       return;
     }
     _eightBit = true;
+    // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
+    // Only the white level is set explicitly; mpv's own tone-mapping is kept.
     if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
     await _setProp(player, 'vf', 'format=yuv420p');
-    await _setProp(player, 'target-peak', '$_hdrTargetPeak');
+    await _pushTuning(player);
     debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
     notifyListeners();
