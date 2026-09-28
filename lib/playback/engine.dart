@@ -49,6 +49,7 @@ class PlaybackEngine extends ChangeNotifier {
   bool wantPlay = false;
   bool _eightBit = false;
   String debugInfo = '';
+  String? _codecWarn;
 
   bool get hasPlayer => _player != null && !_closed;
 
@@ -104,7 +105,13 @@ class PlaybackEngine extends ChangeNotifier {
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
-    await _adaptForDeepColor(player);
+    final decoded = await _adaptForDeepColor(player);
+    if (!decoded && _codecWarn != null && !value.hasError) {
+      // No decoder could produce video at all: a real failure, so let the
+      // caller retry (software) as before.
+      value = EngineValue(hasError: true, errorDescription: _codecWarn);
+      notifyListeners();
+    }
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (value.hasError) {
@@ -174,6 +181,7 @@ class PlaybackEngine extends ChangeNotifier {
   Future<void> _applyHdrPipeline(Player player) async {
     _eightBit = false;
     debugInfo = '';
+    _codecWarn = null;
     await _setProp(player, 'vf', '');
     await _setProp(player, 'tone-mapping', 'auto');
     await _setProp(player, 'hdr-compute-peak', 'auto');
@@ -258,13 +266,13 @@ class PlaybackEngine extends ChangeNotifier {
 
   /// HDR / >8-bit sources: software decode + the exact mpv settings from the
   /// HDR test player (which plays these files), keeping the GL renderer.
-  Future<void> _adaptForDeepColor(Player player) async {
+  Future<bool> _adaptForDeepColor(Player player) async {
     await _loadTuning();
     if (_closed || _eightBit) {
       debugInfo = 'adapt skipped: closed=$_closed eightBit=$_eightBit hwdec=$_hwdec';
       DeveloperLog.append(debugInfo);
       notifyListeners();
-      return;
+      return true;
     }
     var pix = '';
     var gamma = '';
@@ -282,9 +290,10 @@ class PlaybackEngine extends ChangeNotifier {
     final info = 'pix=$pix gamma=$gamma prim=$primaries matrix=$matrix peak=$sigPeak hdr=$hdr deep=$deep hwdec=$_hwdec';
     debugInfo = info;
     DeveloperLog.append('video $info');
+    final decoded = pix.isNotEmpty;
     if (!hdr && !deep) {
       notifyListeners();
-      return;
+      return decoded;
     }
     _eightBit = true;
     // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
@@ -298,6 +307,7 @@ class PlaybackEngine extends ChangeNotifier {
     try {
       await player.seek(player.state.position);
     } catch (_) {}
+    return decoded;
   }
 
   String _mediaUri(String path) {
@@ -368,6 +378,14 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.height.listen((_) => push()),
       player.stream.log.listen((e) => DeveloperLog.append('mpv[${e.prefix}] ${e.text.trim()}')),
       player.stream.error.listen((e) {
+        // A hardware decoder that fails to start logs "Could not open codec"
+        // while mpv quietly falls back to software decoding. That is not a
+        // failed open; _openBody decides after checking a frame was decoded.
+        if (e.toLowerCase().contains('could not open codec')) {
+          _codecWarn = e;
+          DeveloperLog.append('non-fatal decoder message ignored: $e');
+          return;
+        }
         value = EngineValue(
           isInitialized: value.isInitialized,
           isPlaying: false,
