@@ -296,25 +296,24 @@ class PlaybackEngine extends ChangeNotifier {
   /// Applies the known-good chain first, then adds each limiter on its own and
   /// reads the chain back. A filter this libmpv build lacks is remembered in
   /// [RenderCaps], skipped from then on, and never breaks playback.
+  /// Records that this libmpv build can't run [name] (fps / scale) and, if
+  /// the current video was relying on it, rebuilds the chain without it so
+  /// the picture doesn't sit on a filter mpv silently refused to create.
+  void _markFilterUnsupported(String name, String detail) {
+    if (RenderCaps.of(name) == false) return; // already known
+    if (RenderCaps.of(name) != null && RenderCaps.of(name) != false) return; // not one of ours
+    if (name != 'fps' && name != 'scale') return;
+    RenderCaps.set(name, false);
+    DeveloperLog.append('render: the $name filter is not available in this libmpv build ($detail)');
+    unawaited(reapplyRender());
+  }
+
+  /// One-shot: builds the whole chain and sets it. [RenderProfile.plan]
+  /// already leaves out any filter [RenderCaps] has marked unsupported, so
+  /// nothing here needs to probe mpv or trust its readback.
   Future<void> _applyVf(Player player, RenderPlan plan) async {
     if (_lastVf == plan.key) return;
-    String chain(List<RenderExtra> extras) =>
-        [...extras.map((x) => x.filter), if (plan.baseline.isNotEmpty) plan.baseline].join(',');
-    var accepted = <RenderExtra>[];
-    await _setProp(player, 'vf', plan.baseline);
-    for (final extra in plan.extras) {
-      final trial = [...accepted, extra];
-      await _setProp(player, 'vf', chain(trial));
-      final back = await _getProp(player, 'vf');
-      if (back.contains(extra.token)) {
-        accepted = trial;
-        RenderCaps.set(extra.token, true);
-      } else {
-        RenderCaps.set(extra.token, false);
-        DeveloperLog.append('render: the ${extra.token} filter is not available in this libmpv build');
-        await _setProp(player, 'vf', chain(accepted));
-      }
-    }
+    await _setProp(player, 'vf', plan.key);
     _lastVf = plan.key;
   }
 
@@ -416,7 +415,16 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.buffering.listen((_) => push()),
       player.stream.width.listen((_) => push()),
       player.stream.height.listen((_) => push()),
-      player.stream.log.listen((e) => DeveloperLog.append('mpv[${e.prefix}] ${e.text.trim()}')),
+      player.stream.log.listen((e) {
+        final text = e.text.trim();
+        DeveloperLog.append('mpv[${e.prefix}] $text');
+        // FFmpeg's own filter graph (used for fps/scale) reports a missing
+        // filter only here, as a log line, never as a thrown error. The vf
+        // property still reads back the attempted string even though the
+        // filter was never created, so this is the only reliable signal.
+        final m = RegExp("No such filter: '(\\w+)'").firstMatch(text);
+        if (m != null) _markFilterUnsupported(m.group(1)!, text);
+      }),
       player.stream.error.listen((e) {
         // Not every error line means the open failed:
         //  - a hardware decoder that fails to start logs "Could not open
@@ -432,6 +440,8 @@ class PlaybackEngine extends ChangeNotifier {
         }
         if (low.startsWith('option ') || low.contains("doesn't exist")) {
           DeveloperLog.append('non-fatal option message ignored: $e');
+          final m = RegExp(r"Option (?:vf|vo): (\w+) doesn't exist", caseSensitive: false).firstMatch(e);
+          if (m != null) _markFilterUnsupported(m.group(1)!, e);
           return;
         }
         value = EngineValue(
