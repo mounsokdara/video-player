@@ -213,6 +213,9 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'gamma', '0');
     await _setProp(player, 'video-output-levels', 'auto');
     await _setProp(player, 'dither-depth', 'no');
+    await _setProp(player, 'framedrop', 'vo');
+    await _setProp(player, 'vd-lavc-fast', 'no');
+    await _setProp(player, 'vd-lavc-skiploopfilter', 'default');
   }
 
   Future<SourceInfo> _probeSource(Player player) async {
@@ -248,16 +251,29 @@ class PlaybackEngine extends ChangeNotifier {
     _convert = src.needsConvert;
     _sdrMode = rs.autoSdr || (appSettings.rememberHdr && !appSettings.hdrOn);
     DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
-    final switchToSoftware = _convert;
-    if (switchToSoftware) await _setProp(player, 'hwdec', 'no');
+    if (_convert) {
+      await _setProp(player, 'hwdec', 'no');
+      await _applyFastDecode(player);
+    }
     await _applyRender(player);
-    if (switchToSoftware) {
-      // The decoder has to restart for the hardware -> software switch.
+    if (_convert) {
+      // The decoder has to restart for the hardware -> software switch and
+      // for the decoder options above.
       try {
         await player.seek(player.state.position);
       } catch (_) {}
     }
     return src.decoded;
+  }
+
+  /// Software decoding of HDR / >8-bit video can be too slow for real time.
+  /// Dropping late frames at the decoder and skipping the loop filter on
+  /// non-reference frames trades a little quality for smoother playback.
+  Future<void> _applyFastDecode(Player player) async {
+    if (!RenderSettings.instance.fastDecode) return;
+    await _setProp(player, 'framedrop', 'decoder+vo');
+    await _setProp(player, 'vd-lavc-fast', 'yes');
+    await _setProp(player, 'vd-lavc-skiploopfilter', 'nonref');
   }
 
   /// Builds the plan from the current settings and pushes it to mpv.
@@ -277,21 +293,29 @@ class PlaybackEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Applies the known-good chain first, then tries to add the limiters. If
-  /// this libmpv build lacks a filter, the known-good chain stays in place.
+  /// Applies the known-good chain first, then adds each limiter on its own and
+  /// reads the chain back. A filter this libmpv build lacks is remembered in
+  /// [RenderCaps], skipped from then on, and never breaks playback.
   Future<void> _applyVf(Player player, RenderPlan plan) async {
-    if (_lastVf == plan.full) return;
+    if (_lastVf == plan.key) return;
+    String chain(List<RenderExtra> extras) =>
+        [...extras.map((x) => x.filter), if (plan.baseline.isNotEmpty) plan.baseline].join(',');
+    var accepted = <RenderExtra>[];
     await _setProp(player, 'vf', plan.baseline);
-    if (plan.full != plan.baseline) {
-      await _setProp(player, 'vf', plan.full);
+    for (final extra in plan.extras) {
+      final trial = [...accepted, extra];
+      await _setProp(player, 'vf', chain(trial));
       final back = await _getProp(player, 'vf');
-      final missing = back.isNotEmpty && plan.tokens.any((t) => !back.contains(t));
-      if (missing) {
-        DeveloperLog.append('render: filter missing in this libmpv build, using ${plan.baseline.isEmpty ? 'no filter' : plan.baseline}. wanted=${plan.full} got=$back');
-        await _setProp(player, 'vf', plan.baseline);
+      if (back.contains(extra.token)) {
+        accepted = trial;
+        RenderCaps.set(extra.token, true);
+      } else {
+        RenderCaps.set(extra.token, false);
+        DeveloperLog.append('render: the ${extra.token} filter is not available in this libmpv build');
+        await _setProp(player, 'vf', chain(accepted));
       }
     }
-    _lastVf = plan.full;
+    _lastVf = plan.key;
   }
 
   Future<void> _pushTuning(Player player) async {
@@ -394,12 +418,20 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.height.listen((_) => push()),
       player.stream.log.listen((e) => DeveloperLog.append('mpv[${e.prefix}] ${e.text.trim()}')),
       player.stream.error.listen((e) {
-        // A hardware decoder that fails to start logs "Could not open codec"
-        // while mpv quietly falls back to software decoding. That is not a
-        // failed open; _openBody decides after checking a frame was decoded.
-        if (e.toLowerCase().contains('could not open codec')) {
+        // Not every error line means the open failed:
+        //  - a hardware decoder that fails to start logs "Could not open
+        //    codec" while mpv falls back to software decoding;
+        //  - a filter this libmpv build lacks logs "Option vf: ... doesn't
+        //    exist" and simply is not applied.
+        // _openBody decides afterwards whether a frame was really decoded.
+        final low = e.toLowerCase();
+        if (low.contains('could not open codec')) {
           _codecWarn = e;
           DeveloperLog.append('non-fatal decoder message ignored: $e');
+          return;
+        }
+        if (low.startsWith('option ') || low.contains("doesn't exist")) {
+          DeveloperLog.append('non-fatal option message ignored: $e');
           return;
         }
         value = EngineValue(
