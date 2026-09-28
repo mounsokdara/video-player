@@ -4,8 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:video_player_app/playback/engine.dart';
 import 'package:video_player_app/playback/render_profile.dart';
 
-/// Bottom sheet with the render options: HDR/SDR mode, brightness,
-/// frame-rate limit and resolution limit. Everything applies live.
 Future<void> showRenderSheet(BuildContext context, PlaybackEngine? engine) {
   return showModalBottomSheet<void>(
     context: context,
@@ -26,9 +24,7 @@ class _RenderSheet extends StatefulWidget {
 
 class _RenderSheetState extends State<_RenderSheet> {
   final _rs = RenderSettings.instance;
-  final _fpsCtl = TextEditingController();
   final _resCtl = TextEditingController();
-  late bool _fpsCustom;
   late bool _resCustom;
   late bool _sdr;
 
@@ -37,16 +33,13 @@ class _RenderSheetState extends State<_RenderSheet> {
   @override
   void initState() {
     super.initState();
-    _fpsCustom = _rs.fpsMode == FpsMode.fixed && !RenderSettings.fpsPresets.contains(_rs.fpsValue);
     _resCustom = _rs.resMode == ResMode.fixed && !RenderSettings.resPresets.any((r) => r.p == _rs.resValue);
-    _sdr = _e?.sdrMode ?? _rs.autoSdr;
-    if (_fpsCustom) _fpsCtl.text = '${_rs.fpsValue}';
+    _sdr = _e?.sdrMode ?? false;
     if (_resCustom) _resCtl.text = '${_rs.resValue}';
   }
 
   @override
   void dispose() {
-    _fpsCtl.dispose();
     _resCtl.dispose();
     super.dispose();
   }
@@ -54,27 +47,6 @@ class _RenderSheetState extends State<_RenderSheet> {
   Future<void> _commit() async {
     await _rs.save();
     await _e?.reapplyRender();
-  }
-
-  void _setFps(FpsMode mode, {int? value}) {
-    setState(() {
-      _fpsCustom = false;
-      _rs.fpsMode = mode;
-      if (value != null) _rs.fpsValue = value;
-    });
-    _commit();
-  }
-
-  void _applyCustomFps() {
-    final n = int.tryParse(_fpsCtl.text.trim());
-    if (n == null) return;
-    setState(() {
-      _rs.fpsMode = FpsMode.fixed;
-      _rs.fpsValue = n.clamp(RenderSettings.fpsMin, RenderSettings.fpsMax);
-      _fpsCtl.text = '${_rs.fpsValue}';
-    });
-    FocusScope.of(context).unfocus();
-    _commit();
   }
 
   void _setRes(ResMode mode, {int? value}) {
@@ -113,6 +85,16 @@ class _RenderSheetState extends State<_RenderSheet> {
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+    );
+  }
+
+  Widget _warn(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error),
+      ),
     );
   }
 
@@ -175,11 +157,11 @@ class _RenderSheetState extends State<_RenderSheet> {
                   : 'Only for HDR videos. The current video is not HDR.'),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Auto convert HDR to SDR'),
-                subtitle: const Text('Open every HDR video in SDR mode.'),
-                value: _rs.autoSdr,
+                title: const Text('Fast software decoding'),
+                subtitle: const Text('For HDR videos: drop late frames and skip some filtering so 1440p/4K plays smoother. Applies to the next video.'),
+                value: _rs.fastDecode,
                 onChanged: (v) {
-                  setState(() => _rs.autoSdr = v);
+                  setState(() => _rs.fastDecode = v);
                   _rs.save();
                 },
               ),
@@ -221,23 +203,6 @@ class _RenderSheetState extends State<_RenderSheet> {
                 ),
               ),
 
-              _title('Frame-rate limit'),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  _chip('Off', _rs.fpsMode == FpsMode.off, () => _setFps(FpsMode.off)),
-                  _chip('Auto · $hz Hz', _rs.fpsMode == FpsMode.auto, () => _setFps(FpsMode.auto)),
-                  for (final f in RenderSettings.fpsPresets)
-                    _chip('$f', _rs.fpsMode == FpsMode.fixed && !_fpsCustom && _rs.fpsValue == f,
-                        () => _setFps(FpsMode.fixed, value: f)),
-                  _chip('Custom', _fpsCustom, () => setState(() => _fpsCustom = true)),
-                ],
-              ),
-              if (_fpsCustom) _numberField(_fpsCtl, 'FPS (${RenderSettings.fpsMin}-${RenderSettings.fpsMax})', _applyCustomFps),
-              _hint('Only drops frames above the limit, never adds any. Auto uses your screen refresh rate.'
-                  '${src != null && src.fps > 0 ? ' This video: ${src.fps.round()} fps.' : ''}'),
-
               _title('Resolution limit'),
               Wrap(
                 spacing: 8,
@@ -254,6 +219,7 @@ class _RenderSheetState extends State<_RenderSheet> {
               if (_resCustom) _numberField(_resCtl, 'P (${RenderSettings.resMin}-${RenderSettings.resMax})', _applyCustomRes),
               _hint('Shrinks the picture before it is drawn. The limit is the shorter side (720p = 1280×720 or 720×1280) and it never upscales. Auto · video keeps the original size, Auto · screen fits your display.'
                   '${src != null && src.w > 0 ? ' This video: ${src.w}×${src.h}.' : ''}'),
+              if (RenderCaps.scale == false) _warn('The video engine in this build has no scaling filter, so this limit has no effect.'),
 
               Align(
                 alignment: Alignment.centerRight,
@@ -261,12 +227,11 @@ class _RenderSheetState extends State<_RenderSheet> {
                   onPressed: () {
                     setState(() {
                       _rs.resetLimits();
-                      _fpsCustom = false;
                       _resCustom = false;
                     });
                     _commit();
                   },
-                  child: const Text('Reset limits'),
+                  child: const Text('Reset resolution limit'),
                 ),
               ),
             ],
