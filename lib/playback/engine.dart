@@ -168,8 +168,6 @@ class PlaybackEngine extends ChangeNotifier {
     return '';
   }
 
-  /// Neutral colour settings for every new file. The player is reused between
-  /// files, so anything the HDR path changed has to be undone here.
   Future<void> _applyHdrPipeline(Player player) async {
     _eightBit = false;
     debugInfo = '';
@@ -185,8 +183,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'dither-depth', 'no');
   }
 
-  /// Same detection as the working HDR test player: transfer function,
-  /// primaries, matrix, peak and bit depth are all checked.
   bool _looksHdr({
     required String gamma,
     required String primaries,
@@ -212,14 +208,8 @@ class PlaybackEngine extends ChangeNotifier {
 
   static const _hdrSoftwareDecode = true;
 
-  /// Nits that mpv treats as the screen's white when tone-mapping HDR.
-  /// Measured against the phone gallery: 100 (mpv's old default) came out
-  /// about 2x too bright; 203 is the HDR reference white and matches.
-  /// Lower = brighter, higher = darker. Fine-tune with 160 / 203 / 250.
-  static const _hdrTargetPeak = 203;
+  static const _hdrTargetPeak = 0;
 
-  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
-  /// HDR test player (which plays these files), keeping the GL renderer.
   Future<void> _adaptForDeepColor(Player player) async {
     if (_closed || _eightBit) {
       debugInfo = 'adapt skipped: closed=$_closed eightBit=$_eightBit hwdec=$_hwdec';
@@ -248,8 +238,6 @@ class PlaybackEngine extends ChangeNotifier {
       return;
     }
     _eightBit = true;
-    // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
-    // Only the white level is set explicitly; mpv's own tone-mapping is kept.
     if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
     await _setProp(player, 'vf', 'format=yuv420p');
     await _setProp(player, 'target-peak', '$_hdrTargetPeak');
