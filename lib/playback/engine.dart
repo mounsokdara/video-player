@@ -151,7 +151,9 @@ class PlaybackEngine extends ChangeNotifier {
           await platform.setProperty('video-sync', 'audio');
         } catch (_) {}
         try {
-          await platform.setProperty('vd-lavc-dr', 'no');
+          // Keep decoder frames zero-copy where possible. Disabling direct rendering
+          // forces expensive frame copies and is especially costly for 10-bit HDR.
+          await platform.setProperty('vd-lavc-dr', 'yes');
         } catch (_) {}
         return;
       }
@@ -219,10 +221,8 @@ class PlaybackEngine extends ChangeNotifier {
     return matrix.contains('2020');
   }
 
-  // Keep hardware decoding enabled for HDR. The yuv420p format filter is
-  // intentionally retained, but software-decoding 10-bit HEVC/AV1 can make
-  // Android playback stutter badly. Hardware decode + format conversion is
-  // substantially cheaper than decoding the whole HDR stream on the CPU.
+  // HDR should stay on the hardware decoder when one is available. Forcing
+  // software decode here makes 10-bit HEVC/H.264 HDR unnecessarily expensive.
   static const _hdrSoftwareDecode = false;
 
   /// HDR brightness tuning (saved, adjustable live from the HDR button).
@@ -268,8 +268,8 @@ class PlaybackEngine extends ChangeNotifier {
     }
   }
 
-  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
-  /// HDR test player (which plays these files), keeping the GL renderer.
+  /// HDR / >8-bit sources: keep the selected hardware decoder when possible
+  /// and let the GL renderer handle native 10-bit frames and tone mapping.
   Future<bool> _adaptForDeepColor(Player player) async {
     await _loadTuning();
     if (_closed || _eightBit) {
@@ -300,19 +300,12 @@ class PlaybackEngine extends ChangeNotifier {
       return decoded;
     }
     _eightBit = true;
-    // Keep hardware decoding for HDR to avoid CPU-bound 10-bit decoding.
-    // The yuv420p conversion is intentionally retained for the renderer.
-    if (_hdrSoftwareDecode) {
-      await _setProp(player, 'hwdec', 'no');
-    } else if (_hwdec != null && _hwdec!.isNotEmpty) {
-      // Restore the requested hardware decoder in case another source changed it.
-      await _setProp(player, 'hwdec', _hwdec!);
-    }
-    await _setProp(player, 'vf', 'format=yuv420p');
-    // Peak analysis is unnecessary because HDR white level is explicitly
-    // controlled by target-peak, and disabling it removes per-frame CPU work.
-    await _setProp(player, 'hdr-compute-peak', 'no');
-    await _setProp(player, 'video-sync', 'audio');
+    // Keep HDR frames in their native 10-bit format and let the GPU renderer
+    // perform the colour conversion/tone mapping. The old path forced software
+    // decode plus `format=yuv420p`, which copied/converts every HDR frame and
+    // causes severe playback lag on high-resolution 10-bit video.
+    if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
+    await _setProp(player, 'vf', '');
     await _pushTuning(player);
     debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
