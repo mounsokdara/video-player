@@ -3,15 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// How the render frame-rate limiter picks its cap.
-enum FpsMode { off, auto, fixed }
-
-/// How the render resolution limiter picks its cap.
 enum ResMode { autoVideo, autoScreen, fixed }
 
-/// Brightness tuning for one colour mode.
-/// [peak] is the nit level mpv treats as the screen's white (higher = darker),
-/// [gamma] is a mid-tone shift from -100 to 100 (negative = darker).
 class HdrTuning {
   const HdrTuning(this.peak, this.gamma);
   final int peak;
@@ -24,17 +17,10 @@ class ResPreset {
   final int p;
 }
 
-/// User options for the render pipeline. Saved with SharedPreferences and
-/// independent from the rest of the app settings.
 class RenderSettings {
   RenderSettings._();
   static final RenderSettings instance = RenderSettings._();
 
-  static const fpsPresets = <int>[1, 5, 10, 15, 24, 30, 45, 60, 90, 120];
-  static const fpsMin = 1;
-  static const fpsMax = 240;
-
-  /// Shorter side of the frame: 1080 means 1920x1080 or 1080x1920.
   static const resPresets = <ResPreset>[
     ResPreset('Low', 240),
     ResPreset('360p', 360),
@@ -53,16 +39,9 @@ class RenderSettings {
   static const defaultPeakHdr = 400;
   static const defaultPeakSdr = 203;
 
-  FpsMode fpsMode = FpsMode.off;
-  int fpsValue = 30;
   ResMode resMode = ResMode.autoVideo;
   int resValue = 1080;
 
-  /// Open HDR videos in SDR mode without asking.
-  bool autoSdr = false;
-
-  /// For HDR / >8-bit videos (software decode): drop late frames and skip the
-  /// loop filter on non-reference frames. Applies to the next video.
   bool fastDecode = true;
 
   int peakHdr = defaultPeakHdr;
@@ -96,8 +75,6 @@ class RenderSettings {
   }
 
   void resetLimits() {
-    fpsMode = FpsMode.off;
-    fpsValue = 30;
     resMode = ResMode.autoVideo;
     resValue = 1080;
   }
@@ -107,13 +84,9 @@ class RenderSettings {
     _loaded = true;
     try {
       final p = await SharedPreferences.getInstance();
-      fpsMode = FpsMode.values[(p.getInt('rs_fpsMode') ?? 0).clamp(0, FpsMode.values.length - 1)];
-      fpsValue = (p.getInt('rs_fpsValue') ?? 30).clamp(fpsMin, fpsMax);
       resMode = ResMode.values[(p.getInt('rs_resMode') ?? 0).clamp(0, ResMode.values.length - 1)];
       resValue = (p.getInt('rs_resValue') ?? 1080).clamp(resMin, resMax);
-      autoSdr = p.getBool('rs_autoSdr') ?? false;
       fastDecode = p.getBool('rs_fastDecode') ?? true;
-      // 'hdrPeak' / 'hdrGamma' are the keys of the first tuning sheet.
       peakHdr = (p.getInt('rs_peakHdr') ?? p.getInt('hdrPeak') ?? defaultPeakHdr).clamp(50, 2000);
       gammaHdr = (p.getInt('rs_gammaHdr') ?? p.getInt('hdrGamma') ?? 0).clamp(-100, 100);
       peakSdr = (p.getInt('rs_peakSdr') ?? defaultPeakSdr).clamp(50, 2000);
@@ -124,11 +97,8 @@ class RenderSettings {
   Future<void> save() async {
     try {
       final p = await SharedPreferences.getInstance();
-      await p.setInt('rs_fpsMode', fpsMode.index);
-      await p.setInt('rs_fpsValue', fpsValue);
       await p.setInt('rs_resMode', resMode.index);
       await p.setInt('rs_resValue', resValue);
-      await p.setBool('rs_autoSdr', autoSdr);
       await p.setBool('rs_fastDecode', fastDecode);
       await p.setInt('rs_peakHdr', peakHdr);
       await p.setInt('rs_gammaHdr', gammaHdr);
@@ -138,7 +108,6 @@ class RenderSettings {
   }
 }
 
-/// What mpv reports about the decoded video, before any filter.
 class SourceInfo {
   const SourceInfo({
     required this.pix,
@@ -160,10 +129,8 @@ class SourceInfo {
   final int h;
   final double fps;
 
-  /// False while mpv has not produced a single decoded frame format.
   bool get decoded => pix.isNotEmpty;
 
-  /// PQ / HLG transfer, or wide-gamut BT.2020 with a high signal peak.
   bool get hdr {
     if (gamma.contains('hlg') ||
         gamma.contains('pq') ||
@@ -180,10 +147,8 @@ class SourceInfo {
     return matrix.contains('2020');
   }
 
-  /// More than 8 bits per channel (yuv420p10, p010, ...).
   bool get deep => RegExp(r'p0(10|12|16)|p(10|12|14|16)(le|be)?$').hasMatch(pix);
 
-  /// HDR and >8-bit frames need the safe path: software decode, 8-bit frames.
   bool get needsConvert => hdr || deep;
 
   String describe() =>
@@ -208,63 +173,48 @@ class ScreenInfo {
   }
 }
 
-/// Which optional mpv filters this libmpv build really has. Filled in by the
-/// engine the first time it tries each one. null = not tried yet.
 class RenderCaps {
   const RenderCaps._();
-  static bool? fps;
   static bool? scale;
 
-  static bool? of(String token) => token == 'fps' ? fps : (token == 'scale' ? scale : null);
+  static bool? of(String token) => token == 'scale' ? scale : null;
 
   static void set(String token, bool value) {
-    if (token == 'fps') fps = value;
     if (token == 'scale') scale = value;
   }
 }
 
-/// One optional filter (frame-rate or resolution limiter).
 class RenderExtra {
   const RenderExtra(this.token, this.filter);
 
-  /// Name that must show up when the chain is read back from mpv.
   final String token;
 
-  /// The mpv `vf` entry.
   final String filter;
 }
 
-/// The mpv filter chain for one video.
 class RenderPlan {
   const RenderPlan({
     required this.baseline,
     required this.extras,
-    this.fpsCap,
     this.outW,
     this.outH,
   });
 
-  /// Known-good chain: only the 8-bit conversion for HDR/deep sources.
   final String baseline;
 
-  /// Limiters, in the order they should run.
   final List<RenderExtra> extras;
 
-  final int? fpsCap;
   final int? outW;
   final int? outH;
 
-  /// The full intended chain, used to skip work when nothing changed.
   String get key => [...extras.map((e) => e.filter), if (baseline.isNotEmpty) baseline].join(',');
 
   String describe(SourceInfo src) {
     final size = outW != null ? '${src.w}x${src.h}->${outW}x$outH' : '${src.w}x${src.h}';
-    final fps = fpsCap != null ? '${src.fps.toStringAsFixed(0)}->${fpsCap}fps' : '${src.fps.toStringAsFixed(0)}fps';
-    return '$size $fps vf=${key.isEmpty ? '-' : key}';
+    return '$size ${src.fps.toStringAsFixed(0)}fps vf=${key.isEmpty ? '-' : key}';
   }
 }
 
-/// Turns settings + source + screen into a [RenderPlan]. Pure, no side effects.
 class RenderProfile {
   const RenderProfile._();
 
@@ -275,23 +225,6 @@ class RenderProfile {
   }) {
     final extras = <RenderExtra>[];
 
-    // Frame rate: only ever drops frames, never invents them.
-    int? want;
-    switch (settings.fpsMode) {
-      case FpsMode.off:
-        break;
-      case FpsMode.auto:
-        want = screen.hz.round();
-      case FpsMode.fixed:
-        want = settings.fpsValue;
-    }
-    int? fpsCap;
-    if (want != null && want >= 1 && src.fps > want + 0.5 && RenderCaps.fps != false) {
-      fpsCap = want;
-      extras.add(RenderExtra('fps', 'lavfi=[fps=$want]'));
-    }
-
-    // Resolution: the limit applies to the shorter side and never upscales.
     int? limit;
     switch (settings.resMode) {
       case ResMode.autoVideo:
@@ -316,13 +249,11 @@ class RenderProfile {
     return RenderPlan(
       baseline: src.needsConvert ? 'format=yuv420p' : '',
       extras: extras,
-      fpsCap: fpsCap,
       outW: outW,
       outH: outH,
     );
   }
 
-  /// Largest shorter-side that still fits the video inside the screen.
   static int? _screenLimit(SourceInfo src, ScreenInfo screen) {
     if (screen.width <= 0 || screen.height <= 0 || src.w <= 0 || src.h <= 0) return null;
     final longSide = math.max(screen.width, screen.height);
