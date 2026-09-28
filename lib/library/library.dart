@@ -127,13 +127,6 @@ class LibraryService {
     if (!allFiles) await AndroidBridge.requestAllFilesAccess();
   }
 
-  Future<void> ensureManageMedia() async {
-    manageMedia = await AndroidBridge.canManageMedia();
-    if (!manageMedia) {
-      await AndroidBridge.requestManageMedia();
-      manageMedia = await AndroidBridge.canManageMedia();
-    }
-  }
 
   Future<void> scan() async {
     if (_scanning) return;
