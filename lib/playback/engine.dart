@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:video_player_app/core/developer_log.dart';
+import 'package:video_player_app/playback/render_profile.dart';
 import 'package:video_player_app/settings/settings.dart';
 
 class EngineValue {
@@ -47,7 +47,6 @@ class PlaybackEngine extends ChangeNotifier {
   double _rate = 1;
   bool _pitchShift = false;
   bool wantPlay = false;
-  bool _eightBit = false;
   String debugInfo = '';
   String? _codecWarn;
 
@@ -101,11 +100,11 @@ class PlaybackEngine extends ChangeNotifier {
     final player = _player!;
     _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
-    await _applyHdrPipeline(player);
+    await _resetPerFile(player);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
-    final decoded = await _adaptForDeepColor(player);
+    final decoded = await _prepareRender(player);
     if (!decoded && _codecWarn != null && !value.hasError) {
       // No decoder could produce video at all: a real failure, so let the
       // caller retry (software) as before.
@@ -176,10 +175,32 @@ class PlaybackEngine extends ChangeNotifier {
     return '';
   }
 
-  /// Neutral colour settings for every new file. The player is reused between
-  /// files, so anything the HDR path changed has to be undone here.
-  Future<void> _applyHdrPipeline(Player player) async {
-    _eightBit = false;
+  // ---- render pipeline ---------------------------------------------------
+  //
+  // The picture goes: decoder -> mpv filter chain (fps limit, resolution
+  // limit, 8-bit conversion) -> GL renderer (tone-mapping) -> Flutter texture.
+  // HDR and >8-bit sources use software decode and 8-bit frames, because the
+  // hardware path shows a black picture on many phones.
+
+  SourceInfo? _src;
+  bool _convert = false;
+  bool _sdrMode = false;
+  String? _lastVf;
+
+  /// True while the current video is HDR or >8-bit and uses the safe path.
+  bool get hdrActive => _convert;
+
+  /// True = SDR look, false = HDR look. Only matters while [hdrActive].
+  bool get sdrMode => _sdrMode;
+
+  SourceInfo? get source => _src;
+
+  /// Neutral settings for every new file. The player is reused between files,
+  /// so anything the previous video changed has to be undone here.
+  Future<void> _resetPerFile(Player player) async {
+    _src = null;
+    _convert = false;
+    _lastVf = null;
     debugInfo = '';
     _codecWarn = null;
     await _setProp(player, 'vf', '');
@@ -194,86 +215,7 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'dither-depth', 'no');
   }
 
-  /// Same detection as the working HDR test player: transfer function,
-  /// primaries, matrix, peak and bit depth are all checked.
-  bool _looksHdr({
-    required String gamma,
-    required String primaries,
-    required String matrix,
-    required String sigPeak,
-    required String pix,
-  }) {
-    if (gamma.contains('hlg') ||
-        gamma.contains('pq') ||
-        gamma.contains('st2084') ||
-        gamma.contains('smpte2084') ||
-        gamma.contains('bt.2100')) {
-      return true;
-    }
-    final wide = primaries.contains('2020');
-    if (wide) {
-      final peak = double.tryParse(sigPeak);
-      if (peak != null && peak > 1.1) return true;
-      if (pix.contains('10') || pix.contains('p010')) return true;
-    }
-    return matrix.contains('2020');
-  }
-
-  static const _hdrSoftwareDecode = true;
-
-  /// HDR brightness tuning (saved, adjustable live from the HDR button).
-  /// hdrPeak: nits mpv treats as the screen's white. Higher = darker picture,
-  /// lower = brighter. 203 is plain HDR reference white; the phone gallery
-  /// measured about twice as dark as that, so the default is 400.
-  /// hdrGamma: extra mid-tone shift, -100..100 (negative = darker).
-  static const hdrPeakDefault = 400;
-  static int hdrPeak = hdrPeakDefault;
-  static int hdrGamma = 0;
-  static bool _tuningLoaded = false;
-
-  bool get hdrActive => _eightBit;
-
-  static Future<void> _loadTuning() async {
-    if (_tuningLoaded) return;
-    _tuningLoaded = true;
-    try {
-      final p = await SharedPreferences.getInstance();
-      hdrPeak = (p.getInt('hdrPeak') ?? hdrPeakDefault).clamp(50, 2000);
-      hdrGamma = (p.getInt('hdrGamma') ?? 0).clamp(-100, 100);
-    } catch (_) {}
-  }
-
-  Future<void> _pushTuning(Player player) async {
-    await _setProp(player, 'target-peak', '$hdrPeak');
-    await _setProp(player, 'gamma', '$hdrGamma');
-  }
-
-  /// Live update from the HDR sheet. Only touches the picture while the HDR
-  /// path is active for the current video.
-  Future<void> setHdrTuning({required int peak, required int gamma, bool save = false}) async {
-    hdrPeak = peak.clamp(50, 2000);
-    hdrGamma = gamma.clamp(-100, 100);
-    final player = _player;
-    if (player != null && _eightBit) await _pushTuning(player);
-    if (save) {
-      try {
-        final p = await SharedPreferences.getInstance();
-        await p.setInt('hdrPeak', hdrPeak);
-        await p.setInt('hdrGamma', hdrGamma);
-      } catch (_) {}
-    }
-  }
-
-  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
-  /// HDR test player (which plays these files), keeping the GL renderer.
-  Future<bool> _adaptForDeepColor(Player player) async {
-    await _loadTuning();
-    if (_closed || _eightBit) {
-      debugInfo = 'adapt skipped: closed=$_closed eightBit=$_eightBit hwdec=$_hwdec';
-      DeveloperLog.append(debugInfo);
-      notifyListeners();
-      return true;
-    }
+  Future<SourceInfo> _probeSource(Player player) async {
     var pix = '';
     var gamma = '';
     for (var i = 0; i < 30 && !_closed; i++) {
@@ -282,32 +224,106 @@ class PlaybackEngine extends ChangeNotifier {
       if (pix.isNotEmpty && gamma.isNotEmpty) break;
       await Future<void>.delayed(const Duration(milliseconds: 60));
     }
-    final primaries = await _getProp(player, 'video-params/primaries');
-    final matrix = await _getProp(player, 'video-params/colormatrix');
-    final sigPeak = await _getProp(player, 'video-params/sig-peak');
-    final hdr = _looksHdr(gamma: gamma, primaries: primaries, matrix: matrix, sigPeak: sigPeak, pix: pix);
-    final deep = RegExp(r'p0(10|12|16)|p(10|12|14|16)(le|be)?$').hasMatch(pix);
-    final info = 'pix=$pix gamma=$gamma prim=$primaries matrix=$matrix peak=$sigPeak hdr=$hdr deep=$deep hwdec=$_hwdec';
-    debugInfo = info;
-    DeveloperLog.append('video $info');
-    final decoded = pix.isNotEmpty;
-    if (!hdr && !deep) {
-      notifyListeners();
-      return decoded;
+    Future<double?> numOf(String name) async => double.tryParse(await _getProp(player, name));
+    return SourceInfo(
+      pix: pix,
+      gamma: gamma,
+      primaries: await _getProp(player, 'video-params/primaries'),
+      matrix: await _getProp(player, 'video-params/colormatrix'),
+      sigPeak: await _getProp(player, 'video-params/sig-peak'),
+      w: ((await numOf('video-params/w')) ?? 0).round(),
+      h: ((await numOf('video-params/h')) ?? 0).round(),
+      fps: (await numOf('container-fps')) ?? (await numOf('estimated-vf-fps')) ?? 0,
+    );
+  }
+
+  /// Runs once per file, after it opened. Returns false when no decoder
+  /// produced any video format.
+  Future<bool> _prepareRender(Player player) async {
+    final rs = RenderSettings.instance;
+    await rs.load();
+    if (_closed) return true;
+    final src = await _probeSource(player);
+    _src = src;
+    _convert = src.needsConvert;
+    _sdrMode = rs.autoSdr || (appSettings.rememberHdr && !appSettings.hdrOn);
+    DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
+    final switchToSoftware = _convert;
+    if (switchToSoftware) await _setProp(player, 'hwdec', 'no');
+    await _applyRender(player);
+    if (switchToSoftware) {
+      // The decoder has to restart for the hardware -> software switch.
+      try {
+        await player.seek(player.state.position);
+      } catch (_) {}
     }
-    _eightBit = true;
-    // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
-    // Only the white level is set explicitly; mpv's own tone-mapping is kept.
-    if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
-    await _setProp(player, 'vf', 'format=yuv420p');
-    await _pushTuning(player);
-    debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
-    DeveloperLog.append('HDR path applied');
+    return src.decoded;
+  }
+
+  /// Builds the plan from the current settings and pushes it to mpv.
+  Future<void> _applyRender(Player player) async {
+    final src = _src;
+    if (src == null || _closed) return;
+    final plan = RenderProfile.plan(
+      settings: RenderSettings.instance,
+      src: src,
+      screen: ScreenInfo.current(),
+    );
+    await _applyVf(player, plan);
+    if (_convert) await _pushTuning(player);
+    final mode = _convert ? (_sdrMode ? 'HDR->SDR' : 'HDR look') : 'SDR source';
+    debugInfo = '$mode | ${plan.describe(src)} | ${src.describe()}';
+    DeveloperLog.append('render $debugInfo');
     notifyListeners();
-    try {
-      await player.seek(player.state.position);
-    } catch (_) {}
-    return decoded;
+  }
+
+  /// Applies the known-good chain first, then tries to add the limiters. If
+  /// this libmpv build lacks a filter, the known-good chain stays in place.
+  Future<void> _applyVf(Player player, RenderPlan plan) async {
+    if (_lastVf == plan.full) return;
+    await _setProp(player, 'vf', plan.baseline);
+    if (plan.full != plan.baseline) {
+      await _setProp(player, 'vf', plan.full);
+      final back = await _getProp(player, 'vf');
+      final missing = back.isNotEmpty && plan.tokens.any((t) => !back.contains(t));
+      if (missing) {
+        DeveloperLog.append('render: filter missing in this libmpv build, using ${plan.baseline.isEmpty ? 'no filter' : plan.baseline}. wanted=${plan.full} got=$back');
+        await _setProp(player, 'vf', plan.baseline);
+      }
+    }
+    _lastVf = plan.full;
+  }
+
+  Future<void> _pushTuning(Player player) async {
+    final t = RenderSettings.instance.tuning(sdr: _sdrMode);
+    await _setProp(player, 'target-peak', '${t.peak}');
+    await _setProp(player, 'gamma', '${t.gamma}');
+  }
+
+  /// Pushes only the brightness values; cheap enough to call while dragging.
+  Future<void> retune() async {
+    final player = _player;
+    if (player == null || _closed || !_convert) return;
+    await _pushTuning(player);
+  }
+
+  /// Re-applies fps limit, resolution limit and brightness after the user
+  /// changed a setting, without reopening the video.
+  Future<void> reapplyRender() async {
+    final player = _player;
+    if (player == null || _closed) return;
+    _lastVf = null;
+    await _applyRender(player);
+  }
+
+  /// Switches the current HDR video between the SDR and HDR look.
+  Future<void> setSdrMode(bool sdr) async {
+    _sdrMode = sdr;
+    appSettings.hdrOn = !sdr;
+    if (appSettings.rememberHdr) unawaited(appSettings.save());
+    final player = _player;
+    if (player != null && _convert && !_closed) await _pushTuning(player);
+    notifyListeners();
   }
 
   String _mediaUri(String path) {
@@ -449,9 +465,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _player?.setVolume((v.clamp(0.0, 1.0) * 100).toDouble());
   }
 
-  Future<void> setPlaybackSpeed(double r) async {
-    await applyTempo(rate: r, pitchShift: _pitchShift);
-  }
 
   Future<void> setLooping(bool on) async {
     await _player?.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
