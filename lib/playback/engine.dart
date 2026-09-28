@@ -219,8 +219,10 @@ class PlaybackEngine extends ChangeNotifier {
     return matrix.contains('2020');
   }
 
-  // Prefer the hardware decoder for HDR/deep-color video. Software decoding
-  // is much more expensive on mobile and was the main source of HDR stutter.
+  // Keep hardware decoding enabled for HDR. The yuv420p format filter is
+  // intentionally retained, but software-decoding 10-bit HEVC/AV1 can make
+  // Android playback stutter badly. Hardware decode + format conversion is
+  // substantially cheaper than decoding the whole HDR stream on the CPU.
   static const _hdrSoftwareDecode = false;
 
   /// HDR brightness tuning (saved, adjustable live from the HDR button).
@@ -298,21 +300,21 @@ class PlaybackEngine extends ChangeNotifier {
       return decoded;
     }
     _eightBit = true;
-    // Keep HDR on the hardware path whenever possible. Forcing software decode
-    // and an 8-bit yuv420p filter makes 10-bit HDR frames go through a costly
-    // CPU conversion on every frame, which causes playback lag.
+    // Keep hardware decoding for HDR to avoid CPU-bound 10-bit decoding.
+    // The yuv420p conversion is intentionally retained for the renderer.
     if (_hdrSoftwareDecode) {
       await _setProp(player, 'hwdec', 'no');
-      await _setProp(player, 'vf', 'format=yuv420p');
-    } else {
-      // Let mpv keep the decoder's native deep-color format and do HDR
-      // processing in the renderer. This avoids a per-frame CPU pixel-format
-      // conversion while retaining hardware decoding.
-      await _setProp(player, 'hwdec', _hwdec ?? 'auto');
-      await _setProp(player, 'vf', '');
+    } else if (_hwdec != null && _hwdec!.isNotEmpty) {
+      // Restore the requested hardware decoder in case another source changed it.
+      await _setProp(player, 'hwdec', _hwdec!);
     }
+    await _setProp(player, 'vf', 'format=yuv420p');
+    // Peak analysis is unnecessary because HDR white level is explicitly
+    // controlled by target-peak, and disabling it removes per-frame CPU work.
+    await _setProp(player, 'hdr-compute-peak', 'no');
+    await _setProp(player, 'video-sync', 'audio');
     await _pushTuning(player);
-    debugInfo = 'HDR path ON (hardware-first, sw fallback=$_hdrSoftwareDecode) | $info';
+    debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
     notifyListeners();
     try {
