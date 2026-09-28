@@ -22,6 +22,7 @@ import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/player/hdr_tune.dart';
 import 'package:video_player_app/player/player_fx.dart';
 import 'package:video_player_app/player/player_more.dart';
 import 'package:video_player_app/player/player_picture.dart';
@@ -1449,7 +1450,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     switch (id) {
       case 'hdr':
         return TextButton(
-          onPressed: () => setState(() => hdr = !hdr),
+          onPressed: () => showHdrTune(context, vc),
           child: Text(hdr ? 'HDR' : 'SDR', style: TextStyle(color: hdr ? Colors.white : Colors.white54, fontWeight: FontWeight.w700)),
         );
       case 'eq':
