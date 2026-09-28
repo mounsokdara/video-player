@@ -22,7 +22,7 @@ import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
-import 'package:video_player_app/player/hdr_tune.dart';
+import 'package:video_player_app/player/render_sheet.dart';
 import 'package:video_player_app/player/player_fx.dart';
 import 'package:video_player_app/player/player_more.dart';
 import 'package:video_player_app/player/player_picture.dart';
@@ -62,7 +62,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Timer? persistTimer;
   DateTime now = DateTime.now();
   int battery = 100;
-  bool hdr = true;
   late AspectMode aspect;
   double speed = 1;
   Offset? panStart;
@@ -150,7 +149,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     index = widget.index.clamp(0, widget.playlist.length - 1);
     aspect = appSettings.aspect;
     speed = appSettings.rememberSpeed ? appSettings.speed : 1;
-    hdr = appSettings.rememberHdr ? appSettings.hdrOn : true;
     night = appSettings.nightMode;
     mirror = appSettings.mirror;
     invert = appSettings.invertColors;
@@ -1199,49 +1197,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     );
   }
 
-  Widget _ytQueueOverlay() {
-    final size = MediaQuery.sizeOf(context);
-    final pad = SystemBars.rawOf(context);
-    final landscape = size.width > size.height;
-    final panelW = landscape ? math.min(420.0, size.width * 0.46) : size.width;
-    return Positioned.fill(
-      child: Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(
-            onTap: () => setState(() => _ytQueue = false),
-            child: ColoredBox(color: Colors.black.withValues(alpha: 0.55)),
-          ),
-        ),
-        Align(
-          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
-          child: Material(
-            color: Theme.of(context).colorScheme.surface,
-            elevation: 16,
-            borderRadius: landscape
-                ? const BorderRadius.horizontal(left: Radius.circular(16))
-                : const BorderRadius.vertical(top: Radius.circular(16)),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              width: panelW,
-              height: landscape ? size.height : size.height * 0.92,
-              child: _youtubeQueueBody(
-                context,
-                pad,
-                onClose: () => setState(() => _ytQueue = false),
-                onPick: (i) {
-                  setState(() => _ytQueue = false);
-                  index = i;
-                  unawaited(_openCurrent());
-                },
-              ),
-            ),
-          ),
-        ),
-      ],
-      ),
-    );
-  }
 
   Widget _watchMeta() {
     final scheme = Theme.of(context).colorScheme;
@@ -1449,9 +1404,23 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Widget _titleBtn(String id) {
     switch (id) {
       case 'hdr':
-        return TextButton(
-          onPressed: () => showHdrTune(context, vc),
-          child: Text(hdr ? 'HDR' : 'SDR', style: TextStyle(color: hdr ? Colors.white : Colors.white54, fontWeight: FontWeight.w700)),
+        return ListenableBuilder(
+          listenable: Listenable.merge([if (vc != null) vc!]),
+          builder: (context, _) {
+            final e = vc;
+            final active = e?.hdrActive ?? false;
+            final label = active && !(e?.sdrMode ?? true) ? 'HDR' : 'SDR';
+            return TextButton(
+              onPressed: () => showRenderSheet(context, e),
+              onLongPress: () {
+                if (e != null && e.hdrActive) e.setSdrMode(!e.sdrMode);
+              },
+              child: Text(
+                label,
+                style: TextStyle(color: active ? Colors.white : Colors.white54, fontWeight: FontWeight.w700),
+              ),
+            );
+          },
         );
       case 'eq':
         return IconButton(
