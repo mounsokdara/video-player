@@ -2,8 +2,7 @@
 
 Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files stay on the device.
 
-[Download APK](https://github.com/mounsokdara/video-player/releases/download/v1.0.1/com.mounsokdara.video_player.apk)
-
+[Download APK](https://github.com/mounsokdara/video-player/releases/latest/download/com.mounsokdara.video_player.apk)
 
 ## Library
 
