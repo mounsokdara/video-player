@@ -155,17 +155,6 @@ class _RenderSheetState extends State<_RenderSheet> {
               _hint(active
                   ? 'Switches this video live. Neither mode is real HDR output: the picture is always tone-mapped for your screen. HDR matches the phone gallery, SDR is brighter.'
                   : 'Only for HDR videos. The current video is not HDR.'),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Fast software decoding'),
-                subtitle: const Text('For HDR videos: drop late frames and skip some filtering so 1440p/4K plays smoother. Applies to the next video.'),
-                value: _rs.fastDecode,
-                onChanged: (v) {
-                  setState(() => _rs.fastDecode = v);
-                  _rs.save();
-                },
-              ),
-
               _title('${_sdr ? 'SDR' : 'HDR'} brightness'),
               Text('White level: ${tune.peak} nits (higher = darker)'),
               Slider(
