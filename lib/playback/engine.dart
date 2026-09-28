@@ -212,6 +212,12 @@ class PlaybackEngine extends ChangeNotifier {
 
   static const _hdrSoftwareDecode = true;
 
+  /// Nits that mpv treats as the screen's white when tone-mapping HDR.
+  /// Measured against the phone gallery: 100 (mpv's old default) came out
+  /// about 2x too bright; 203 is the HDR reference white and matches.
+  /// Lower = brighter, higher = darker. Fine-tune with 160 / 203 / 250.
+  static const _hdrTargetPeak = 203;
+
   /// HDR / >8-bit sources: software decode + the exact mpv settings from the
   /// HDR test player (which plays these files), keeping the GL renderer.
   Future<void> _adaptForDeepColor(Player player) async {
@@ -243,9 +249,10 @@ class PlaybackEngine extends ChangeNotifier {
     }
     _eightBit = true;
     // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
-    // No custom tone-mapping / brightness settings; mpv defaults apply.
+    // Only the white level is set explicitly; mpv's own tone-mapping is kept.
     if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
     await _setProp(player, 'vf', 'format=yuv420p');
+    await _setProp(player, 'target-peak', '$_hdrTargetPeak');
     debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
     notifyListeners();
