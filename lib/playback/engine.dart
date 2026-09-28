@@ -242,17 +242,10 @@ class PlaybackEngine extends ChangeNotifier {
       return;
     }
     _eightBit = true;
+    // Only the black-screen fix: software decode + 8-bit frames, GL renderer.
+    // No custom tone-mapping / brightness settings; mpv defaults apply.
     if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
     await _setProp(player, 'vf', 'format=yuv420p');
-    await _setProp(player, 'tone-mapping', 'hable');
-    await _setProp(player, 'hdr-compute-peak', 'yes');
-    await _setProp(player, 'target-peak', '100');
-    await _setProp(player, 'target-trc', 'bt.1886');
-    await _setProp(player, 'target-prim', 'bt.709');
-    await _setProp(player, 'gamut-mapping-mode', 'perceptual');
-    await _setProp(player, 'gamma', '0.9');
-    await _setProp(player, 'video-output-levels', 'full');
-    await _setProp(player, 'dither-depth', '8');
     debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
     DeveloperLog.append('HDR path applied');
     notifyListeners();
