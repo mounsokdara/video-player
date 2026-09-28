@@ -106,8 +106,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _waitReady(player);
     final decoded = await _prepareRender(player);
     if (!decoded && _codecWarn != null && !value.hasError) {
-      // No decoder could produce video at all: a real failure, so let the
-      // caller retry (software) as before.
       value = EngineValue(hasError: true, errorDescription: _codecWarn);
       notifyListeners();
     }
@@ -175,28 +173,17 @@ class PlaybackEngine extends ChangeNotifier {
     return '';
   }
 
-  // ---- render pipeline ---------------------------------------------------
-  //
-  // The picture goes: decoder -> mpv filter chain (fps limit, resolution
-  // limit, 8-bit conversion) -> GL renderer (tone-mapping) -> Flutter texture.
-  // HDR and >8-bit sources use software decode and 8-bit frames, because the
-  // hardware path shows a black picture on many phones.
-
   SourceInfo? _src;
   bool _convert = false;
   bool _sdrMode = false;
   String? _lastVf;
 
-  /// True while the current video is HDR or >8-bit and uses the safe path.
   bool get hdrActive => _convert;
 
-  /// True = SDR look, false = HDR look. Only matters while [hdrActive].
   bool get sdrMode => _sdrMode;
 
   SourceInfo? get source => _src;
 
-  /// Neutral settings for every new file. The player is reused between files,
-  /// so anything the previous video changed has to be undone here.
   Future<void> _resetPerFile(Player player) async {
     _src = null;
     _convert = false;
@@ -240,8 +227,6 @@ class PlaybackEngine extends ChangeNotifier {
     );
   }
 
-  /// Runs once per file, after it opened. Returns false when no decoder
-  /// produced any video format.
   Future<bool> _prepareRender(Player player) async {
     final rs = RenderSettings.instance;
     await rs.load();
@@ -257,8 +242,6 @@ class PlaybackEngine extends ChangeNotifier {
     }
     await _applyRender(player);
     if (_convert) {
-      // The decoder has to restart for the hardware -> software switch and
-      // for the decoder options above.
       try {
         await player.seek(player.state.position);
       } catch (_) {}
@@ -266,9 +249,6 @@ class PlaybackEngine extends ChangeNotifier {
     return src.decoded;
   }
 
-  /// Software decoding of HDR / >8-bit video can be too slow for real time.
-  /// Dropping late frames at the decoder and skipping the loop filter on
-  /// non-reference frames trades a little quality for smoother playback.
   Future<void> _applyFastDecode(Player player) async {
     if (!RenderSettings.instance.fastDecode) return;
     await _setProp(player, 'framedrop', 'decoder+vo');
@@ -276,7 +256,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'vd-lavc-skiploopfilter', 'nonref');
   }
 
-  /// Builds the plan from the current settings and pushes it to mpv.
   Future<void> _applyRender(Player player) async {
     final src = _src;
     if (src == null || _closed) return;
@@ -293,24 +272,15 @@ class PlaybackEngine extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Applies the known-good chain first, then adds each limiter on its own and
-  /// reads the chain back. A filter this libmpv build lacks is remembered in
-  /// [RenderCaps], skipped from then on, and never breaks playback.
-  /// Records that this libmpv build can't run [name] (fps / scale) and, if
-  /// the current video was relying on it, rebuilds the chain without it so
-  /// the picture doesn't sit on a filter mpv silently refused to create.
   void _markFilterUnsupported(String name, String detail) {
-    if (RenderCaps.of(name) == false) return; // already known
-    if (RenderCaps.of(name) != null && RenderCaps.of(name) != false) return; // not one of ours
+    if (RenderCaps.of(name) == false) return;
+    if (RenderCaps.of(name) != null && RenderCaps.of(name) != false) return;
     if (name != 'fps' && name != 'scale') return;
     RenderCaps.set(name, false);
     DeveloperLog.append('render: the $name filter is not available in this libmpv build ($detail)');
     unawaited(reapplyRender());
   }
 
-  /// One-shot: builds the whole chain and sets it. [RenderProfile.plan]
-  /// already leaves out any filter [RenderCaps] has marked unsupported, so
-  /// nothing here needs to probe mpv or trust its readback.
   Future<void> _applyVf(Player player, RenderPlan plan) async {
     if (_lastVf == plan.key) return;
     await _setProp(player, 'vf', plan.key);
@@ -323,15 +293,12 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'gamma', '${t.gamma}');
   }
 
-  /// Pushes only the brightness values; cheap enough to call while dragging.
   Future<void> retune() async {
     final player = _player;
     if (player == null || _closed || !_convert) return;
     await _pushTuning(player);
   }
 
-  /// Re-applies fps limit, resolution limit and brightness after the user
-  /// changed a setting, without reopening the video.
   Future<void> reapplyRender() async {
     final player = _player;
     if (player == null || _closed) return;
@@ -339,7 +306,6 @@ class PlaybackEngine extends ChangeNotifier {
     await _applyRender(player);
   }
 
-  /// Switches the current HDR video between the SDR and HDR look.
   Future<void> setSdrMode(bool sdr) async {
     _sdrMode = sdr;
     appSettings.hdrOn = !sdr;
@@ -418,20 +384,10 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.log.listen((e) {
         final text = e.text.trim();
         DeveloperLog.append('mpv[${e.prefix}] $text');
-        // FFmpeg's own filter graph (used for fps/scale) reports a missing
-        // filter only here, as a log line, never as a thrown error. The vf
-        // property still reads back the attempted string even though the
-        // filter was never created, so this is the only reliable signal.
         final m = RegExp("No such filter: '(\\w+)'").firstMatch(text);
         if (m != null) _markFilterUnsupported(m.group(1)!, text);
       }),
       player.stream.error.listen((e) {
-        // Not every error line means the open failed:
-        //  - a hardware decoder that fails to start logs "Could not open
-        //    codec" while mpv falls back to software decoding;
-        //  - a filter this libmpv build lacks logs "Option vf: ... doesn't
-        //    exist" and simply is not applied.
-        // _openBody decides afterwards whether a frame was really decoded.
         final low = e.toLowerCase();
         if (low.contains('could not open codec')) {
           _codecWarn = e;
@@ -506,7 +462,6 @@ class PlaybackEngine extends ChangeNotifier {
   Future<void> setVolume(double v) async {
     await _player?.setVolume((v.clamp(0.0, 1.0) * 100).toDouble());
   }
-
 
   Future<void> setLooping(bool on) async {
     await _player?.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
