@@ -94,6 +94,7 @@ class PlaybackEngine extends ChangeNotifier {
         configuration: VideoControllerConfiguration(
           enableHardwareAcceleration: wantHw,
           hwdec: hwdec,
+          androidAttachSurfaceAfterVideoParameters: true,
         ),
       );
       _bind(player);
@@ -179,14 +180,15 @@ class PlaybackEngine extends ChangeNotifier {
     await _setProp(player, 'target-prim', 'bt.709');
     await _setProp(player, 'target-trc', 'srgb');
     await _setProp(player, 'tone-mapping', 'hable');
-    // Peak detection needs compute shaders, which most GLES 3.0 GPUs lack.
-    await _setProp(player, 'hdr-compute-peak', 'no');
+    await _setProp(player, 'hdr-compute-peak', 'auto');
   }
 
   /// Many Android GPUs cannot sample 10-bit (16-bit unorm) textures from the
   /// GLES renderer, which shows up as a black picture with working audio.
   /// If the decoded frames are HDR or >8-bit, convert them to 8-bit on the
   /// CPU first; the colour tags survive, so tone-mapping still happens.
+  static const _hdrSoftwareDecode = true;
+
   Future<void> _adaptForDeepColor(Player player) async {
     if (_closed || _hwdec == null || _hwdec == 'no' || _eightBit) return;
     var pix = '';
@@ -202,7 +204,16 @@ class PlaybackEngine extends ChangeNotifier {
     if (!hdr && !deep) return;
     _eightBit = true;
     await _setProp(player, 'vf', 'format=yuv420p');
-    DeveloperLog.append('HDR/10-bit source: forcing 8-bit yuv420p before GL upload');
+    if (_hdrSoftwareDecode) {
+      // Same recipe as the working HDR test player: decode on the CPU but
+      // keep the GL renderer, so mpv still tone-maps PQ/HLG down to SDR.
+      await _setProp(player, 'hwdec', 'no');
+    }
+    DeveloperLog.append('HDR/10-bit source: 8-bit yuv420p, software decode=$_hdrSoftwareDecode');
+    // Restart the decoder so the new hwdec/vf settings take effect cleanly.
+    try {
+      await player.seek(player.state.position);
+    } catch (_) {}
   }
 
   String _mediaUri(String path) {
