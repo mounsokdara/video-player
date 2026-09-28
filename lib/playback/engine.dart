@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'package:video_player_app/core/developer_log.dart';
+import 'package:video_player_app/settings/settings.dart';
 
 class EngineValue {
   const EngineValue({
@@ -46,6 +47,7 @@ class PlaybackEngine extends ChangeNotifier {
   bool _pitchShift = false;
   bool wantPlay = false;
   bool _eightBit = false;
+  String debugInfo = '';
 
   bool get hasPlayer => _player != null && !_closed;
 
@@ -171,46 +173,89 @@ class PlaybackEngine extends ChangeNotifier {
     return '';
   }
 
-  /// Flutter shows the video through an SDR surface, so HDR (PQ / HLG,
-  /// BT.2020) has to be tone-mapped down to SDR by mpv's GPU renderer.
-  /// Resets per-file state and sets tone-mapping options that work on GLES.
+  /// Neutral colour settings for every new file. The player is reused between
+  /// files, so anything the HDR path changed has to be undone here.
   Future<void> _applyHdrPipeline(Player player) async {
     _eightBit = false;
+    debugInfo = '';
     await _setProp(player, 'vf', '');
-    await _setProp(player, 'target-prim', 'bt.709');
-    await _setProp(player, 'target-trc', 'srgb');
-    await _setProp(player, 'tone-mapping', 'hable');
+    await _setProp(player, 'tone-mapping', 'auto');
     await _setProp(player, 'hdr-compute-peak', 'auto');
+    await _setProp(player, 'target-peak', 'auto');
+    await _setProp(player, 'target-trc', 'auto');
+    await _setProp(player, 'target-prim', 'auto');
+    await _setProp(player, 'gamut-mapping-mode', 'auto');
+    await _setProp(player, 'gamma', '0');
+    await _setProp(player, 'video-output-levels', 'auto');
+    await _setProp(player, 'dither-depth', 'no');
   }
 
-  /// Many Android GPUs cannot sample 10-bit (16-bit unorm) textures from the
-  /// GLES renderer, which shows up as a black picture with working audio.
-  /// If the decoded frames are HDR or >8-bit, convert them to 8-bit on the
-  /// CPU first; the colour tags survive, so tone-mapping still happens.
+  /// Same detection as the working HDR test player: transfer function,
+  /// primaries, matrix, peak and bit depth are all checked.
+  bool _looksHdr({
+    required String gamma,
+    required String primaries,
+    required String matrix,
+    required String sigPeak,
+    required String pix,
+  }) {
+    if (gamma.contains('hlg') ||
+        gamma.contains('pq') ||
+        gamma.contains('st2084') ||
+        gamma.contains('smpte2084') ||
+        gamma.contains('bt.2100')) {
+      return true;
+    }
+    final wide = primaries.contains('2020');
+    if (wide) {
+      final peak = double.tryParse(sigPeak);
+      if (peak != null && peak > 1.1) return true;
+      if (pix.contains('10') || pix.contains('p010')) return true;
+    }
+    return matrix.contains('2020');
+  }
+
   static const _hdrSoftwareDecode = true;
 
+  /// HDR / >8-bit sources: software decode + the exact mpv settings from the
+  /// HDR test player (which plays these files), keeping the GL renderer.
   Future<void> _adaptForDeepColor(Player player) async {
     if (_closed || _hwdec == null || _hwdec == 'no' || _eightBit) return;
     var pix = '';
-    for (var i = 0; i < 25 && !_closed; i++) {
+    var gamma = '';
+    for (var i = 0; i < 30 && !_closed; i++) {
       pix = await _getProp(player, 'video-params/pixelformat');
-      if (pix.isNotEmpty) break;
+      gamma = await _getProp(player, 'video-params/gamma');
+      if (pix.isNotEmpty && gamma.isNotEmpty) break;
       await Future<void>.delayed(const Duration(milliseconds: 60));
     }
-    final gamma = await _getProp(player, 'video-params/gamma');
-    final hdr = gamma == 'pq' || gamma == 'hlg';
+    final primaries = await _getProp(player, 'video-params/primaries');
+    final matrix = await _getProp(player, 'video-params/colormatrix');
+    final sigPeak = await _getProp(player, 'video-params/sig-peak');
+    final hdr = _looksHdr(gamma: gamma, primaries: primaries, matrix: matrix, sigPeak: sigPeak, pix: pix);
     final deep = RegExp(r'p0(10|12|16)|p(10|12|14|16)(le|be)?$').hasMatch(pix);
-    DeveloperLog.append('video pixfmt=$pix gamma=$gamma hdr=$hdr deep=$deep hwdec=$_hwdec');
-    if (!hdr && !deep) return;
-    _eightBit = true;
-    await _setProp(player, 'vf', 'format=yuv420p');
-    if (_hdrSoftwareDecode) {
-      // Same recipe as the working HDR test player: decode on the CPU but
-      // keep the GL renderer, so mpv still tone-maps PQ/HLG down to SDR.
-      await _setProp(player, 'hwdec', 'no');
+    final info = 'pix=$pix gamma=$gamma prim=$primaries matrix=$matrix peak=$sigPeak hdr=$hdr deep=$deep hwdec=$_hwdec';
+    debugInfo = info;
+    DeveloperLog.append('video $info');
+    if (!hdr && !deep) {
+      notifyListeners();
+      return;
     }
-    DeveloperLog.append('HDR/10-bit source: 8-bit yuv420p, software decode=$_hdrSoftwareDecode');
-    // Restart the decoder so the new hwdec/vf settings take effect cleanly.
+    _eightBit = true;
+    if (_hdrSoftwareDecode) await _setProp(player, 'hwdec', 'no');
+    await _setProp(player, 'vf', 'format=yuv420p');
+    await _setProp(player, 'tone-mapping', 'hable');
+    await _setProp(player, 'hdr-compute-peak', 'yes');
+    await _setProp(player, 'target-peak', '100');
+    await _setProp(player, 'target-trc', 'bt.1886');
+    await _setProp(player, 'target-prim', 'bt.709');
+    await _setProp(player, 'gamut-mapping-mode', 'perceptual');
+    await _setProp(player, 'gamma', '0.9');
+    await _setProp(player, 'video-output-levels', 'full');
+    await _setProp(player, 'dither-depth', '8');
+    debugInfo = 'HDR path ON (sw decode=$_hdrSoftwareDecode) | $info';
+    DeveloperLog.append('HDR path applied');
+    notifyListeners();
     try {
       await player.seek(player.state.position);
     } catch (_) {}
@@ -414,6 +459,7 @@ class AppVideo extends StatefulWidget {
 
 class _AppVideoState extends State<AppVideo> {
   VideoController? _controller;
+  String _info = '';
 
   @override
   void initState() {
@@ -440,8 +486,12 @@ class _AppVideoState extends State<AppVideo> {
 
   void _onEngine() {
     final next = widget.engine.video;
-    if (!identical(next, _controller) && mounted) {
-      setState(() => _controller = next);
+    final info = widget.engine.debugInfo;
+    if (mounted && (!identical(next, _controller) || info != _info)) {
+      setState(() {
+        _controller = next;
+        _info = info;
+      });
     }
   }
 
@@ -449,11 +499,31 @@ class _AppVideoState extends State<AppVideo> {
   Widget build(BuildContext context) {
     final c = _controller;
     if (c == null) return const ColoredBox(color: Colors.black);
-    return Video(
+    final video = Video(
       controller: c,
       fill: Colors.black,
       fit: widget.fit,
       controls: NoVideoControls,
+    );
+    if (!(appSettings.developerEnabled && appSettings.debugLog) || _info.isEmpty) {
+      return video;
+    }
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        video,
+        Positioned(
+          left: 6,
+          top: 40,
+          right: 6,
+          child: IgnorePointer(
+            child: Text(
+              _info,
+              style: const TextStyle(color: Colors.yellowAccent, fontSize: 10, backgroundColor: Colors.black54),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
