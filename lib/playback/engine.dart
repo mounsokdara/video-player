@@ -279,6 +279,10 @@ class PlaybackEngine extends ChangeNotifier {
     final t = RenderSettings.instance.tuning(sdr: _sdrMode);
     await _setProp(player, 'target-peak', '${t.peak}');
     await _setProp(player, 'gamma', '${t.gamma}');
+    if (!_convert) {
+      await _setProp(player, 'target-peak', 'auto');
+      await _setProp(player, 'gamma', '${t.gamma}');
+    }
   }
 
   Future<void> retune() async {
