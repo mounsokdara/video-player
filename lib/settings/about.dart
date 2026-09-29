@@ -13,7 +13,7 @@ class AboutInfo {
   AboutInfo._();
   static const name = 'Video Player';
   static const author = 'Moun Sokdara';
-  static const displayVersion = '1.0.1';
+  static const displayVersion = '1.0.2';
   static const legalese = 'Local-only Android player. Material 3.';
 }
 
@@ -108,6 +108,17 @@ class _AboutPageState extends State<AboutPage> {
               applicationName: AboutInfo.name,
               applicationVersion: version,
               applicationLegalese: '${AboutInfo.legalese}\nCreated by ${AboutInfo.author}.',
+            ),
+          ),
+          const Divider(height: 24),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.new_releases_outlined),
+            title: const Text('What’s new in 1.0.2'),
+            subtitle: const Text(
+              'Added HDR Render (not the best performing)\\n'
+              'Added FFmpeg module\\n'
+              'Added more debug log toggles: VideoLogOverlay, playback state, media info, render info, decoder info, timing/screen, player events, gesture events, and lifecycle events.',
             ),
           ),
           ListTile(
