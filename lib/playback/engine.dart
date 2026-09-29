@@ -639,7 +639,7 @@ class _AppVideoState extends State<AppVideo> {
       fit: widget.fit,
       controls: NoVideoControls,
     );
-    if (!appSettings.videoLogOverlay) return video;
+    if (!appSettings.developerEnabled || !appSettings.videoLogOverlay) return video;
     return Stack(
       fit: StackFit.passthrough,
       children: [
