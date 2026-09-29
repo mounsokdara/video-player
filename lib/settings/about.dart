@@ -126,12 +126,102 @@ class _AboutPageState extends State<AboutPage> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Log debug'),
-              subtitle: const Text('Write extra player and native traces to the console'),
+              subtitle: const Text('Enable developer logging'),
               value: appSettings.debugLog,
               onChanged: (v) {
                 setState(() => appSettings.debugLog = v);
                 unawaited(appSettings.save());
                 DeveloperLog.append('debugLog=$v');
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('VideoLogOverlay'),
+              subtitle: const Text('Show live yellow diagnostic text over the video'),
+              value: appSettings.videoLogOverlay,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogOverlay = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Overlay: playback state'),
+              subtitle: const Text('Position, duration, play/pause, buffering, size and FPS'),
+              value: appSettings.videoLogShowState,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogShowState = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Overlay: media info'),
+              subtitle: const Text('Pixel format, transfer, primaries, matrix and HDR detection'),
+              value: appSettings.videoLogShowMedia,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogShowMedia = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Overlay: render info'),
+              subtitle: const Text('Render mode and active video filter'),
+              value: appSettings.videoLogShowRender,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogShowRender = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Overlay: decoder info'),
+              subtitle: const Text('Hardware/software decoder and render capability'),
+              value: appSettings.videoLogShowDecoder,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogShowDecoder = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Overlay: timing / screen'),
+              subtitle: const Text('Display resolution, refresh rate and render timing data'),
+              value: appSettings.videoLogShowTiming,
+              onChanged: (v) async {
+                setState(() => appSettings.videoLogShowTiming = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Log player events'),
+              subtitle: const Text('Open, play, pause, seek, repeat and close events'),
+              value: appSettings.logPlayerEvents,
+              onChanged: (v) async {
+                setState(() => appSettings.logPlayerEvents = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Log gesture events'),
+              subtitle: const Text('Pinch, seek, brightness, volume and tap gesture events'),
+              value: appSettings.logGestureEvents,
+              onChanged: (v) async {
+                setState(() => appSettings.logGestureEvents = v);
+                await appSettings.save();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Log lifecycle events'),
+              subtitle: const Text('App/player resume, pause and background transitions'),
+              value: appSettings.logLifecycleEvents,
+              onChanged: (v) async {
+                setState(() => appSettings.logLifecycleEvents = v);
+                await appSettings.save();
               },
             ),
             ListTile(
