@@ -17,6 +17,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/core/developer_log.dart';
 import 'package:video_player_app/player/hud.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
@@ -225,6 +226,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    DeveloperLog.lifecycle('state=${state.name}');
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _persistProgress();
       unawaited(PlaybackSession.onAway(
