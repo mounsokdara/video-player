@@ -51,8 +51,10 @@ class PlaybackEngine extends ChangeNotifier {
   String? _codecWarn;
 
   bool get hasPlayer => _player != null && !_closed;
+  String get hwdecName => _hwdec ?? 'unknown';
 
   Future<void> open(String path, {required String hwdec}) async {
+    DeveloperLog.player('open path=$path hwdec=$hwdec');
     await _queue(() => _openBody(path, hwdec: hwdec));
   }
 
@@ -112,11 +114,13 @@ class PlaybackEngine extends ChangeNotifier {
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (value.hasError) {
+      DeveloperLog.player('open error=' + (value.errorDescription ?? 'Source error'));
       throw StateError(value.errorDescription ?? 'Source error');
     }
   }
 
   Future<void> applyTempo({required double rate, required bool pitchShift}) async {
+    DeveloperLog.player('tempo rate=$rate pitchShift=$pitchShift');
     _rate = rate.clamp(0.25, 8.0).toDouble();
     _pitchShift = pitchShift;
     final player = _player;
@@ -233,6 +237,7 @@ class PlaybackEngine extends ChangeNotifier {
     _convert = src.needsConvert;
     _sdrMode = appSettings.rememberHdr && !appSettings.hdrOn;
     DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
+    DeveloperLog.player('source ${src.describe()} hwdec=$_hwdec');
     if (_convert) {
       await _setProp(player, 'hwdec', 'no');
     }
@@ -426,6 +431,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> play() async {
+    DeveloperLog.player('play');
     wantPlay = true;
     _alive.add(this);
     await _pauseOthers();
@@ -433,6 +439,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> pause() async {
+    DeveloperLog.player('pause');
     wantPlay = false;
     await _player?.pause();
   }
@@ -448,6 +455,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration d) async {
+    DeveloperLog.player('seek ' + d.inMilliseconds.toString() + 'ms');
     await _player?.seek(d);
   }
 
@@ -456,11 +464,13 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> setLooping(bool on) async {
+    DeveloperLog.player('looping=' + on.toString());
     await _player?.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
   }
 
   Future<void> close() async {
     if (_closed) return;
+    DeveloperLog.player('close');
     _closed = true;
     wantPlay = false;
     _alive.remove(this);
@@ -516,6 +526,71 @@ class AppVideo extends StatefulWidget {
   State<AppVideo> createState() => _AppVideoState();
 }
 
+class VideoLogOverlay extends StatelessWidget {
+  const VideoLogOverlay({super.key, required this.engine});
+
+  final PlaybackEngine engine;
+
+  String _fmt(Duration d) {
+    final ms = d.inMilliseconds;
+    final h = ms ~/ 3600000;
+    final m = (ms ~/ 60000) % 60;
+    final s = (ms ~/ 1000) % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = engine.value;
+    final src = engine.source;
+    final screen = ScreenInfo.current();
+    final lines = <String>['VIDEO LOG'];
+    if (appSettings.videoLogShowState) {
+      lines.add('STATE  ${v.isPlaying ? 'PLAYING' : 'PAUSED'}${v.isBuffering ? ' · BUFFERING' : ''}');
+      lines.add('TIME   ${_fmt(v.position)} / ${_fmt(v.duration)}');
+      lines.add('SIZE   ${v.size.width.round()}×${v.size.height.round()}  ${src?.fps.toStringAsFixed(2) ?? '--'} fps');
+      lines.add('ERROR  ${v.hasError ? (v.errorDescription ?? 'unknown') : 'none'}');
+    }
+    if (appSettings.videoLogShowMedia && src != null) {
+      lines.add('MEDIA  ${src.pix} · ${src.gamma}');
+      lines.add('COLOR  ${src.primaries} · ${src.matrix} · peak=${src.sigPeak}');
+      lines.add('HDR    ${src.hdr ? 'HDR' : 'SDR'} · deep=${src.deep}');
+    }
+    if (appSettings.videoLogShowRender) {
+      lines.add('RENDER ${engine.sdrMode ? 'SDR' : 'HDR'} mode · ${engine.debugInfo.isEmpty ? '-' : engine.debugInfo}');
+    }
+    if (appSettings.videoLogShowDecoder) {
+      lines.add('DECODER ${engine.hwdecName} · hw=${engine.hwdecName != 'no'}');
+    }
+    if (appSettings.videoLogShowTiming) {
+      lines.add('SCREEN ${screen.width.round()}×${screen.height.round()} · ${screen.hz.toStringAsFixed(1)}Hz');
+    }
+    return Positioned(
+      left: 6,
+      top: 40,
+      right: 6,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          color: Colors.black.withValues(alpha: 0.58),
+          child: Text(
+            lines.join('\n'),
+            style: const TextStyle(
+              color: Colors.yellowAccent,
+              fontSize: 10,
+              height: 1.2,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AppVideoState extends State<AppVideo> {
   VideoController? _controller;
   String _info = '';
@@ -564,24 +639,12 @@ class _AppVideoState extends State<AppVideo> {
       fit: widget.fit,
       controls: NoVideoControls,
     );
-    if (!(appSettings.developerEnabled && appSettings.debugLog) || _info.isEmpty) {
-      return video;
-    }
+    if (!appSettings.videoLogOverlay) return video;
     return Stack(
       fit: StackFit.passthrough,
       children: [
         video,
-        Positioned(
-          left: 6,
-          top: 40,
-          right: 6,
-          child: IgnorePointer(
-            child: Text(
-              _info,
-              style: const TextStyle(color: Colors.yellowAccent, fontSize: 10, backgroundColor: Colors.black54),
-            ),
-          ),
-        ),
+        VideoLogOverlay(engine: widget.engine),
       ],
     );
   }
