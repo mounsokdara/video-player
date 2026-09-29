@@ -55,7 +55,7 @@ class _RenderSheetState extends State<_RenderSheet> {
   @override
   Widget build(BuildContext context) {
     final e = _e;
-    final active = e?.hdrActive ?? false;
+    final active = e != null && e.hasPlayer;
     final tune = _rs.tuning(sdr: _sdr);
 
     return SafeArea(
@@ -84,8 +84,8 @@ class _RenderSheetState extends State<_RenderSheet> {
                     : null,
               ),
               _hint(active
-                  ? 'Switches this video live. Neither mode is real HDR output: the picture is always tone-mapped for your screen. HDR matches the phone gallery, SDR is brighter.'
-                  : 'Only for HDR videos. The current video is not HDR.'),
+                  ? 'Switches the active render mode live. For HDR videos this changes HDR/SDR tone mapping; for SDR videos it applies the selected render tuning.'
+                  : 'Start a video to change the render mode.'),
               _title('${_sdr ? 'SDR' : 'HDR'} brightness'),
               Text('White level: ${tune.peak} nits (higher = darker)'),
               Slider(
