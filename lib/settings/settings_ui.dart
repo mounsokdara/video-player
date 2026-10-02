@@ -512,13 +512,24 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                       s.dynamicColor = false;
                     }),
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
+                  Builder(builder: (context) {
+                    final cs = Theme.of(context).colorScheme;
+                    final rgb = s.seedColor & 0xFFFFFF;
+                    final isCustom = !s.dynamicColor &&
+                        !schemeChips.any((c) => (c.circle.toARGB32() & 0xFFFFFF) == rgb);
+                    return ListTile(
+                    contentPadding: isCustom ? const EdgeInsets.symmetric(horizontal: 12) : EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: isCustom ? BorderSide(color: cs.primary, width: 2) : BorderSide.none,
+                    ),
+                    selected: isCustom,
+                    selectedTileColor: cs.primaryContainer.withValues(alpha: 0.5),
                     enabled: !s.dynamicColor,
                     leading: CircleAvatar(backgroundColor: Color(s.seedColor)),
                     title: const Text('Custom color'),
                     subtitle: Text('#${s.seedColor.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'),
-                    trailing: const Icon(Icons.chevron_right),
+                    trailing: Icon(isCustom ? Icons.check_circle : Icons.chevron_right),
                     onTap: s.dynamicColor
                         ? null
                         : () async {
@@ -530,7 +541,8 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                               });
                             }
                           },
-                  ),
+                    );
+                  }),
                 ],
               ),
             ),
