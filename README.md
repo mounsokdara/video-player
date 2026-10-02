@@ -1,3 +1,11 @@
+<!--
+DEV NOTE (hidden, not shown on GitHub):
+Edit and test in the dev repo FIRST: https://github.com/mounsokdara/video-player.Dev (private).
+Only publish to this public repo after it works in dev.
+Every push to main here runs "Build APK" and publishes a new "latest" release.
+For docs-only changes, put [skip ci] in the commit message.
+-->
+
 # Video Player
 
 Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files stay on the device.
