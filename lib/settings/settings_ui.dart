@@ -12,6 +12,7 @@ import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
 import 'package:video_player_app/settings/settings.dart';
 import 'package:video_player_app/playback/session.dart';
+import 'package:video_player_app/core/material_you.dart';
 import 'package:video_player_app/core/widgets.dart';
 
 class SettingsHub extends StatelessWidget {
@@ -447,17 +448,6 @@ class ThemeSettings extends StatefulWidget {
 }
 
 class _ThemeSettingsState extends State<ThemeSettings> {
-  static const seeds = <(String, int)>[
-    ('Steel', 0xFF8BA3B8),
-    ('Ink', 0xFFC5CDD6),
-    ('Slate', 0xFF6E7C8A),
-    ('Teal', 0xFF4F8B8A),
-    ('Forest', 0xFF5F7A63),
-    ('Ocean', 0xFF4A6FA5),
-    ('Sand', 0xFFA09080),
-    ('Rose', 0xFF8E6B73),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final s = appSettings;
@@ -511,30 +501,16 @@ class _ThemeSettingsState extends State<ThemeSettings> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Seed color', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  ChipScroller(
-                    children: [
-                      for (final e in seeds)
-                        GestureDetector(
-                          onTap: () => set(() {
-                            s.seedColor = e.$2;
-                            s.dynamicColor = false;
-                          }),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: Color(e.$2),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: s.seedColor == e.$2 ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
-                                width: 3,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                  const Text('Material You color', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  // Same colour plates as Khmer Calendar.
+                  MaterialYouChips(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    selected: Color(s.seedColor),
+                    onPick: (c) => set(() {
+                      s.seedColor = c.circle.toARGB32();
+                      s.dynamicColor = false;
+                    }),
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
