@@ -307,8 +307,8 @@ class MaterialYouChips extends StatelessWidget {
             padding: padding,
             scrollDirection: Axis.horizontal,
             itemCount: schemeChips.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (_, i) {
+            separatorBuilder: (context, index) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
               final s = schemeChips[i];
               return Tooltip(
                 message: s.label,
