@@ -463,7 +463,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + pad.bottom),
         children: [
-          const Text('Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('Appearance', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           // Theme button, same control as Khmer Calendar: text-only, full width, check mark on wide screens.
           LayoutBuilder(
