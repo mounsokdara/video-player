@@ -475,14 +475,25 @@ class _ThemeSettingsState extends State<ThemeSettings> {
         children: [
           const Text('Mode', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          SegmentedButton<ThemeModePref>(
-            segments: const [
-              ButtonSegment(value: ThemeModePref.system, label: Text('System'), icon: Icon(Icons.brightness_auto)),
-              ButtonSegment(value: ThemeModePref.light, label: Text('Light'), icon: Icon(Icons.light_mode)),
-              ButtonSegment(value: ThemeModePref.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode)),
-            ],
-            selected: {s.themeMode},
-            onSelectionChanged: (v) => set(() => s.themeMode = v.first),
+          // Theme button, same control as Khmer Calendar: text-only, full width, check mark on wide screens.
+          LayoutBuilder(
+            builder: (ctx, box) => FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: box.maxWidth),
+                child: SegmentedButton<ThemeModePref>(
+                  showSelectedIcon: box.maxWidth > 380,
+                  segments: const [
+                    ButtonSegment(value: ThemeModePref.light, label: Text('Light')),
+                    ButtonSegment(value: ThemeModePref.dark, label: Text('Dark')),
+                    ButtonSegment(value: ThemeModePref.system, label: Text('System')),
+                  ],
+                  selected: {s.themeMode},
+                  onSelectionChanged: (v) => set(() => s.themeMode = v.first),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 20),
           SwitchListTile(
