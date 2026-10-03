@@ -57,8 +57,8 @@ jobs:
           blk = "\n".join([
               "    signingConfigs {",
               "        create(\"release\") {",
-              "            val props = java.util.Properties()",
-              "            props.load(java.io.FileInputStream(rootProject.file(\"key.properties\")))",
+              "            val props = Properties()",
+              "            props.load(FileInputStream(rootProject.file(\"key.properties\")))",
               "            keyAlias = props.getProperty(\"keyAlias\")",
               "            keyPassword = props.getProperty(\"keyPassword\")",
               "            storeFile = file(props.getProperty(\"storeFile\"))",
@@ -69,6 +69,7 @@ jobs:
               "",
           ])
           s = s.replace("    buildTypes {", blk + "    buildTypes {", 1)
+          s = "import java.io.FileInputStream\nimport java.util.Properties\n\n" + s
           s = s.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
           open(p, "w").write(s)
           PY
