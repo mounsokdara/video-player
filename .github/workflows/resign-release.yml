@@ -74,7 +74,13 @@ jobs:
           PY
           fi
       - run: flutter pub get
-      - run: flutter build apk --release
+      - name: Build release APK
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build.log || {
+            echo "::error title=BuildFailed::$(grep -E 'What went wrong|FAILURE|error:|Error:|e: |Exception' -A4 build.log | head -40 | tr '\n' '|' | cut -c1-1800)"
+            exit 1
+          }
       - name: Verify APK is signed with the NEW key
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
