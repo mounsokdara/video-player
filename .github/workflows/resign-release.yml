@@ -1,0 +1,104 @@
+# One-off: rebuild old release APKs with the rotated signing key.
+name: Resign old releases
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "JSON array of release tags to rebuild"
+        default: '["v1.0.0_Indev","v1.0.0_BETA","v1.0.0_pre-Release","v1.0.0","v1.0.1"]'
+permissions:
+  contents: write
+jobs:
+  resign:
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(inputs.tags) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.tag }}
+      - name: Read flutter version used by this tag
+        id: fv
+        run: |
+          V=$(grep -m1 'flutter-version' .github/workflows/build-apk.yml | sed -E 's/.*"([0-9.]+)".*/\1/')
+          echo "Flutter $V"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fv.outputs.v }}
+          channel: stable
+          cache: true
+      - name: Restore new signing key (overrides leaked files in this old tag)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$KS_B64" || { echo "ANDROID_KEYSTORE_BASE64 missing"; exit 1; }
+          echo "$KS_B64" | base64 -d > android/app/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
+      - name: Patch tags that were signed with the public debug key
+        run: |
+          F=android/app/build.gradle.kts
+          if grep -q 'getByName("debug")' "$F" && ! grep -q 'key.properties' "$F"; then
+            echo "Patching debug-signed gradle to use release key"
+            python3 - <<'PY'
+          p = "android/app/build.gradle.kts"
+          s = open(p).read()
+          blk = "\n".join([
+              "    signingConfigs {",
+              "        create(\"release\") {",
+              "            val props = Properties()",
+              "            props.load(FileInputStream(rootProject.file(\"key.properties\")))",
+              "            keyAlias = props.getProperty(\"keyAlias\")",
+              "            keyPassword = props.getProperty(\"keyPassword\")",
+              "            storeFile = file(props.getProperty(\"storeFile\"))",
+              "            storePassword = props.getProperty(\"storePassword\")",
+              "        }",
+              "    }",
+              "",
+              "",
+          ])
+          s = s.replace("    buildTypes {", blk + "    buildTypes {", 1)
+          s = "import java.io.FileInputStream\nimport java.util.Properties\n\n" + s
+          s = s.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
+          open(p, "w").write(s)
+          PY
+          fi
+      - run: flutter pub get
+      - name: Build release APK
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build.log || {
+            echo "::error title=BuildFailed::$(grep -E 'What went wrong|FAILURE|error:|Error:|e: |Exception' -A4 build.log | head -40 | tr '\n' '|' | cut -c1-1800)"
+            exit 1
+          }
+      - name: Verify APK is signed with the NEW key
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          GOT=$("$APKSIGNER" verify --print-certs "$APK" | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          WANT=$(keytool -list -v -keystore android/app/upload-keystore.jks -storepass "$KS_PASS" | grep -m1 'SHA256:' | awk '{print $NF}' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "apk cert:      $GOT"
+          echo "expected cert: $WANT"
+          test -n "$GOT" && test "$GOT" = "$WANT"
+      - name: Replace release APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/up"
+          cp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/up/com.mounsokdara.video_player.apk"
+          gh release upload "$TAG" "$RUNNER_TEMP/up/com.mounsokdara.video_player.apk" --clobber
