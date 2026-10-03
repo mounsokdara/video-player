@@ -46,6 +46,33 @@ jobs:
           test -n "$KS_B64" || { echo "ANDROID_KEYSTORE_BASE64 missing"; exit 1; }
           echo "$KS_B64" | base64 -d > android/app/upload-keystore.jks
           printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
+      - name: Patch tags that were signed with the public debug key
+        run: |
+          F=android/app/build.gradle.kts
+          if grep -q 'getByName("debug")' "$F" && ! grep -q 'key.properties' "$F"; then
+            echo "Patching debug-signed gradle to use release key"
+            python3 - <<'PY'
+          p = "android/app/build.gradle.kts"
+          s = open(p).read()
+          blk = "\n".join([
+              "    signingConfigs {",
+              "        create(\"release\") {",
+              "            val props = java.util.Properties()",
+              "            props.load(java.io.FileInputStream(rootProject.file(\"key.properties\")))",
+              "            keyAlias = props.getProperty(\"keyAlias\")",
+              "            keyPassword = props.getProperty(\"keyPassword\")",
+              "            storeFile = file(props.getProperty(\"storeFile\"))",
+              "            storePassword = props.getProperty(\"storePassword\")",
+              "        }",
+              "    }",
+              "",
+              "",
+          ])
+          s = s.replace("    buildTypes {", blk + "    buildTypes {", 1)
+          s = s.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
+          open(p, "w").write(s)
+          PY
+          fi
       - run: flutter pub get
       - run: flutter build apk --release
       - name: Verify APK is signed with the NEW key
