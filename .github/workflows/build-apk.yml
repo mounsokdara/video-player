@@ -55,8 +55,8 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: Video Player v1.0.2
+          tag_name: v1.0.2.1
+          name: Video Player v1.0.2.1
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           fail_on_unmatched_files: true
           prerelease: false
@@ -64,6 +64,11 @@ jobs:
           generate_release_notes: false
           body: |
             # Changelog
+
+            ## 1.0.2.1
+
+            Small change:
+            - Added a better snackbar instead of the long, wide default snackbar.
 
             ## 1.0.2
             
