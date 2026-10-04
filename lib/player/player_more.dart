@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'package:video_player_app/core/insets.dart';
-import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
 import 'package:video_player_app/settings/settings.dart';
 

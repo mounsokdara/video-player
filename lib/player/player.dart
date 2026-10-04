@@ -17,11 +17,13 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/crash.dart';
+import 'package:video_player_app/core/developer_log.dart';
 import 'package:video_player_app/player/hud.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/player/render_sheet.dart';
 import 'package:video_player_app/player/player_fx.dart';
 import 'package:video_player_app/player/player_more.dart';
 import 'package:video_player_app/player/player_picture.dart';
@@ -61,7 +63,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Timer? persistTimer;
   DateTime now = DateTime.now();
   int battery = 100;
-  bool hdr = true;
   late AspectMode aspect;
   double speed = 1;
   Offset? panStart;
@@ -149,7 +150,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     index = widget.index.clamp(0, widget.playlist.length - 1);
     aspect = appSettings.aspect;
     speed = appSettings.rememberSpeed ? appSettings.speed : 1;
-    hdr = appSettings.rememberHdr ? appSettings.hdrOn : true;
     night = appSettings.nightMode;
     mirror = appSettings.mirror;
     invert = appSettings.invertColors;
@@ -226,6 +226,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    DeveloperLog.lifecycle('state=${state.name}');
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _persistProgress();
       unawaited(PlaybackSession.onAway(
@@ -778,14 +779,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   double _ytMaxAnimT() => Curves.easeInOutCubic.transform(_ytMaxAnim.value);
 
-  double _fit(double v, double a, double b) {
-    final lo = math.min(a, b);
-    final hi = math.max(a, b);
-    return v.clamp(lo, hi);
-  }
-
   double _ytPaneMaxH(Size screen, double topGap, double t) {
-    final usable = _fit(screen.height - topGap, 1.0, math.max(1.0, screen.height));
+    final usable = (screen.height - topGap).clamp(120.0, screen.height);
     final w = screen.width;
     final src = _sourceVideoSize();
     final ar = src.width / math.max(src.height, 1.0);
@@ -795,11 +790,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         : (_portraitVideo ? w * 16 / 9 : w * 9 / 16);
     final cap916 = w * 16 / 9;
     final leave = ui.lerpDouble(math.min(128.0, usable * 0.18), 0, t)!;
-    final watchH = _fit(
-      math.min(natural, math.min(cap916, usable - leave)),
-      math.min(120.0, usable),
-      usable,
-    );
+    final watchH = math.min(natural, math.min(cap916, usable - leave)).clamp(120.0, usable);
     return ui.lerpDouble(watchH, screen.height, t)!;
   }
 
@@ -898,7 +889,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           if (topGap > 0.5) SizedBox(height: topGap),
           SizedBox(
             width: size.width,
-            height: _fit(paneH, 96.0, math.max(96.0, size.height - topGap)),
+            height: paneH.clamp(96.0, math.max(96.0, size.height - topGap)),
             child: _stage(c, Size(size.width, paneH), stagePad, watch: t < 0.85),
           ),
           if (rest > 1)
@@ -918,10 +909,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Widget _youtubeWide(PlaybackEngine? c, Size size, EdgeInsets pad) {
     final t = _ytMaxAnimT();
     final watchLike = t < 0.85;
-    final hi = math.min(400.0, math.max(0.0, size.width * 0.42));
-    final lo = math.min(240.0, hi);
-    final listW = ui.lerpDouble(_fit(size.width * 0.36, lo, hi), 0, t)!;
-    final leftW = _fit(size.width - listW, 0.0, size.width);
+    final listW = ui.lerpDouble(
+      math.min(400.0, size.width * 0.36).clamp(240.0, size.width * 0.42),
+      0,
+      t,
+    )!;
+    final leftW = math.max(200.0, size.width - listW);
     final detailsKeep = ui.lerpDouble(148, 0, t)!;
     final stagePad = EdgeInsets.lerp(EdgeInsets.zero, pad, t)!;
     final inset = ui.lerpDouble(12, 0, t)!;
@@ -945,11 +938,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                   aspect == AspectMode.original ? fromVideo : w * 9 / 16,
                   math.min(w * 16 / 9, math.max(120.0, box.maxHeight - detailsKeep)),
                 );
-                final videoH = _fit(
-                  ui.lerpDouble(watchH, box.maxHeight, t)!,
-                  math.min(96.0, box.maxHeight),
-                  math.max(1.0, box.maxHeight),
-                );
+                final videoH = ui.lerpDouble(watchH, box.maxHeight, t)!.clamp(96.0, box.maxHeight);
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1210,49 +1199,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     );
   }
 
-  Widget _ytQueueOverlay() {
-    final size = MediaQuery.sizeOf(context);
-    final pad = SystemBars.rawOf(context);
-    final landscape = size.width > size.height;
-    final panelW = landscape ? math.min(420.0, size.width * 0.46) : size.width;
-    return Positioned.fill(
-      child: Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(
-            onTap: () => setState(() => _ytQueue = false),
-            child: ColoredBox(color: Colors.black.withValues(alpha: 0.55)),
-          ),
-        ),
-        Align(
-          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
-          child: Material(
-            color: Theme.of(context).colorScheme.surface,
-            elevation: 16,
-            borderRadius: landscape
-                ? const BorderRadius.horizontal(left: Radius.circular(16))
-                : const BorderRadius.vertical(top: Radius.circular(16)),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              width: panelW,
-              height: landscape ? size.height : size.height * 0.92,
-              child: _youtubeQueueBody(
-                context,
-                pad,
-                onClose: () => setState(() => _ytQueue = false),
-                onPick: (i) {
-                  setState(() => _ytQueue = false);
-                  index = i;
-                  unawaited(_openCurrent());
-                },
-              ),
-            ),
-          ),
-        ),
-      ],
-      ),
-    );
-  }
 
   Widget _watchMeta() {
     final scheme = Theme.of(context).colorScheme;
@@ -1460,9 +1406,23 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   Widget _titleBtn(String id) {
     switch (id) {
       case 'hdr':
-        return TextButton(
-          onPressed: () => setState(() => hdr = !hdr),
-          child: Text(hdr ? 'HDR' : 'SDR', style: TextStyle(color: hdr ? Colors.white : Colors.white54, fontWeight: FontWeight.w700)),
+        return ListenableBuilder(
+          listenable: Listenable.merge([if (vc != null) vc!]),
+          builder: (context, _) {
+            final e = vc;
+            final active = e?.hdrActive ?? false;
+            final label = active && !(e?.sdrMode ?? true) ? 'HDR' : 'SDR';
+            return TextButton(
+              onPressed: () => showRenderSheet(context, e),
+              onLongPress: () {
+                if (e != null && e.hdrActive) e.setSdrMode(!e.sdrMode);
+              },
+              child: Text(
+                label,
+                style: TextStyle(color: active ? Colors.white : Colors.white54, fontWeight: FontWeight.w700),
+              ),
+            );
+          },
         );
       case 'eq':
         return IconButton(

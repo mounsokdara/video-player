@@ -334,15 +334,6 @@ Future<T?> showAppSheet<T>({
   );
 }
 
-Future<void> showVideoMenu(BuildContext context, VideoItem item, {required VoidCallback onChanged, required VoidCallback onPlay}) async {
-  await showItemsMenu(
-    context,
-    items: [item],
-    allowRename: true,
-    onChanged: onChanged,
-    onPlay: (_) => onPlay(),
-  );
-}
 
 Future<void> showItemsMenu(
   BuildContext context, {

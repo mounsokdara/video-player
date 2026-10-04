@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'package:video_player_app/core/developer_log.dart';
+import 'package:video_player_app/playback/render_profile.dart';
+import 'package:video_player_app/settings/settings.dart';
+
 class EngineValue {
   const EngineValue({
     this.isInitialized = false,
@@ -43,10 +47,14 @@ class PlaybackEngine extends ChangeNotifier {
   double _rate = 1;
   bool _pitchShift = false;
   bool wantPlay = false;
+  String debugInfo = '';
+  String? _codecWarn;
 
   bool get hasPlayer => _player != null && !_closed;
+  String get hwdecName => _hwdec ?? 'unknown';
 
   Future<void> open(String path, {required String hwdec}) async {
+    DeveloperLog.player('open path=$path hwdec=$hwdec');
     await _queue(() => _openBody(path, hwdec: hwdec));
   }
 
@@ -70,11 +78,6 @@ class PlaybackEngine extends ChangeNotifier {
     _closed = false;
     _alive.add(this);
     await _pauseOthers();
-    final wantHw = hwdec != 'no';
-    final hadHw = _hwdec != null && _hwdec != 'no';
-    if (_player != null && wantHw != hadHw) {
-      await _disposePlayer();
-    }
     value = const EngineValue();
     notifyListeners();
     if (_player == null) {
@@ -82,14 +85,16 @@ class PlaybackEngine extends ChangeNotifier {
         configuration: const PlayerConfiguration(
           pitch: false,
           title: 'Video Player',
+          logLevel: MPVLogLevel.warn,
         ),
       );
       _player = player;
       video = VideoController(
         player,
         configuration: VideoControllerConfiguration(
-          enableHardwareAcceleration: wantHw,
+          enableHardwareAcceleration: true,
           hwdec: hwdec,
+          androidAttachSurfaceAfterVideoParameters: true,
         ),
       );
       _bind(player);
@@ -97,17 +102,25 @@ class PlaybackEngine extends ChangeNotifier {
     final player = _player!;
     _hwdec = hwdec;
     await _applyHwdec(player, hwdec);
+    await _resetPerFile(player);
     await _applyPitchCorrection(player, _pitchShift);
     await player.open(Media(_mediaUri(path)), play: false);
     await _waitReady(player);
+    final decoded = await _prepareRender(player);
+    if (!decoded && _codecWarn != null && !value.hasError) {
+      value = EngineValue(hasError: true, errorDescription: _codecWarn);
+      notifyListeners();
+    }
     await player.setRate(_rate <= 0 ? 1 : _rate);
     _emit(player);
     if (value.hasError) {
+      DeveloperLog.player('open error=' + (value.errorDescription ?? 'Source error'));
       throw StateError(value.errorDescription ?? 'Source error');
     }
   }
 
   Future<void> applyTempo({required double rate, required bool pitchShift}) async {
+    DeveloperLog.player('tempo rate=$rate pitchShift=$pitchShift');
     _rate = rate.clamp(0.25, 8.0).toDouble();
     _pitchShift = pitchShift;
     final player = _player;
@@ -145,6 +158,158 @@ class PlaybackEngine extends ChangeNotifier {
       }
       await (platform as dynamic).setProperty('hwdec', hwdec);
     } catch (_) {}
+  }
+
+  Future<void> _setProp(Player player, String name, String value) async {
+    try {
+      final platform = player.platform;
+      if (platform is NativePlayer) await platform.setProperty(name, value);
+    } catch (_) {}
+  }
+
+  Future<String> _getProp(Player player, String name) async {
+    try {
+      final platform = player.platform;
+      if (platform is NativePlayer) {
+        return (await platform.getProperty(name)).trim().toLowerCase();
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  SourceInfo? _src;
+  bool _convert = false;
+  bool _sdrMode = false;
+  String? _lastVf;
+
+  bool get hdrActive => _convert;
+
+  bool get sdrMode => _sdrMode;
+
+  SourceInfo? get source => _src;
+
+  Future<void> _resetPerFile(Player player) async {
+    _src = null;
+    _convert = false;
+    _lastVf = null;
+    debugInfo = '';
+    _codecWarn = null;
+    await _setProp(player, 'vf', '');
+    await _setProp(player, 'tone-mapping', 'auto');
+    await _setProp(player, 'hdr-compute-peak', 'auto');
+    await _setProp(player, 'target-peak', 'auto');
+    await _setProp(player, 'target-trc', 'auto');
+    await _setProp(player, 'target-prim', 'auto');
+    await _setProp(player, 'gamut-mapping-mode', 'auto');
+    await _setProp(player, 'gamma', '0');
+    await _setProp(player, 'video-output-levels', 'auto');
+    await _setProp(player, 'dither-depth', 'no');
+  }
+
+  Future<SourceInfo> _probeSource(Player player) async {
+    var pix = '';
+    var gamma = '';
+    for (var i = 0; i < 30 && !_closed; i++) {
+      pix = await _getProp(player, 'video-params/pixelformat');
+      gamma = await _getProp(player, 'video-params/gamma');
+      if (pix.isNotEmpty && gamma.isNotEmpty) break;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
+    Future<double?> numOf(String name) async => double.tryParse(await _getProp(player, name));
+    return SourceInfo(
+      pix: pix,
+      gamma: gamma,
+      primaries: await _getProp(player, 'video-params/primaries'),
+      matrix: await _getProp(player, 'video-params/colormatrix'),
+      sigPeak: await _getProp(player, 'video-params/sig-peak'),
+      w: ((await numOf('video-params/w')) ?? 0).round(),
+      h: ((await numOf('video-params/h')) ?? 0).round(),
+      fps: (await numOf('container-fps')) ?? (await numOf('estimated-vf-fps')) ?? 0,
+    );
+  }
+
+  Future<bool> _prepareRender(Player player) async {
+    final rs = RenderSettings.instance;
+    await rs.load();
+    if (_closed) return true;
+    final src = await _probeSource(player);
+    _src = src;
+    _convert = src.needsConvert;
+    _sdrMode = appSettings.rememberHdr && !appSettings.hdrOn;
+    DeveloperLog.append('video ${src.describe()} hwdec=$_hwdec');
+    DeveloperLog.player('source ${src.describe()} hwdec=$_hwdec');
+    if (_convert) {
+      await _setProp(player, 'hwdec', 'no');
+    }
+    await _applyRender(player);
+    if (_convert) {
+      try {
+        await player.seek(player.state.position);
+      } catch (_) {}
+    }
+    return src.decoded;
+  }
+
+  Future<void> _applyRender(Player player) async {
+    final src = _src;
+    if (src == null || _closed) return;
+    final plan = RenderProfile.plan(
+      settings: RenderSettings.instance,
+      src: src,
+    );
+    await _applyVf(player, plan);
+    if (_convert) await _pushTuning(player);
+    final mode = _convert ? (_sdrMode ? 'HDR->SDR' : 'HDR look') : 'SDR source';
+    debugInfo = '$mode | ${plan.describe(src)} | ${src.describe()}';
+    DeveloperLog.append('render $debugInfo');
+    notifyListeners();
+  }
+
+  void _markFilterUnsupported(String name, String detail) {
+    if (RenderCaps.of(name) == false) return;
+    if (RenderCaps.of(name) != null && RenderCaps.of(name) != false) return;
+    if (name != 'fps' && name != 'scale') return;
+    RenderCaps.set(name, false);
+    DeveloperLog.append('render: the $name filter is not available in this libmpv build ($detail)');
+    unawaited(reapplyRender());
+  }
+
+  Future<void> _applyVf(Player player, RenderPlan plan) async {
+    if (_lastVf == plan.key) return;
+    await _setProp(player, 'vf', plan.key);
+    _lastVf = plan.key;
+  }
+
+  Future<void> _pushTuning(Player player) async {
+    final t = RenderSettings.instance.tuning(sdr: _sdrMode);
+    await _setProp(player, 'target-peak', '${t.peak}');
+    await _setProp(player, 'gamma', '${t.gamma}');
+    if (!_convert) {
+      await _setProp(player, 'target-peak', 'auto');
+      await _setProp(player, 'gamma', '${t.gamma}');
+    }
+  }
+
+  Future<void> retune() async {
+    final player = _player;
+    if (player == null || _closed || !_convert) return;
+    await _pushTuning(player);
+  }
+
+  Future<void> reapplyRender() async {
+    final player = _player;
+    if (player == null || _closed) return;
+    _lastVf = null;
+    await _applyRender(player);
+  }
+
+  Future<void> setSdrMode(bool sdr) async {
+    _sdrMode = sdr;
+    appSettings.hdrOn = !sdr;
+    if (appSettings.rememberHdr) unawaited(appSettings.save());
+    final player = _player;
+    if (player != null && _convert && !_closed) await _pushTuning(player);
+    notifyListeners();
   }
 
   String _mediaUri(String path) {
@@ -213,7 +378,25 @@ class PlaybackEngine extends ChangeNotifier {
       player.stream.buffering.listen((_) => push()),
       player.stream.width.listen((_) => push()),
       player.stream.height.listen((_) => push()),
+      player.stream.log.listen((e) {
+        final text = e.text.trim();
+        DeveloperLog.append('mpv[${e.prefix}] $text');
+        final m = RegExp("No such filter: '(\\w+)'").firstMatch(text);
+        if (m != null) _markFilterUnsupported(m.group(1)!, text);
+      }),
       player.stream.error.listen((e) {
+        final low = e.toLowerCase();
+        if (low.contains('could not open codec')) {
+          _codecWarn = e;
+          DeveloperLog.append('non-fatal decoder message ignored: $e');
+          return;
+        }
+        if (low.startsWith('option ') || low.contains("doesn't exist")) {
+          DeveloperLog.append('non-fatal option message ignored: $e');
+          final m = RegExp(r"Option (?:vf|vo): (\w+) doesn't exist", caseSensitive: false).firstMatch(e);
+          if (m != null) _markFilterUnsupported(m.group(1)!, e);
+          return;
+        }
         value = EngineValue(
           isInitialized: value.isInitialized,
           isPlaying: false,
@@ -248,6 +431,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> play() async {
+    DeveloperLog.player('play');
     wantPlay = true;
     _alive.add(this);
     await _pauseOthers();
@@ -255,6 +439,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> pause() async {
+    DeveloperLog.player('pause');
     wantPlay = false;
     await _player?.pause();
   }
@@ -270,6 +455,7 @@ class PlaybackEngine extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration d) async {
+    DeveloperLog.player('seek ' + d.inMilliseconds.toString() + 'ms');
     await _player?.seek(d);
   }
 
@@ -277,16 +463,14 @@ class PlaybackEngine extends ChangeNotifier {
     await _player?.setVolume((v.clamp(0.0, 1.0) * 100).toDouble());
   }
 
-  Future<void> setPlaybackSpeed(double r) async {
-    await applyTempo(rate: r, pitchShift: _pitchShift);
-  }
-
   Future<void> setLooping(bool on) async {
+    DeveloperLog.player('looping=' + on.toString());
     await _player?.setPlaylistMode(on ? PlaylistMode.single : PlaylistMode.none);
   }
 
   Future<void> close() async {
     if (_closed) return;
+    DeveloperLog.player('close');
     _closed = true;
     wantPlay = false;
     _alive.remove(this);
@@ -342,8 +526,74 @@ class AppVideo extends StatefulWidget {
   State<AppVideo> createState() => _AppVideoState();
 }
 
+class VideoLogOverlay extends StatelessWidget {
+  const VideoLogOverlay({super.key, required this.engine});
+
+  final PlaybackEngine engine;
+
+  String _fmt(Duration d) {
+    final ms = d.inMilliseconds;
+    final h = ms ~/ 3600000;
+    final m = (ms ~/ 60000) % 60;
+    final s = (ms ~/ 1000) % 60;
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = engine.value;
+    final src = engine.source;
+    final screen = ScreenInfo.current();
+    final lines = <String>['VIDEO LOG'];
+    if (appSettings.videoLogShowState) {
+      lines.add('STATE  ${v.isPlaying ? 'PLAYING' : 'PAUSED'}${v.isBuffering ? ' · BUFFERING' : ''}');
+      lines.add('TIME   ${_fmt(v.position)} / ${_fmt(v.duration)}');
+      lines.add('SIZE   ${v.size.width.round()}×${v.size.height.round()}  ${src?.fps.toStringAsFixed(2) ?? '--'} fps');
+      lines.add('ERROR  ${v.hasError ? (v.errorDescription ?? 'unknown') : 'none'}');
+    }
+    if (appSettings.videoLogShowMedia && src != null) {
+      lines.add('MEDIA  ${src.pix} · ${src.gamma}');
+      lines.add('COLOR  ${src.primaries} · ${src.matrix} · peak=${src.sigPeak}');
+      lines.add('HDR    ${src.hdr ? 'HDR' : 'SDR'} · deep=${src.deep}');
+    }
+    if (appSettings.videoLogShowRender) {
+      lines.add('RENDER ${engine.sdrMode ? 'SDR' : 'HDR'} mode · ${engine.debugInfo.isEmpty ? '-' : engine.debugInfo}');
+    }
+    if (appSettings.videoLogShowDecoder) {
+      lines.add('DECODER ${engine.hwdecName} · hw=${engine.hwdecName != 'no'}');
+    }
+    if (appSettings.videoLogShowTiming) {
+      lines.add('SCREEN ${screen.width.round()}×${screen.height.round()} · ${screen.hz.toStringAsFixed(1)}Hz');
+    }
+    return Positioned(
+      left: 6,
+      top: 40,
+      right: 6,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          color: Colors.black.withValues(alpha: 0.58),
+          child: Text(
+            lines.join('\n'),
+            style: const TextStyle(
+              color: Colors.yellowAccent,
+              fontSize: 10,
+              height: 1.2,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AppVideoState extends State<AppVideo> {
   VideoController? _controller;
+  String _info = '';
 
   @override
   void initState() {
@@ -370,8 +620,12 @@ class _AppVideoState extends State<AppVideo> {
 
   void _onEngine() {
     final next = widget.engine.video;
-    if (!identical(next, _controller) && mounted) {
-      setState(() => _controller = next);
+    final info = widget.engine.debugInfo;
+    if (mounted && (!identical(next, _controller) || info != _info)) {
+      setState(() {
+        _controller = next;
+        _info = info;
+      });
     }
   }
 
@@ -379,11 +633,19 @@ class _AppVideoState extends State<AppVideo> {
   Widget build(BuildContext context) {
     final c = _controller;
     if (c == null) return const ColoredBox(color: Colors.black);
-    return Video(
+    final video = Video(
       controller: c,
       fill: Colors.black,
       fit: widget.fit,
       controls: NoVideoControls,
+    );
+    if (!appSettings.developerEnabled || !appSettings.videoLogOverlay) return video;
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        video,
+        VideoLogOverlay(engine: widget.engine),
+      ],
     );
   }
 }
