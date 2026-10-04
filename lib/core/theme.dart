@@ -1,7 +1,6 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
-import 'package:video_player_app/core/material_you.dart';
 import 'package:video_player_app/settings/settings.dart';
 
 class AppTheme {
@@ -13,7 +12,7 @@ class AppTheme {
     final seed = settings.seed;
     ColorScheme scheme = settings.dynamicColor && dynamicScheme != null
         ? dynamicScheme.harmonized()
-        : materialYouScheme(seed, brightness);
+        : ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
 
     if (settings.highContrast) {
       scheme = scheme.copyWith(

@@ -7,8 +7,38 @@ import android.media.MediaMetadataRetriever
 import android.os.Build
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 object LibraryScanner {
+    // A cached pool (not a single fixed thread) so a probe that hangs on one
+    // pathological file occupies only its own thread; the next file's probe
+    // still gets scheduled immediately instead of queueing behind it.
+    private val probeExecutor: ExecutorService = Executors.newCachedThreadPool()
+
+    /**
+     * Runs [block] with a hard wall-clock budget. If it doesn't finish in time,
+     * returns [default] immediately and abandons the underlying call rather than
+     * blocking the caller - native MediaExtractor/MediaMetadataRetriever calls
+     * can't always be interrupted cleanly, so we don't wait for them to die,
+     * we just stop waiting on them.
+     */
+    private fun <T> withTimeout(timeoutMs: Long, default: T, block: () -> T): T {
+        val future: Future<T> = probeExecutor.submit(Callable<T> { block() })
+        return try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            future.cancel(true)
+            default
+        } catch (_: Exception) {
+            default
+        }
+    }
+
     fun scan(
         root: File,
         depth: Int,
@@ -22,7 +52,69 @@ object LibraryScanner {
         return out
     }
 
+    /**
+     * Inspects the video track's format for HDR / 10-bit signals (HLG or PQ
+     * transfer function, BT.2020 color, or an HEVC Main10 profile) without
+     * decoding any frames. Used so playback can proactively avoid the
+     * hardware-decoder + GPU color paths that commonly glitch or black-screen
+     * on this class of content on many Android chipsets.
+     */
+    fun colorInfo(path: String): Map<String, Any?> {
+        return withTimeout<Map<String, Any?>>(800L, mapOf("isHdr" to false)) { colorInfoBody(path) }
+    }
+
+    private fun colorInfoBody(path: String): Map<String, Any?> {
+        val out = HashMap<String, Any?>()
+        out["isHdr"] = false
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(path)
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/")) continue
+                out["mime"] = mime
+                var isHdr = false
+                if (Build.VERSION.SDK_INT >= 24) {
+                    val transfer = if (format.containsKey(MediaFormat.KEY_COLOR_TRANSFER))
+                        format.getInteger(MediaFormat.KEY_COLOR_TRANSFER) else -1
+                    val standard = if (format.containsKey(MediaFormat.KEY_COLOR_STANDARD))
+                        format.getInteger(MediaFormat.KEY_COLOR_STANDARD) else -1
+                    out["transfer"] = transfer
+                    out["standard"] = standard
+                    // COLOR_TRANSFER_ST2084 (PQ) = 6, COLOR_TRANSFER_HLG = 7,
+                    // COLOR_STANDARD_BT2020 = 6
+                    if (transfer == 6 || transfer == 7 || standard == 6) isHdr = true
+                }
+                if (format.containsKey(MediaFormat.KEY_PROFILE)) {
+                    val profile = format.getInteger(MediaFormat.KEY_PROFILE)
+                    out["profile"] = profile
+                    // HEVCProfileMain10 = 2, HEVCProfileMain10HDR10 = 4096,
+                    // HEVCProfileMain10HDR10Plus = 8192
+                    if (mime == MediaFormat.MIMETYPE_VIDEO_HEVC &&
+                        (profile == 2 || profile == 4096 || profile == 8192)
+                    ) {
+                        isHdr = true
+                    }
+                }
+                out["isHdr"] = isHdr
+                break
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
     fun thumbnailJpeg(path: String, size: Int): ByteArray? {
+        return withTimeout<ByteArray?>(3000L, null) { thumbnailJpegBody(path, size) }
+    }
+
+    private fun thumbnailJpegBody(path: String, size: Int): ByteArray? {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(path)
@@ -97,7 +189,9 @@ object LibraryScanner {
                 if (hiddenOnly && !fileHidden) continue
                 if (!MainActivity.isVideoFile(f)) continue
                 budget[0] = budget[0] - 1
-                val meta = probeMeta(f.absolutePath)
+                // Bounded: one slow/corrupt file (common with large HDR/10-bit
+                // clips) can no longer stall the entire library scan.
+                val meta = withTimeout<Map<String, Any?>>(1500L, emptyMap()) { probeMeta(f.absolutePath) }
                 out.add(
                     mapOf(
                         "path" to f.absolutePath,

@@ -82,15 +82,6 @@ class AppSettings {
   bool alwaysHideNavBar = false;
   bool developerEnabled = false;
   bool debugLog = false;
-  bool videoLogOverlay = false;
-  bool videoLogShowState = true;
-  bool videoLogShowMedia = true;
-  bool videoLogShowRender = true;
-  bool videoLogShowDecoder = true;
-  bool videoLogShowTiming = false;
-  bool logPlayerEvents = false;
-  bool logGestureEvents = false;
-  bool logLifecycleEvents = false;
 
   /// Tab ids hidden from the bottom bar and moved into the overflow menu.
   /// Valid: videos, folders, settings. At least one tab must stay visible.
@@ -273,15 +264,6 @@ class AppSettings {
     alwaysHideNavBar = p.getBool('alwaysHideNavBar') ?? false;
     developerEnabled = p.getBool('developerEnabled') ?? false;
     debugLog = p.getBool('debugLog') ?? false;
-    videoLogOverlay = p.getBool('videoLogOverlay') ?? false;
-    videoLogShowState = p.getBool('videoLogShowState') ?? true;
-    videoLogShowMedia = p.getBool('videoLogShowMedia') ?? true;
-    videoLogShowRender = p.getBool('videoLogShowRender') ?? true;
-    videoLogShowDecoder = p.getBool('videoLogShowDecoder') ?? true;
-    videoLogShowTiming = p.getBool('videoLogShowTiming') ?? false;
-    logPlayerEvents = p.getBool('logPlayerEvents') ?? false;
-    logGestureEvents = p.getBool('logGestureEvents') ?? false;
-    logLifecycleEvents = p.getBool('logLifecycleEvents') ?? false;
     hiddenTabs = List<String>.from(p.getStringList('hiddenTabs') ?? const []);
     hiddenTabs.removeWhere((t) => !tabIds.contains(t));
     if (hiddenTabs.length >= tabIds.length) {
@@ -401,15 +383,6 @@ class AppSettings {
     await p.setBool('alwaysHideNavBar', alwaysHideNavBar);
     await p.setBool('developerEnabled', developerEnabled);
     await p.setBool('debugLog', debugLog);
-    await p.setBool('videoLogOverlay', videoLogOverlay);
-    await p.setBool('videoLogShowState', videoLogShowState);
-    await p.setBool('videoLogShowMedia', videoLogShowMedia);
-    await p.setBool('videoLogShowRender', videoLogShowRender);
-    await p.setBool('videoLogShowDecoder', videoLogShowDecoder);
-    await p.setBool('videoLogShowTiming', videoLogShowTiming);
-    await p.setBool('logPlayerEvents', logPlayerEvents);
-    await p.setBool('logGestureEvents', logGestureEvents);
-    await p.setBool('logLifecycleEvents', logLifecycleEvents);
     await p.setStringList('hiddenTabs', hiddenTabs);
     await p.setStringList('quickActions', quickActions);
     await p.setStringList('titleActions', titleActions);

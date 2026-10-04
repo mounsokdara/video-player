@@ -17,7 +17,6 @@ extension PlayerGestures on _PlayerPageState {
 
   void _onScaleStart(ScaleStartDetails d, Size size) {
     if (locked || _watch) return;
-    DeveloperLog.gesture('scale start pointers=${d.pointerCount} zoom=${appSettings.allowZoom}');
     if (_gesture == 'hold' || _gesture == 'pinch' || _pinching) return;
     _gestureAt = DateTime.now();
     _sawTwo = d.pointerCount >= 2 || _fingers >= 2;
@@ -67,7 +66,6 @@ extension PlayerGestures on _PlayerPageState {
 
   Future<void> _onScaleEnd(PlaybackEngine? c) async {
     if (_gesture == 'hold') return;
-    DeveloperLog.gesture('scale end gesture=$_gesture kind=$panKind');
     if (_gesture == 'pinch' || _pinching) {
       _pinching = false;
       if (_zoomScale < 0.011) {
@@ -98,7 +96,6 @@ extension PlayerGestures on _PlayerPageState {
   }
 
   void _beginPinch(Offset focal, {double scale = 1}) {
-    DeveloperLog.gesture('pinch begin scale=$scale');
     _gesture = 'pinch';
     _pinching = true;
     _sawTwo = true;
@@ -228,7 +225,6 @@ extension PlayerGestures on _PlayerPageState {
   }
 
   void _onVideoTap(Offset pos, Size size) {
-    DeveloperLog.gesture('tap x=${pos.dx.round()} y=${pos.dy.round()}');
     const tapWindow = Duration(milliseconds: 320);
     const hideDelay = Duration(milliseconds: 900);
     const midHide = Duration(milliseconds: 700);
@@ -295,7 +291,6 @@ extension PlayerGestures on _PlayerPageState {
             if (_currentSide == 'left') _currentSide = null;
           });
         });
-        DeveloperLog.gesture('double tap seek -$step');
         unawaited(_seekBy(-step));
       } else {
         _rightTap = now;
@@ -312,7 +307,6 @@ extension PlayerGestures on _PlayerPageState {
             if (_currentSide == 'right') _currentSide = null;
           });
         });
-        DeveloperLog.gesture('double tap seek +$step');
         unawaited(_seekBy(step));
       }
       setState(() {});

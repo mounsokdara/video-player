@@ -12,7 +12,6 @@ import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
 import 'package:video_player_app/settings/settings.dart';
 import 'package:video_player_app/playback/session.dart';
-import 'package:video_player_app/core/material_you.dart';
 import 'package:video_player_app/core/widgets.dart';
 
 class SettingsHub extends StatelessWidget {
@@ -448,6 +447,17 @@ class ThemeSettings extends StatefulWidget {
 }
 
 class _ThemeSettingsState extends State<ThemeSettings> {
+  static const seeds = <(String, int)>[
+    ('Steel', 0xFF8BA3B8),
+    ('Ink', 0xFFC5CDD6),
+    ('Slate', 0xFF6E7C8A),
+    ('Teal', 0xFF4F8B8A),
+    ('Forest', 0xFF5F7A63),
+    ('Ocean', 0xFF4A6FA5),
+    ('Sand', 0xFFA09080),
+    ('Rose', 0xFF8E6B73),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final s = appSettings;
@@ -463,27 +473,16 @@ class _ThemeSettingsState extends State<ThemeSettings> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + pad.bottom),
         children: [
-          const Text('Appearance', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('Mode', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          // Theme button, same control as Khmer Calendar: text-only, full width, check mark on wide screens.
-          LayoutBuilder(
-            builder: (ctx, box) => FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: box.maxWidth),
-                child: SegmentedButton<ThemeModePref>(
-                  showSelectedIcon: box.maxWidth > 380,
-                  segments: const [
-                    ButtonSegment(value: ThemeModePref.light, label: Text('Light')),
-                    ButtonSegment(value: ThemeModePref.dark, label: Text('Dark')),
-                    ButtonSegment(value: ThemeModePref.system, label: Text('System')),
-                  ],
-                  selected: {s.themeMode},
-                  onSelectionChanged: (v) => set(() => s.themeMode = v.first),
-                ),
-              ),
-            ),
+          SegmentedButton<ThemeModePref>(
+            segments: const [
+              ButtonSegment(value: ThemeModePref.system, label: Text('System'), icon: Icon(Icons.brightness_auto)),
+              ButtonSegment(value: ThemeModePref.light, label: Text('Light'), icon: Icon(Icons.light_mode)),
+              ButtonSegment(value: ThemeModePref.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode)),
+            ],
+            selected: {s.themeMode},
+            onSelectionChanged: (v) => set(() => s.themeMode = v.first),
           ),
           const SizedBox(height: 20),
           SwitchListTile(
@@ -501,35 +500,38 @@ class _ThemeSettingsState extends State<ThemeSettings> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Material You color', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  // Same colour plates as Khmer Calendar.
-                  MaterialYouChips(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    selected: Color(s.seedColor),
-                    onPick: (c) => set(() {
-                      s.seedColor = c.circle.toARGB32();
-                      s.dynamicColor = false;
-                    }),
+                  const Text('Seed color', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  ChipScroller(
+                    children: [
+                      for (final e in seeds)
+                        GestureDetector(
+                          onTap: () => set(() {
+                            s.seedColor = e.$2;
+                            s.dynamicColor = false;
+                          }),
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: Color(e.$2),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: s.seedColor == e.$2 ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  Builder(builder: (context) {
-                    final cs = Theme.of(context).colorScheme;
-                    final rgb = s.seedColor & 0xFFFFFF;
-                    final isCustom = !s.dynamicColor &&
-                        !schemeChips.any((c) => (c.circle.toARGB32() & 0xFFFFFF) == rgb);
-                    return ListTile(
-                    contentPadding: isCustom ? const EdgeInsets.symmetric(horizontal: 12) : EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: isCustom ? BorderSide(color: cs.primary, width: 2) : BorderSide.none,
-                    ),
-                    selected: isCustom,
-                    selectedTileColor: cs.primaryContainer.withValues(alpha: 0.5),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
                     enabled: !s.dynamicColor,
                     leading: CircleAvatar(backgroundColor: Color(s.seedColor)),
                     title: const Text('Custom color'),
                     subtitle: Text('#${s.seedColor.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'),
-                    trailing: Icon(isCustom ? Icons.check_circle : Icons.chevron_right),
+                    trailing: const Icon(Icons.chevron_right),
                     onTap: s.dynamicColor
                         ? null
                         : () async {
@@ -541,8 +543,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
                               });
                             }
                           },
-                    );
-                  }),
+                  ),
                 ],
               ),
             ),
