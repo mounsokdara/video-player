@@ -220,7 +220,25 @@ open class MainActivity : FlutterActivity() {
                                 ?: return@setMethodCallHandler result.error("ARG", "name", null)
                             val src = File(path)
                             val dest = File(src.parentFile, name)
-                            result.success(if (src.renameTo(dest)) dest.absolutePath else null)
+                            // renameTo would silently replace an existing file with that name.
+                            if (dest.exists() || !src.renameTo(dest)) {
+                                result.success(null)
+                            } else {
+                                // Keep the media database in step: add the new name, drop the old row.
+                                try {
+                                    MediaScannerConnection.scanFile(this, arrayOf(src.absolutePath, dest.absolutePath), null, null)
+                                } catch (_: Exception) {
+                                }
+                                result.success(dest.absolutePath)
+                            }
+                        }
+                        "scanPaths" -> {
+                            val paths = call.argument<List<String>>("paths") ?: emptyList()
+                            try {
+                                MediaScannerConnection.scanFile(this, paths.toTypedArray(), null, null)
+                            } catch (_: Exception) {
+                            }
+                            result.success(true)
                         }
                         "setKeepScreenOn" -> {
                             keepScreenOn = call.argument<Boolean>("on") ?: false
@@ -849,7 +867,6 @@ open class MainActivity : FlutterActivity() {
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DATA,
-            MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.SIZE,
             MediaStore.Video.Media.DATE_MODIFIED,
             MediaStore.Video.Media.DURATION,
@@ -872,7 +889,6 @@ open class MainActivity : FlutterActivity() {
             )?.use { c ->
                 val iId = c.getColumnIndex(MediaStore.Video.Media._ID)
                 val iData = c.getColumnIndex(MediaStore.Video.Media.DATA)
-                val iName = c.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME)
                 val iSize = c.getColumnIndex(MediaStore.Video.Media.SIZE)
                 val iMod = c.getColumnIndex(MediaStore.Video.Media.DATE_MODIFIED)
                 val iDur = c.getColumnIndex(MediaStore.Video.Media.DURATION)
@@ -883,10 +899,11 @@ open class MainActivity : FlutterActivity() {
                     val path = if (iData >= 0) c.getString(iData) else null
                     if (path.isNullOrBlank()) continue
                     val file = File(path)
-                    if (file.exists() && file.isFile && !isVideoFile(file)) continue
+                    // MediaStore keeps the old row after a rename / move; the file on disk is the truth.
+                    if (!file.isFile || !isVideoFile(file)) continue
                     var size = if (iSize >= 0) c.getLong(iSize) else 0L
-                    if (size <= 0 && file.exists()) size = file.length()
-                    val name = if (iName >= 0) c.getString(iName) ?: file.name else file.name
+                    if (size <= 0) size = file.length()
+                    val name = file.name
                     val modified = if (iMod >= 0) c.getLong(iMod) * 1000 else file.lastModified()
                     out.add(
                         mapOf(

@@ -26,7 +26,7 @@ class AndroidBridge {
 
   /// Opens the native Settings activity (separate screen, own back stack).
   /// Opens a screen that has its own activity (`/settings`, `/general`, `/video`, `/accessibility`,
-  /// `/theme`, `/about`, `/equalizer`, `/licenses`, `/console`) with the system slide transition.
+  /// `/theme`, `/about`, `/equalizer`, `/licenses`, `/changelog`, `/console`) with the system slide transition.
   /// False when there is no such activity (callers fall back to an in-app route).
   static Future<bool> openRoute(String route) async {
     try {
@@ -138,6 +138,13 @@ class AndroidBridge {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Asks the media scanner to re-read [paths] (adds new files, drops rows of files that are gone).
+  static Future<void> scanPaths(List<String> paths) async {
+    try {
+      await _ch.invokeMethod<void>('scanPaths', {'paths': paths});
+    } catch (_) {}
   }
 
   static Future<bool> copyPath(String src, String dest) async {
