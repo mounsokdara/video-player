@@ -24,6 +24,18 @@ class AndroidBridge {
     return _events!;
   }
 
+  /// Opens the native Settings activity (separate screen, own back stack).
+  /// Opens a screen that has its own activity (`/settings`, `/general`, `/video`, `/accessibility`,
+  /// `/theme`, `/about`, `/equalizer`, `/licenses`, `/console`) with the system slide transition.
+  /// False when there is no such activity (callers fall back to an in-app route).
+  static Future<bool> openRoute(String route) async {
+    try {
+      return await _ch.invokeMethod<bool>('openActivity', {'route': route}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<int> sdkInt() async {
     try {
       return await _ch.invokeMethod<int>('sdkInt') ?? 0;
@@ -304,11 +316,12 @@ class AndroidBridge {
     return null;
   }
 
-  static Future<Uint8List?> previewFrame({required String path, required int positionMs}) async {
+  static Future<Uint8List?> previewFrame({required String path, required int positionMs, int longEdge = 180}) async {
     try {
       final raw = await _ch.invokeMethod('previewFrame', {
         'path': path,
         'positionMs': positionMs,
+        'longEdge': longEdge,
       });
       if (raw is Uint8List) return raw;
       if (raw is List<int>) return Uint8List.fromList(raw);
@@ -356,10 +369,22 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<void> openCrashReport({String? report}) async {
+  /// Persisted debug log text (native app storage), used by the Console page.
+  static Future<String> readDebugLog() async {
     try {
-      await _ch.invokeMethod('openCrashReport', {'report': report});
-    } catch (_) {}
+      return await _ch.invokeMethod<String>('readDebugLog') ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Crash breadcrumbs text for the Console page.
+  static Future<String> peekCrash() async {
+    try {
+      return await _ch.invokeMethod<String>('peekCrash') ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   static Future<void> debugLog(String line) async {

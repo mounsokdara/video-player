@@ -79,6 +79,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   double _pinchBase = 1;
   double? _scrub;
   Uint8List? _previewBytes;
+  double _previewAspect = 16 / 9;
   int _playerGen = 0;
   double? _systemBrightness;
   Offset _zoomPan = Offset.zero;
@@ -98,7 +99,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   bool _leftOn = false;
   bool _rightOn = false;
   bool _midOn = false;
-  bool _midPlayingIcon = true;
   final _midBursts = <MidBurst>[];
   String? _currentSide;
   Timer? _leftHide;
@@ -301,7 +301,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
     final sheetOpen = SystemBars.popupCount > 0;
     final hide = !sheetOpen && !_watch && (appSettings.alwaysHideNavBar || !showUi);
-    SystemBars.apply(icons: Brightness.light, contrast: true, hide: hide);
+    // Watch layout (not full screen): a solid navigation bar over the page. Full screen: transparent.
+    SystemBars.setStrip(null);
+    SystemBars.apply(icons: Brightness.light, contrast: _watch, hide: hide);
   }
 
   void _setYtMax(bool max) {
@@ -622,6 +624,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     } catch (_) {}
   }
 
+  /// Preview thumbnail size: fixed long edge, the video's own aspect ratio.
+  Size _previewBox() {
+    const edge = 168.0;
+    final ar = _previewAspect.clamp(0.4, 2.4).toDouble();
+    return ar >= 1 ? Size(edge, edge / ar) : Size(edge * ar, edge);
+  }
+
+  Widget _previewImage() {
+    final box = _previewBox();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          _previewBytes!,
+          width: box.width,
+          height: box.height,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+          isAntiAlias: true,
+        ),
+      ),
+    );
+  }
+
+  /// Finish a scrub: show the target position at once (no snap back to the old
+  /// position while the seek runs), then seek.
+  Future<void> _commitSeek(PlaybackEngine c, Duration target) async {
+    _posTick.value = target.inMilliseconds;
+    if (mounted) {
+      setState(() {
+        _scrub = null;
+        _previewBytes = null;
+      });
+    }
+    await c.seekTo(target, fast: true);
+  }
+
   Future<void> _seekBy(int seconds) async {
     final c = vc;
     if (c == null) return;
@@ -701,6 +745,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     AndroidBridge.setPipEnabled(false);
     AndroidBridge.setOrientation('none');
     SystemBars.alwaysHide = false;
+    SystemBars.setStrip(SystemBars.homeStrip);
     SystemBars.apply(icons: Brightness.light, contrast: true, hide: false);
     super.dispose();
   }
@@ -817,7 +862,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     final watchLike = t < 0.85;
     final bg = Color.lerp(Theme.of(context).colorScheme.surface, Colors.black, t)!;
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemBars.overlay(icons: (watchLike && light) ? Brightness.dark : Brightness.light),
+      value: SystemBars.overlay(icons: (watchLike && light) ? Brightness.dark : Brightness.light, contrast: watchLike),
       child: Scaffold(
         backgroundColor: bg,
         resizeToAvoidBottomInset: false,
@@ -1121,10 +1166,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                 bottom: 96 + pad.bottom,
                 child: IgnorePointer(
                   child: Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(_previewBytes!, width: 160, height: 90, fit: BoxFit.cover),
-                    ),
+                    child: _previewImage(),
                   ),
                 ),
               ),
@@ -1196,7 +1238,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
 
   Widget _playerChrome(Widget body) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemBars.overlay(icons: Brightness.light),
+      value: SystemBars.overlay(icons: Brightness.light, contrast: false),
       child: Scaffold(
         backgroundColor: Colors.black,
         resizeToAvoidBottomInset: false,
@@ -1586,22 +1628,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                           child: Container(width: 2, height: 22, color: color),
                         );
                       }
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
+                      const sliderInset = 20.0;
+                      final pw = _previewBox().width;
+                      final thumbX = sliderInset + frac * (box.maxWidth - sliderInset * 2);
+                      final previewLeft = (thumbX - pw / 2).clamp(0.0, (box.maxWidth - pw).clamp(0.0, double.infinity)).toDouble();
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
                         children: [
-                          if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
-                            Align(
-                              alignment: Alignment((frac * 2 - 1).clamp(-1.0, 1.0).toDouble(), 0),
-                              child: Transform.translate(
-                                offset: const Offset(0, -6),
-                                child: IgnorePointer(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.memory(_previewBytes!, width: 140, height: 80, fit: BoxFit.cover),
-                                  ),
-                                ),
-                              ),
-                            ),
                           Stack(
                             alignment: Alignment.center,
                             children: [
@@ -1609,6 +1643,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                                 data: SliderTheme.of(context).copyWith(
                                   overlayColor: Colors.white24,
                                   trackHeight: 2,
+                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: sliderInset),
+                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                                  trackShape: const RoundedRectSliderTrackShape(),
                                 ),
                                 child: Slider(
                                   value: frac,
@@ -1620,11 +1657,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                                   onChangeEnd: (v) async {
                                     _holdChrome(false);
                                     if (c == null) return;
-                                    await c.seekTo(Duration(milliseconds: (v * dur.inMilliseconds).round()));
-                                    setState(() {
-                                      _scrub = null;
-                                      _previewBytes = null;
-                                    });
+                                    await _commitSeek(c, Duration(milliseconds: (v * dur.inMilliseconds).round()));
                                   },
                                 ),
                               ),
@@ -1632,6 +1665,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                               mark(abB, const Color(0xFFFF7043)),
                             ],
                           ),
+                          // Floating overlay: takes no space, so the bar and the time labels never move.
+                          if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
+                            Positioned(
+                              left: previewLeft,
+                              bottom: 34,
+                              child: IgnorePointer(child: _previewImage()),
+                            ),
                         ],
                       );
                     }),

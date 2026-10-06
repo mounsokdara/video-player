@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:video_player_app/native/android_bridge.dart';
-import 'package:video_player_app/settings/about.dart';
+import 'package:video_player_app/about/about_info.dart';
+import 'package:video_player_app/about/about_page.dart';
 import 'package:video_player_app/core/crash.dart';
 import 'package:video_player_app/player/hud.dart';
 import 'package:video_player_app/core/insets.dart';
@@ -14,51 +16,270 @@ import 'package:video_player_app/settings/settings.dart';
 import 'package:video_player_app/playback/session.dart';
 import 'package:video_player_app/core/material_you.dart';
 import 'package:video_player_app/core/widgets.dart';
+import 'package:video_player_app/about/about_widgets.dart' show standaloneBack;
 
+/// One entry in the settings sidebar / category list.
+class _SettingsCategory {
+  const _SettingsCategory(this.icon, this.title, this.sub, this.build);
+  final IconData icon;
+  final String title;
+  final String sub;
+  final Widget Function(VoidCallback onChanged) build;
+}
+
+final _settingsCategories = <_SettingsCategory>[
+  _SettingsCategory(Icons.tune, 'General', 'Library, scanning, tabs, storage', (c) => GeneralSettings(onChanged: c)),
+  _SettingsCategory(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', (c) => VideoSettings(onChanged: c)),
+  _SettingsCategory(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', (c) => AccessSettings(onChanged: c)),
+  _SettingsCategory(Icons.palette_outlined, 'Theme', 'Dark / light / system and seed color', (c) => ThemeSettings(onChanged: c)),
+];
+
+/// Route name -> index in [_settingsCategories], for the per-category activities.
+const _standaloneCategory = {'/general': 0, '/video': 1, '/accessibility': 2, '/theme': 3};
+
+/// Activity route of each entry in [_settingsCategories].
+const _categoryRoutes = ['/general', '/video', '/accessibility', '/theme'];
+
+/// Full-screen page for an activity that shows one settings category (or the equalizer) on its own,
+/// or null for any other route. Reuses the same widgets as the Settings activity; the back arrow
+/// closes the activity.
+Widget? standaloneSettingsPage(String route, VoidCallback onChanged) {
+  if (route == '/equalizer') return const EqualizerPage();
+  switch (route) {
+    case '/quick-actions':
+      return SystemBarSafeZone(child: QuickActionsEditor(onChanged: onChanged));
+    case '/title-bar':
+      return SystemBarSafeZone(child: TitleBarEditor(onChanged: onChanged));
+    case '/floating-buttons':
+      return HudEditorPage(onChanged: onChanged);
+  }
+  final i = _standaloneCategory[route];
+  if (i == null) return null;
+  return _SettingsBack(onBack: SystemNavigator.pop, child: _settingsCategories[i].build(onChanged));
+}
+
+/// Width from which the Settings screen shows its tabs sidebar.
+const double kSettingsSidebarWidth = 840;
+
+/// Root of the Settings activity (`/settings`).
+/// Phones: category list. Large screens: tabs sidebar on the left, the
+/// selected category on the right.
+class SettingsHost extends StatefulWidget {
+  const SettingsHost({super.key, required this.onChanged});
+  final VoidCallback onChanged;
+
+  @override
+  State<SettingsHost> createState() => _SettingsHostState();
+}
+
+class _SettingsHostState extends State<SettingsHost> {
+  /// Category selected in the sidebar (large screens); the first one while still null.
+  int? _picked;
+
+  void _close() => SystemNavigator.pop();
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= kSettingsSidebarWidth;
+    if (!wide) {
+      // Tabs sidebar hidden: the list of categories; each one opens as its own activity with the
+      // system slide transition (see SettingsHub).
+      return Scaffold(body: SettingsHub(onChanged: widget.onChanged, onBack: _close));
+    }
+    final selected = _picked ?? 0;
+    final scheme = Theme.of(context).colorScheme;
+    final pad = MediaQuery.viewPaddingOf(context);
+    final cat = _settingsCategories[selected];
+    // Round icon colors per category, like the account-style sidebar.
+    final iconBg = <Color>[
+      scheme.primaryContainer,
+      scheme.tertiaryContainer,
+      scheme.secondaryContainer,
+      scheme.surfaceContainerHighest,
+    ];
+    final iconFg = <Color>[
+      scheme.onPrimaryContainer,
+      scheme.onTertiaryContainer,
+      scheme.onSecondaryContainer,
+      scheme.onSurface,
+    ];
+    return SystemBarSafeZone(child: Scaffold(
+      backgroundColor: scheme.surface,
+      body: Padding(
+        // Side insets are handled by the SystemBarSafeZone around this Scaffold.
+        padding: EdgeInsets.zero,
+        child: Row(
+          children: [
+            // Sidebar tabs: only built on large screens. Phones never see it.
+            SizedBox(
+              width: 320,
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(12, pad.top + 8, 12, pad.bottom + 16),
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: 'Close',
+                        onPressed: _close,
+                      ),
+                      const SizedBox(width: 4),
+                      Text('Settings', style: Theme.of(context).textTheme.titleLarge),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  for (var i = 0; i < _settingsCategories.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Material(
+                        color: i == selected ? scheme.primaryContainer : Colors.transparent,
+                        shape: const StadiumBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => setState(() => _picked = i),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 8, 20, 8),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: i == selected ? scheme.surface : iconBg[i % iconBg.length],
+                                  foregroundColor: i == selected ? scheme.primary : iconFg[i % iconFg.length],
+                                  child: Icon(_settingsCategories[i].icon),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Text(
+                                    _settingsCategories[i].title,
+                                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                          color: i == selected ? scheme.onPrimaryContainer : scheme.onSurface,
+                                          fontWeight: i == selected ? FontWeight.w600 : FontWeight.w400,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            VerticalDivider(width: 1, color: scheme.outlineVariant),
+            Expanded(
+              child: KeyedSubtree(
+                key: ValueKey('pane$selected'),
+                child: cat.build(widget.onChanged),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ));
+  }
+}
+
+/// Lets a category page (shown full screen on a phone) draw a back arrow that
+/// returns to the main settings list. Absent in the large-screen detail pane.
+class _SettingsBack extends InheritedWidget {
+  const _SettingsBack({required this.onBack, required super.child});
+  final VoidCallback onBack;
+
+  static VoidCallback? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_SettingsBack>()?.onBack;
+
+  @override
+  bool updateShouldNotify(_SettingsBack oldWidget) => true;
+}
+
+Widget? settingsBackLeading(BuildContext context) {
+  final back = _SettingsBack.of(context);
+  return back == null ? null : BackButton(onPressed: back);
+}
+
+/// Category list shown on phones inside the Settings activity.
 class SettingsHub extends StatelessWidget {
-  const SettingsHub({super.key, required this.onChanged});
+  const SettingsHub({super.key, required this.onChanged, this.onBack});
+  final VoidCallback onChanged;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final pad = MediaQuery.viewPaddingOf(context);
+    return SystemBarSafeZone(child: CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          pinned: true,
+          leading: onBack == null ? null : BackButton(onPressed: onBack),
+          title: const Text('Settings'),
+        ),
+        SliverPadding(
+          padding: EdgeInsets.only(bottom: pad.bottom + 24),
+          sliver: SliverList.list(children: [
+            for (var i = 0; i < _settingsCategories.length; i++)
+              _categoryTile(context, scheme, i),
+          ]),
+        ),
+      ],
+    ));
+  }
+
+  Widget _categoryTile(BuildContext context, ColorScheme scheme, int i) {
+    final c = _settingsCategories[i];
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: scheme.surfaceContainerHighest,
+        foregroundColor: scheme.onSurface,
+        child: Icon(c.icon),
+      ),
+      title: Text(c.title),
+      subtitle: Text(c.sub),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        await openPage(context, _categoryRoutes[i], () => c.build(onChanged));
+        onChanged();
+      },
+    );
+  }
+}
+
+/// The "More" tab: opens the Settings activity, plus equalizer, crash report, about.
+class MoreHub extends StatelessWidget {
+  const MoreHub({super.key, required this.onChanged});
   final VoidCallback onChanged;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pad = MediaQuery.viewPaddingOf(context);
-    Widget tile(IconData icon, String title, String sub, Widget page) {
-      return ListTile(
-        leading: CircleAvatar(
-          backgroundColor: scheme.surfaceContainerHighest,
-          foregroundColor: scheme.onSurface,
-          child: Icon(icon),
-        ),
-        title: Text(title),
-        subtitle: Text(sub),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
-          onChanged();
-        },
-      );
-    }
-
     return CustomScrollView(
       slivers: [
-        SliverAppBar(
-          pinned: true,
-          title: const Text('Settings'),
-        ),
+        const SliverAppBar(pinned: true, title: Text('More')),
         SliverPadding(
           padding: EdgeInsets.only(bottom: pad.bottom + 24),
           sliver: SliverList.list(children: [
-            tile(Icons.tune, 'General', 'Library, scanning, tabs, storage', GeneralSettings(onChanged: onChanged)),
-            tile(Icons.videocam_outlined, 'Video', 'Display, playback, decoder, gestures', VideoSettings(onChanged: onChanged)),
-            tile(Icons.accessibility_new, 'Accessibility', 'Color filters, motion, text', AccessSettings(onChanged: onChanged)),
-            tile(Icons.palette_outlined, 'Theme', 'Dark / light / system and seed color', ThemeSettings(onChanged: onChanged)),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: scheme.surfaceContainerHighest,
+                foregroundColor: scheme.onSurface,
+                child: const Icon(Icons.settings_outlined),
+              ),
+              title: const Text('Settings'),
+              subtitle: const Text('General, video, accessibility, theme'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                await openPage(context, '/settings', () => Scaffold(body: SettingsHub(onChanged: onChanged)));
+                onChanged();
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.equalizer),
               title: const Text('Equalizer'),
               subtitle: Text(appSettings.eqEnabled ? 'On · ${appSettings.eqPreset}' : 'Off'),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage())),
+              onTap: () => openPage(context, '/equalizer', () => const EqualizerPage()),
             ),
             ListTile(
               leading: const Icon(Icons.bug_report_outlined),
@@ -71,8 +292,7 @@ class SettingsHub extends StatelessWidget {
               title: const Text('About'),
               subtitle: Text('Video Player ${AboutInfo.displayVersion}'),
               onTap: () async {
-                if (!context.mounted) return;
-                await Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage()));
+                await openPage(context, '/about', () => const AboutPage());
                 onChanged();
               },
             ),
@@ -149,8 +369,8 @@ class _GeneralSettingsState extends State<GeneralSettings> {
       widget.onChanged();
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('General')),
+    return SystemBarSafeZone(child: Scaffold(
+      appBar: AppBar(leading: settingsBackLeading(context), title: const Text('General')),
       body: ListView(
         padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom + 24),
         children: [
@@ -200,17 +420,17 @@ class _GeneralSettingsState extends State<GeneralSettings> {
           ListTile(
             title: const Text('Quick actions'),
             trailing: const Icon(Icons.tune),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => QuickActionsEditor(onChanged: widget.onChanged))),
+            onTap: () => openPage(context, '/quick-actions', () => QuickActionsEditor(onChanged: widget.onChanged)),
           ),
           ListTile(
             title: const Text('Title bar buttons'),
             trailing: const Icon(Icons.tune),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TitleBarEditor(onChanged: widget.onChanged))),
+            onTap: () => openPage(context, '/title-bar', () => TitleBarEditor(onChanged: widget.onChanged)),
           ),
           ListTile(
             title: const Text('Floating action buttons'),
             trailing: const Icon(Icons.tune),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => HudEditorPage(onChanged: widget.onChanged))),
+            onTap: () => openPage(context, '/floating-buttons', () => HudEditorPage(onChanged: widget.onChanged)),
           ),
           SwitchListTile(title: const Text('Remember playback progress'), value: s.rememberPlayback, onChanged: (v) => set(() => s.rememberPlayback = v)),
           ListTile(
@@ -224,7 +444,7 @@ class _GeneralSettingsState extends State<GeneralSettings> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -247,8 +467,8 @@ class _VideoSettingsState extends State<VideoSettings> {
       widget.onChanged();
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Video')),
+    return SystemBarSafeZone(child: Scaffold(
+      appBar: AppBar(leading: settingsBackLeading(context), title: const Text('Video')),
       body: ListView(
         padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom + 24),
         children: [
@@ -373,7 +593,7 @@ class _VideoSettingsState extends State<VideoSettings> {
           SwitchListTile(title: const Text('Remember HDR mode'), value: s.rememberHdr, onChanged: (v) => set(() => s.rememberHdr = v)),
         ],
       ),
-    );
+    ));
   }
 
   Widget _h(String t) => Padding(
@@ -401,8 +621,8 @@ class _AccessSettingsState extends State<AccessSettings> {
       widget.onChanged();
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Accessibility')),
+    return SystemBarSafeZone(child: Scaffold(
+      appBar: AppBar(leading: settingsBackLeading(context), title: const Text('Accessibility')),
       body: ListView(
         padding: EdgeInsets.only(bottom: insets.bottom + pad.bottom + 24),
         children: [
@@ -431,7 +651,7 @@ class _AccessSettingsState extends State<AccessSettings> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _h(String t) => Padding(
@@ -458,8 +678,8 @@ class _ThemeSettingsState extends State<ThemeSettings> {
       widget.onChanged();
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Theme')),
+    return SystemBarSafeZone(child: Scaffold(
+      appBar: AppBar(leading: settingsBackLeading(context), title: const Text('Theme')),
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + pad.bottom),
         children: [
@@ -572,7 +792,7 @@ class _ThemeSettingsState extends State<ThemeSettings> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -623,13 +843,169 @@ class _EqualizerPageState extends State<EqualizerPage> {
     return (appSettings.eqBands[i] / 100).clamp(minDb, maxDb).toDouble();
   }
 
+  /// Width from which the equalizer switches to the two-pane large-screen layout.
+  static const double _wideWidth = 720;
+
+  String _hzLabel(int i) {
+    final hz = AppSettings.eqBandHz[i];
+    return hz >= 1000 ? '${(hz / 1000).toStringAsFixed(hz % 1000 == 0 ? 0 : 1)}k' : '$hz';
+  }
+
+  String _dbLabel(double db) {
+    final n = db.round();
+    return n > 0 ? '+$n' : '$n';
+  }
+
+  Widget _presetChips({required bool wrap}) {
+    final s = appSettings;
+    final chips = <Widget>[
+      for (final name in AppSettings.eqPresets.keys)
+        ChoiceChip(
+          label: Text(name),
+          selected: s.eqPreset == name,
+          onSelected: (_) async {
+            s.applyPreset(name);
+            s.eqEnabled = true;
+            await _persist();
+          },
+        ),
+    ];
+    if (wrap) return Wrap(spacing: 8, runSpacing: 8, children: chips);
+    return ChipScroller(children: chips);
+  }
+
+  /// The ten band sliders. [height] is the slider track height; with [scale] a dB ruler is drawn on
+  /// the left (large screens).
+  Widget _bands(double height, {required bool scale}) {
+    final s = appSettings;
+    final cs = Theme.of(context).colorScheme;
+    final small = TextStyle(fontSize: 10, color: cs.onSurfaceVariant);
+    final ruler = SizedBox(
+      width: 30,
+      child: Column(
+        children: [
+          Text(' ', style: small),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('+${maxDb.round()}', style: small),
+                Text('0', style: small),
+                Text('${minDb.round()}', style: small),
+              ],
+            ),
+          ),
+          Text(' ', style: small),
+        ],
+      ),
+    );
+    return SizedBox(
+      height: height,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (scale) ruler,
+          for (var i = 0; i < 10; i++)
+            Expanded(
+              child: Column(
+                children: [
+                  Text(_dbLabel(_bandDb(i)), style: small),
+                  Expanded(
+                    child: RotatedBox(
+                      quarterTurns: -1,
+                      child: Slider(
+                        min: minDb,
+                        max: maxDb,
+                        value: _bandDb(i),
+                        onChanged: s.eqEnabled
+                            ? (v) {
+                                setState(() {
+                                  s.eqBands[i] = (v * 100).round();
+                                  s.eqPreset = 'Custom';
+                                });
+                              }
+                            : null,
+                        onChangeEnd: (_) => _persist(),
+                      ),
+                    ),
+                  ),
+                  Text(_hzLabel(i), style: const TextStyle(fontSize: 10)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _effects() {
+    final s = appSettings;
+    return [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Bass boost'),
+        value: s.bassBoostOn,
+        onChanged: (v) async {
+          s.bassBoostOn = v;
+          if (v) s.eqEnabled = true;
+          await _persist();
+        },
+      ),
+      Slider(
+        min: 0,
+        max: 1000,
+        value: s.bassBoost.toDouble(),
+        label: '${(s.bassBoost / 10).round()}%',
+        onChanged: s.bassBoostOn ? (v) => setState(() => s.bassBoost = v.round()) : null,
+        onChangeEnd: (_) => _persist(),
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Surround sound'),
+        value: s.surroundOn,
+        onChanged: (v) async {
+          s.surroundOn = v;
+          if (v) s.eqEnabled = true;
+          await _persist();
+        },
+      ),
+      Slider(
+        min: 0,
+        max: 1000,
+        value: s.surround.toDouble(),
+        label: '${(s.surround / 10).round()}%',
+        onChanged: s.surroundOn ? (v) => setState(() => s.surround = v.round()) : null,
+        onChangeEnd: (_) => _persist(),
+      ),
+    ];
+  }
+
+  Widget _card(Widget child) {
+    final cs = Theme.of(context).colorScheme;
+    // Material so the switch rows inside paint their ripple on the card.
+    return Material(
+      color: cs.surfaceContainer,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: SizedBox(width: double.infinity, child: child),
+      ),
+    );
+  }
+
+  Widget _heading(String text) =>
+      Text(text, style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600));
+
   @override
   Widget build(BuildContext context) {
     final s = appSettings;
     final pad = MediaQuery.viewPaddingOf(context);
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    final bottom = pad.bottom + MediaQuery.viewInsetsOf(context).bottom;
+    return SystemBarSafeZone(child: Scaffold(
       appBar: AppBar(
+        leading: standaloneBack(context),
         title: const Text('Equalizer'),
         actions: [
           Switch(
@@ -642,114 +1018,83 @@ class _EqualizerPageState extends State<EqualizerPage> {
           const SizedBox(width: 8),
         ],
       ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + pad.bottom + MediaQuery.viewInsetsOf(context).bottom),
-        children: [
-          Text('Presets', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ChipScroller(
-            children: [
-              for (final name in AppSettings.eqPresets.keys)
-                ChoiceChip(
-                  label: Text(name),
-                  selected: s.eqPreset == name,
-                  onSelected: (_) async {
-                    s.applyPreset(name);
-                    s.eqEnabled = true;
-                    await _persist();
-                  },
+      body: LayoutBuilder(
+        builder: (context, box) {
+          final wide = box.maxWidth >= _wideWidth;
+          if (!wide) {
+            // Phones: one column, capped width so a tall tablet in portrait does not stretch it.
+            return Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + bottom),
+                  children: [
+                    _heading('Presets'),
+                    const SizedBox(height: 8),
+                    _presetChips(wrap: false),
+                    const SizedBox(height: 20),
+                    _bands(220, scale: false),
+                    const SizedBox(height: 12),
+                    ..._effects(),
+                  ],
                 ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 220,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < 10; i++)
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: RotatedBox(
-                            quarterTurns: -1,
-                            child: Slider(
-                              min: minDb,
-                              max: maxDb,
-                              value: _bandDb(i),
-                              onChanged: s.eqEnabled
-                                  ? (v) async {
-                                      setState(() {
-                                        s.eqBands[i] = (v * 100).round();
-                                        s.eqPreset = 'Custom';
-                                      });
-                                    }
-                                  : null,
-                              onChangeEnd: (_) => _persist(),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          AppSettings.eqBandHz[i] >= 1000
-                              ? '${(AppSettings.eqBandHz[i] / 1000).toStringAsFixed(AppSettings.eqBandHz[i] % 1000 == 0 ? 0 : 1)}k'
-                              : '${AppSettings.eqBandHz[i]}',
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                      ],
+              ),
+            );
+          }
+          // Large screens: bands on the left (as tall as the screen allows), presets and effects
+          // in a side column, everything centred with a maximum width.
+          final bandHeight = (box.maxHeight - 130 - bottom).clamp(260.0, 480.0).toDouble();
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1180),
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(24, 8, 24, 32 + bottom),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: _card(Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _heading('Bands (dB)'),
+                          const SizedBox(height: 12),
+                          _bands(bandHeight, scale: true),
+                        ],
+                      )),
                     ),
-                  ),
-              ],
+                    const SizedBox(width: 20),
+                    SizedBox(
+                      width: 340,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _card(Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _heading('Presets'),
+                              const SizedBox(height: 10),
+                              _presetChips(wrap: true),
+                            ],
+                          )),
+                          const SizedBox(height: 16),
+                          _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            _heading('Effects'),
+                            ..._effects(),
+                          ])),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Bass boost'),
-            value: s.bassBoostOn,
-            onChanged: (v) async {
-              s.bassBoostOn = v;
-              if (v) s.eqEnabled = true;
-              await _persist();
-            },
-          ),
-          Slider(
-            min: 0,
-            max: 1000,
-            value: s.bassBoost.toDouble(),
-            label: '${(s.bassBoost / 10).round()}%',
-            onChanged: s.bassBoostOn
-                ? (v) async {
-                    setState(() => s.bassBoost = v.round());
-                  }
-                : null,
-            onChangeEnd: (_) => _persist(),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Surround sound'),
-            value: s.surroundOn,
-            onChanged: (v) async {
-              s.surroundOn = v;
-              if (v) s.eqEnabled = true;
-              await _persist();
-            },
-          ),
-          Slider(
-            min: 0,
-            max: 1000,
-            value: s.surround.toDouble(),
-            label: '${(s.surround / 10).round()}%',
-            onChanged: s.surroundOn
-                ? (v) async {
-                    setState(() => s.surround = v.round());
-                  }
-                : null,
-            onChangeEnd: (_) => _persist(),
-          ),
-        ],
+          );
+        },
       ),
-    );
+    ));
   }
 }
 
@@ -787,7 +1132,7 @@ class _QuickActionsEditorState extends State<QuickActionsEditor> {
   Widget build(BuildContext context) {
     final pad = MediaQuery.viewPaddingOf(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Quick actions')),
+      appBar: AppBar(leading: standaloneBack(context), title: const Text('Quick actions')),
       body: ReorderableListView.builder(
         padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: pad.bottom + 24),
         itemCount: order.length,

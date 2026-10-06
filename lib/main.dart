@@ -4,19 +4,35 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:video_player_app/about/about_page.dart';
+import 'package:video_player_app/about/console_page.dart';
+import 'package:video_player_app/about/licenses_page.dart';
 import 'package:video_player_app/core/crash.dart';
 import 'package:video_player_app/library/home.dart';
 import 'package:video_player_app/library/picker.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/settings/settings.dart';
+import 'package:video_player_app/settings/settings_ui.dart';
 import 'package:video_player_app/core/theme.dart';
 
 export 'package:video_player_app/settings/settings.dart';
 
 final library = LibraryService(appSettings);
+
+int? _lastWindowBg;
+
+/// Remembers the app surface color so native activities (Settings) can paint
+/// their window with it before Flutter draws, instead of flashing black.
+void _rememberWindowBg(int argb) {
+  if (_lastWindowBg == argb) return;
+  _lastWindowBg = argb;
+  SharedPreferences.getInstance().then((p) => p.setInt('windowBgArgb', argb)).catchError((_) => false);
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,9 +78,37 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      appSettings.load().then((_) {
+      SharedPreferences.getInstance().then((p) => p.reload()).then((_) => appSettings.load()).then((_) {
+        // The equalizer may have been changed in its own activity: apply it to this engine's audio.
+        AndroidBridge.applyEqualizer(
+          enabled: appSettings.eqEnabled,
+          bands: appSettings.eqBands,
+          bassOn: appSettings.bassBoostOn,
+          bass: appSettings.bassBoost,
+          surroundOn: appSettings.surroundOn,
+          surround: appSettings.surround,
+        );
         if (mounted) setState(() {});
       });
+    }
+  }
+
+  void _settingsChanged() {
+    setState(() {});
+    appSettings.save();
+  }
+
+  /// Pages that also run as their own launchable activity (see the *Activity.kt classes).
+  Widget? _standalone(String route) {
+    switch (route) {
+      case '/about':
+        return const AboutPage();
+      case '/licenses':
+        return const SystemBarSafeZone(child: LicensesPage());
+      case '/console':
+        return const ConsolePage();
+      default:
+        return standaloneSettingsPage(route, _settingsChanged);
     }
   }
 
@@ -73,34 +117,29 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
     return DynamicColorBuilder(
       builder: (light, dark) {
         final mode = appSettings.themeMode;
+        final lightTheme = AppTheme.build(brightness: Brightness.light, settings: appSettings, dynamicScheme: light);
+        final darkTheme = AppTheme.build(brightness: Brightness.dark, settings: appSettings, dynamicScheme: dark);
         return MaterialApp(
           navigatorKey: appNavigator,
           navigatorObservers: [SystemBarObserver()],
           title: 'Video Player',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.build(
-            brightness: Brightness.light,
-            settings: appSettings,
-            dynamicScheme: light,
-          ),
-          darkTheme: AppTheme.build(
-            brightness: Brightness.dark,
-            settings: appSettings,
-            dynamicScheme: dark,
-          ),
+          theme: lightTheme,
+          darkTheme: darkTheme,
           themeMode: switch (mode) {
             ThemeModePref.system => ThemeMode.system,
             ThemeModePref.light => ThemeMode.light,
             ThemeModePref.dark => ThemeMode.dark,
           },
           builder: (context, child) {
+            _rememberWindowBg(Theme.of(context).colorScheme.surface.toARGB32());
             final scale = appSettings.uiScale.clamp(0.85, 1.35).toDouble();
             return MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 textScaler: TextScaler.linear(scale),
                 boldText: appSettings.boldText,
               ),
-              child: child ?? const SizedBox.shrink(),
+              child: SolidNavBarStrip(child: child ?? const SizedBox.shrink()),
             );
           },
           initialRoute: WidgetsBinding.instance.platformDispatcher.defaultRouteName,
@@ -110,6 +149,23 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
                 MaterialPageRoute<void>(
                   settings: const RouteSettings(name: '/pick'),
                   builder: (_) => const VideoPickerPage(),
+                ),
+              ];
+            }
+            final leaf = name.contains('/') ? _standalone(name.substring(name.lastIndexOf('/'))) : null;
+            if (leaf != null) {
+              return [
+                MaterialPageRoute<void>(
+                  settings: RouteSettings(name: name),
+                  builder: (_) => leaf,
+                ),
+              ];
+            }
+            if (name == '/settings' || name.endsWith('/settings')) {
+              return [
+                MaterialPageRoute<void>(
+                  settings: const RouteSettings(name: '/settings'),
+                  builder: (_) => SettingsHost(onChanged: _settingsChanged),
                 ),
               ];
             }
@@ -130,6 +186,16 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
               return MaterialPageRoute<void>(
                 settings: settings,
                 builder: (_) => const VideoPickerPage(),
+              );
+            }
+            final page = settings.name == null ? null : _standalone(settings.name!);
+            if (page != null) {
+              return MaterialPageRoute<void>(settings: settings, builder: (_) => page);
+            }
+            if (settings.name == '/settings') {
+              return MaterialPageRoute<void>(
+                settings: settings,
+                builder: (_) => SettingsHost(onChanged: _settingsChanged),
               );
             }
             return MaterialPageRoute<void>(

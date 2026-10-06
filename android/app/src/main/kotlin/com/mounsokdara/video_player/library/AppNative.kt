@@ -47,11 +47,25 @@ class AppNative(
                 result.success(true)
                 return true
             }
-            NativeConstants.Method.OPEN_CRASH_REPORT -> {
-                val intent = Intent(activity, CrashReportActivity::class.java)
-                call.argument<String>("report")?.let { intent.putExtra(CrashReportActivity.EXTRA_REPORT, it) }
-                activity.startActivity(intent)
-                result.success(true)
+            NativeConstants.Method.OPEN_ACTIVITY -> {
+                // Screens that run as their own activity: opened with the system slide transition.
+                val target = when (call.argument<String>("route")) {
+                    "/settings" -> SettingsActivity::class.java
+                    "/general" -> GeneralSettingsActivity::class.java
+                    "/video" -> VideoSettingsActivity::class.java
+                    "/accessibility" -> AccessibilitySettingsActivity::class.java
+                    "/theme" -> ThemeSettingsActivity::class.java
+                    "/about" -> AboutActivity::class.java
+                    "/equalizer" -> EqualizerActivity::class.java
+                    "/licenses" -> LicensesActivity::class.java
+                    "/console" -> ConsoleActivity::class.java
+                    "/quick-actions" -> QuickActionsActivity::class.java
+                    "/title-bar" -> TitleBarButtonsActivity::class.java
+                    "/floating-buttons" -> FloatingButtonsActivity::class.java
+                    else -> null
+                }
+                if (target != null) activity.startActivity(Intent(activity, target))
+                result.success(target != null)
                 return true
             }
             NativeConstants.Method.DEBUG_LOG -> {
@@ -63,6 +77,14 @@ class AppNative(
                 DeveloperLog.append(activity, "__clear__")
                 NativeCrashLog.clear(activity)
                 result.success(true)
+                return true
+            }
+            NativeConstants.Method.READ_DEBUG_LOG -> {
+                result.success(DeveloperLog.read(activity))
+                return true
+            }
+            NativeConstants.Method.PEEK_CRASH -> {
+                result.success(NativeCrashLog.peek(activity))
                 return true
             }
             else -> return false

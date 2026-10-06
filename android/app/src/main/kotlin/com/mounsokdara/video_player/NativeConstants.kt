@@ -57,8 +57,10 @@ object NativeConstants {
         const val REQUEST_AUDIO_FOCUS = "requestAudioFocus"
         const val ABANDON_AUDIO_FOCUS = "abandonAudioFocus"
         const val APPLY_EQUALIZER = "applyEqualizer"
-        const val OPEN_CRASH_REPORT = "openCrashReport"
+        const val OPEN_ACTIVITY = "openActivity"
         const val DEBUG_LOG = "debugLog"
         const val CLEAR_LOGS = "clearLogs"
+        const val READ_DEBUG_LOG = "readDebugLog"
+        const val PEEK_CRASH = "peekCrash"
     }
 }

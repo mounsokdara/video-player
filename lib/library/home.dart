@@ -31,6 +31,9 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   final _snackHost = GlobalKey();
   int tab = 0;
+
+  /// Direction of the last tab change: 1 = to a tab on the right, -1 = to the left (drives the slide).
+  int _tabDir = 1;
   bool loading = true;
   String? error;
   bool selecting = false;
@@ -243,6 +246,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       unawaited(PlaybackSession.onAway());
     } else if (state == AppLifecycleState.resumed) {
       unawaited(PlaybackSession.onBack());
+      // The Settings activity runs in its own engine and saves to prefs;
+      // pick its changes up (tabs, theme, ...) when we come back.
+      unawaited(appSettings.load().then((_) {
+        if (mounted) setState(() {});
+      }));
       unawaited(() async {
         final had = library.allFiles;
         library.allFiles = await AndroidBridge.hasAllFilesAccess();
@@ -493,7 +501,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onOverflow: _onOverflow,
           onRefresh: _refresh,
         ),
-      'settings' => SettingsHub(onChanged: widget.onSettingsChanged),
+      'settings' => MoreHub(onChanged: widget.onSettingsChanged),
       _ => const SizedBox.shrink(),
     };
     Navigator.of(context).push(MaterialPageRoute(
@@ -537,7 +545,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       try {
         await CrashLog.breadcrumb('Open equalizer');
         if (!context.mounted) return;
-        await Navigator.push(context, MaterialPageRoute(builder: (_) => const EqualizerPage()));
+        await openPage(context, '/equalizer', () => const EqualizerPage());
       } catch (e, s) {
         CrashLog.record('EQ', '$e', s);
       }
@@ -612,7 +620,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             ),
           );
         case 'settings':
-          return SettingsHub(onChanged: widget.onSettingsChanged);
+          return MoreHub(onChanged: widget.onSettingsChanged);
         default:
           return VideosHub(
             loading: loading,
@@ -657,7 +665,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     NavigationDestination dest(String id) {
       return switch (id) {
         'folders' => const NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Folders'),
-        'settings' => const NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
+        'settings' => const NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
         _ => const NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Videos'),
       };
     }
@@ -665,23 +673,50 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     NavigationRailDestination rail(String id) {
       return switch (id) {
         'folders' => const NavigationRailDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: Text('Folders')),
-        'settings' => const NavigationRailDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: Text('Settings')),
+        'settings' => const NavigationRailDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: Text('More')),
         _ => const NavigationRailDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: Text('Videos')),
       };
     }
 
-    final body = pageFor(current);
+    // Switching tabs slides + fades: the new tab comes in from the side it sits on, the old one leaves
+    // the other way (shared-axis style).
+    final body = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 280),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (cur, prev) => Stack(fit: StackFit.expand, children: [...prev, if (cur != null) cur]),
+      transitionBuilder: (child, anim) {
+        final incoming = child.key == ValueKey('tab-$current');
+        final from = Offset((incoming ? _tabDir : -_tabDir) * 0.3, 0);
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween<Offset>(begin: from, end: Offset.zero).animate(anim),
+            child: child,
+          ),
+        );
+      },
+      child: KeyedSubtree(key: ValueKey('tab-$current'), child: pageFor(current)),
+    );
     final pad = SystemBars.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final onTop = ModalRoute.of(context)?.isCurrent ?? true;
+    // The strip behind the system nav bar continues the bottom NavigationBar (M3 surfaceContainer);
+    // with no bottom bar (rail / one tab) it is the page surface.
+    SystemBars.homeStrip = (!wide && tabs.length > 1) ? Theme.of(context).colorScheme.surfaceContainer : null;
     if (onTop) {
+      SystemBars.setStrip(SystemBars.homeStrip);
       SystemBars.alwaysHide = false;
       SystemBars.apply(icons: dark ? Brightness.light : Brightness.dark, contrast: true, hide: false);
     }
 
     Widget shell(Widget child) {
-      return Stack(
-        clipBehavior: Clip.none,
+      // Everything the mini player draws (including its parked, off-edge state)
+      // is clipped to the content area, so it can never spill over the
+      // navigation rail or past the screen edge.
+      return ClipRect(
+        child: Stack(
+        clipBehavior: Clip.hardEdge,
         children: [
           child,
           if (PlaybackSession.active && appSettings.inAppMiniplayer)
@@ -717,6 +752,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               ),
             ),
         ],
+        ),
       );
     }
 
@@ -731,6 +767,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               NavigationRail(
                 selectedIndex: safeTab,
                 onDestinationSelected: (i) => setState(() {
+                  _tabDir = i >= safeTab ? 1 : -1;
                   tab = i;
                   selecting = false;
                   selected.clear();
@@ -764,6 +801,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           : NavigationBar(
               selectedIndex: safeTab,
               onDestinationSelected: (i) => setState(() {
+                _tabDir = i >= safeTab ? 1 : -1;
                 tab = i;
                 selecting = false;
                 selected.clear();
@@ -878,12 +916,30 @@ class VideosHub extends StatelessWidget {
   final String filter;
   final void Function(String)? onFilter;
 
-  int _columns(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    if (w >= 1400) return 5;
-    if (w >= 1100) return 4;
-    if (w >= 700) return 3;
-    return 2;
+  /// Grid sized from the width the grid really gets (not the screen width, which
+  /// includes the navigation rail). Phones keep the original 2-column cards;
+  /// tablets and landscape get as many columns as fit, with shorter thumbnails
+  /// so more rows are visible.
+  SliverGridDelegate _gridDelegate(double width) {
+    const gap = 12.0;
+    if (width < 600) {
+      return const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: gap,
+        crossAxisSpacing: gap,
+        childAspectRatio: 0.82,
+      );
+    }
+    final avail = width - 24;
+    final cols = ((avail + gap) / (200 + gap)).floor().clamp(3, 8).toInt();
+    final cardW = (avail - gap * (cols - 1)) / cols;
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: cols,
+      mainAxisSpacing: gap,
+      crossAxisSpacing: gap,
+      // 16:10 thumbnail + the text footer (about 80 dp).
+      mainAxisExtent: cardW * 0.625 + 80,
+    );
   }
 
   @override
@@ -894,10 +950,12 @@ class VideosHub extends StatelessWidget {
       displacement: 40,
       edgeOffset: pad.top + kToolbarHeight,
       onRefresh: onRefresh,
-      child: NestedScrollView(
+      // One scroll view for header + videos: when everything fits there is nothing to scroll
+      // (a NestedScrollView let the header row scroll away even for a short list).
+      child: LayoutBuilder(
+        builder: (context, box) => CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
-      headerSliverBuilder: (context, inner) {
-        return [
+      slivers: [
           SliverAppBar(
             pinned: true,
             title: selecting
@@ -923,36 +981,33 @@ class VideosHub extends StatelessWidget {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${items.length} videos  ·  ${formatBytes(library.totalBytes)}',
-                          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
-                        ),
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  final inline = box.maxWidth >= 600;
+                  final count = Text(
+                    '${items.length} videos  ·  ${formatBytes(library.totalBytes)}',
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+                  );
+                  final actions = <Widget>[
+                    if (selecting)
+                      Checkbox(
+                        value: items.isNotEmpty && items.every((v) => selected.contains(v.id)),
+                        onChanged: items.isEmpty ? null : (_) => onToggleMaster(),
+                      )
+                    else ...[
+                      IconButton(
+                        tooltip: layout == LayoutMode.list ? 'Grid' : 'List',
+                        onPressed: () => onLayout(layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list),
+                        icon: Icon(layout == LayoutMode.list ? Icons.grid_view : Icons.view_list),
                       ),
-                      if (selecting)
-                        Checkbox(
-                          value: items.isNotEmpty && items.every((v) => selected.contains(v.id)),
-                          onChanged: items.isEmpty ? null : (_) => onToggleMaster(),
-                        )
-                      else ...[
-                        IconButton(
-                          tooltip: layout == LayoutMode.list ? 'Grid' : 'List',
-                          onPressed: () => onLayout(layout == LayoutMode.list ? LayoutMode.grid : LayoutMode.list),
-                          icon: Icon(layout == LayoutMode.list ? Icons.grid_view : Icons.view_list),
-                        ),
-                        IconButton(
-                          tooltip: 'Sort',
-                          onPressed: onSort,
-                          icon: const Icon(Icons.sort),
-                        ),
-                      ],
+                      IconButton(
+                        tooltip: 'Sort',
+                        onPressed: onSort,
+                        icon: const Icon(Icons.sort),
+                      ),
                     ],
-                  ),
-                  ChipScroller(
+                  ];
+                  final chips = ChipScroller(
                     children: [
                       ChoiceChip(
                         label: const Text('All'),
@@ -970,84 +1025,109 @@ class VideosHub extends StatelessWidget {
                         onSelected: (_) => onFilter?.call('pinned'),
                       ),
                     ],
-                  ),
-                ],
+                  );
+                  // Wide content: count, filters and view buttons share one row,
+                  // leaving more of the screen for the videos.
+                  if (inline) {
+                    return Row(
+                      children: [
+                        count,
+                        const SizedBox(width: 20),
+                        Expanded(child: chips),
+                        ...actions,
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      Row(children: [Expanded(child: count), ...actions]),
+                      chips,
+                    ],
+                  );
+                },
               ),
             ),
           ),
-        ];
-      },
-      body: loading
-          ? ListView(
-              key: const ValueKey('videos-loading'),
-              physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
-              children: const [SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))],
-            )
-          : library.videos.isEmpty
-              ? CustomScrollView(
-                  key: const ValueKey('empty-library-scroll'),
-                  physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
-                  slivers: [
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: _EmptyLibrary(key: const ValueKey('empty-library'), onRefresh: onRefresh),
-                    ),
-                  ],
-                )
-              : items.isEmpty
-                  ? CustomScrollView(
-                      key: const ValueKey('no-matches-scroll'),
-                      physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
-                      slivers: [
-                        SliverFillRemaining(
-                          hasScrollBody: false,
-                          child: Center(
-                            child: Text('No video found', style: TextStyle(color: scheme.onSurfaceVariant)),
-                          ),
-                        ),
-                      ],
-                    )
-                  : layout == LayoutMode.list
-                      ? ListView.builder(
-                          key: const ValueKey('video-list'),
-                          physics: const ClampingScrollPhysics(),
-                          padding: EdgeInsets.only(bottom: 24 + pad.bottom),
-                          itemCount: items.length,
-                          itemBuilder: (_, i) {
-                            final item = items[i];
-                            return VideoListTile(
-                              item: item,
-                              selected: selected.contains(item.id),
-                              selecting: selecting,
-                              onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                              onLongPress: () => onHold(item),
-                            );
-                          },
-                        )
-                      : GridView.builder(
-                          key: const ValueKey('video-grid'),
-                          physics: const ClampingScrollPhysics(),
-                          padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: _columns(context),
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 12,
-                            childAspectRatio: 0.82,
-                          ),
-                          itemCount: items.length,
-                          itemBuilder: (_, i) {
-                            final item = items[i];
-                            return VideoGridCard(
-                              item: item,
-                              selected: selected.contains(item.id),
-                              selecting: selecting,
-                              onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
-                              onLongPress: () => onHold(item),
-                            );
-                          },
-                        ),
-    ),
+          ..._bodySlivers(context, box.maxWidth),
+        ],
+        ),
+      ),
     );
+  }
+
+  /// The videos area as slivers (loading, empty, no match, list or grid), placed after the header.
+  List<Widget> _bodySlivers(BuildContext context, double width) {
+    final scheme = Theme.of(context).colorScheme;
+    final pad = MediaQuery.viewPaddingOf(context);
+    if (loading) {
+      return const [
+        SliverToBoxAdapter(
+          key: ValueKey('videos-loading'),
+          child: SizedBox(height: 220, child: Center(child: CircularProgressIndicator())),
+        ),
+      ];
+    }
+    if (library.videos.isEmpty) {
+      return [
+        SliverFillRemaining(
+          key: const ValueKey('empty-library-scroll'),
+          hasScrollBody: false,
+          child: _EmptyLibrary(key: const ValueKey('empty-library'), onRefresh: onRefresh),
+        ),
+      ];
+    }
+    if (items.isEmpty) {
+      return [
+        SliverFillRemaining(
+          key: const ValueKey('no-matches-scroll'),
+          hasScrollBody: false,
+          child: Center(
+            child: Text('No video found', style: TextStyle(color: scheme.onSurfaceVariant)),
+          ),
+        ),
+      ];
+    }
+    if (layout == LayoutMode.list) {
+      return [
+        SliverPadding(
+          key: const ValueKey('video-list'),
+          padding: EdgeInsets.only(bottom: 24 + pad.bottom),
+          sliver: SliverList.builder(
+            itemCount: items.length,
+            itemBuilder: (_, i) {
+              final item = items[i];
+              return VideoListTile(
+                item: item,
+                selected: selected.contains(item.id),
+                selecting: selecting,
+                onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
+                onLongPress: () => onHold(item),
+              );
+            },
+          ),
+        ),
+      ];
+    }
+    return [
+      SliverPadding(
+        key: const ValueKey('video-grid'),
+        padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + pad.bottom),
+        sliver: SliverGrid.builder(
+          gridDelegate: _gridDelegate(width),
+          itemCount: items.length,
+          itemBuilder: (_, i) {
+            final item = items[i];
+            return VideoGridCard(
+              item: item,
+              selected: selected.contains(item.id),
+              selecting: selecting,
+              onTap: () => selecting ? onToggleSelect(item) : onOpen(item),
+              onLongPress: () => onHold(item),
+            );
+          },
+        ),
+      ),
+    ];
   }
 }
 

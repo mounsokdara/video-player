@@ -11,13 +11,21 @@ import android.view.WindowManager
 
 class SystemBarController(private val activity: Activity) {
     private var lastLightIcons = true
-    private var lastContrast = true
+    private var lastContrast = false
     private var lastHide = false
     private var hideGen = 0
     private var uiListenerAttached = false
 
+    /** The window's own navigation bar color, so leaving a transparent screen (the player) restores it. */
+    private var defaultNavColor: Int? = null
+
+    private fun rememberDefaultNavColor(window: Window) {
+        if (defaultNavColor == null) defaultNavColor = window.navigationBarColor
+    }
+
     fun enableEdgeToEdge() {
         val window = activity.window
+        rememberDefaultNavColor(window)
         try {
             if (Build.VERSION.SDK_INT >= 30) {
                 window.setDecorFitsSystemWindows(false)
@@ -28,9 +36,11 @@ class SystemBarController(private val activity: Activity) {
             }
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.statusBarColor = Color.TRANSPARENT
+            // Always transparent with no system scrim: the solid color behind the bar is painted
+            // by the app (SolidNavBarStrip), so every screen and every Android version looks the same.
             window.navigationBarColor = Color.TRANSPARENT
             if (Build.VERSION.SDK_INT >= 29) {
-                window.isNavigationBarContrastEnforced = true
+                window.isNavigationBarContrastEnforced = false
                 window.isStatusBarContrastEnforced = false
             }
             attachUiListener(window)
@@ -106,10 +116,12 @@ class SystemBarController(private val activity: Activity) {
             )
     }
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION", "UNUSED_PARAMETER")
     private fun showBars(window: Window, lightIcons: Boolean, contrast: Boolean) {
         window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         window.statusBarColor = Color.TRANSPARENT
+        // Always fully transparent. A solid bar is the app's SolidNavBarStrip; letting the system
+        // draw its default color / contrast scrim here is what tinted the strip gray.
         window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
@@ -125,7 +137,7 @@ class SystemBarController(private val activity: Activity) {
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
             )
         if (Build.VERSION.SDK_INT >= 29) {
-            window.isNavigationBarContrastEnforced = contrast
+            window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
     }

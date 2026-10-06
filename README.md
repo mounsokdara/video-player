@@ -18,7 +18,7 @@ Local-only Material 3 Android player. Playback uses libmpv (media_kit). Files st
 - Optional hidden files (dot-folders and hidden videos)
 - Auto-refresh when videos are added, changed, or deleted
 - Scan on start (optional)
-- Videos tab: list or grid, search, filters (All / Bookmarked / Pinned)
+- Videos tab: list or grid, search, filters, All, Bookmarked, Pinned
 - Sort by name, date, size, duration, or folder (ascending or descending)
 - Tap anywhere on a video row to open; checkbox is on the right while selecting
 - Hold a clip for actions (no 3-dot on list rows)
