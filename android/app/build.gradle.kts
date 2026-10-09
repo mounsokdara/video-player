@@ -28,7 +28,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = flutter.versionCode
-        versionName = "1.0.2.1"
+        versionName = flutter.versionName
     }
 
     signingConfigs {
@@ -46,6 +46,12 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+
+    // F-Droid: do not embed the Google "Dependency metadata" signing block in the APK
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     buildTypes {
@@ -69,6 +75,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// F-Droid: Flutter's embedding pulls in Google Play Core (only used for Play Store
+// deferred components, which this app does not use). Exclude it so no proprietary classes ship.
+configurations.configureEach {
+    exclude(group = "com.google.android.play")
 }
 
 dependencies {
