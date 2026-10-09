@@ -37,7 +37,18 @@ jobs:
             echo "$KS_B64" | base64 -d > android/app/upload-keystore.jks
             printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
           fi
-      - run: flutter build apk --release
+      - name: Read version.txt
+        id: ver
+        run: echo "name=$(cut -d+ -f1 version.txt | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+      - run: flutter build apk --release --dart-define=APP_VERSION=${{ steps.ver.outputs.name }}
+      - name: Verify APK version matches version.txt
+        run: |
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          want_name=$(cut -d+ -f1 version.txt | tr -d '[:space:]')
+          want_code=$(cut -d+ -f2 version.txt | tr -d '[:space:]')
+          out=$("$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk | grep -m1 "^package:")
+          echo "$out"
+          echo "$out" | grep -q "versionName='$want_name'" && echo "$out" | grep -q "versionCode='$want_code'" || { echo "::error::APK version does not match version.txt ($want_name+$want_code)"; exit 1; }
       - name: Sign + verify APK (apksigner v1/v2/v3)
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -55,8 +66,8 @@ jobs:
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2.1
-          name: Video Player v1.0.2.1
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: Video Player v${{ steps.ver.outputs.name }}
           files: build/app/outputs/flutter-apk/com.mounsokdara.video_player.apk
           fail_on_unmatched_files: true
           prerelease: false
@@ -65,7 +76,7 @@ jobs:
           body: |
             # Changelog
             
-            ## 1.0.2.1
+            ## ${{ steps.ver.outputs.name }}
             
             Small change:
             - Added a better snackbar instead of the long, wide default snackbar.
