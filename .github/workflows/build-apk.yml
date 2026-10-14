@@ -106,8 +106,75 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Reproducible per-ABI builds. These use EXACTLY the F-Droid recipe (same flags, FDROID=true, locked deps,
+  # no ABI_FILTER) so F-Droid can rebuild them and publish this signed APK ("Binaries:" in fdroiddata).
+  # File name: com.mounsokdara.video_player_<versionCode>.apk with versionCode = version.txt code * 10 + abi digit.
+  build-fdroid:
+    name: F-Droid ${{ matrix.abi }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { abi: armeabi-v7a, platform: android-arm,   digit: 1 }
+          - { abi: arm64-v8a,   platform: android-arm64, digit: 2 }
+          - { abi: x86_64,      platform: android-x64,   digit: 3 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.2"
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Restore signing key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$KS_B64" || { echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          echo "$KS_B64" | base64 -d > android/app/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
+      - name: Build (identical to the F-Droid recipe)
+        run: |
+          flutter build apk --release --split-per-abi --target-platform ${{ matrix.platform }} \
+            --dart-define=FDROID=true --dart-define=APP_VERSION=$(cut -d+ -f1 version.txt)
+      - name: Check versionCode and package
+        run: |
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          base=$(cut -d+ -f2 version.txt | tr -d '[:space:]')
+          want=$(( base * 10 + ${{ matrix.digit }} ))
+          out=$("$AAPT" dump badging build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk | grep -m1 "^package:")
+          echo "$out"
+          echo "$out" | grep -q "versionCode='$want'" || { echo "::error::expected versionCode $want"; exit 1; }
+      - name: Sign + verify APK (apksigner v2/v3)
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          D=build/app/outputs/flutter-apk; A=$D/app-${{ matrix.abi }}-release.apk
+          KS_FILE=android/app/upload-keystore.jks bash scripts/sign-apk.sh "$A" "$D/signed.apk"
+          base=$(cut -d+ -f2 version.txt | tr -d '[:space:]')
+          mkdir -p dist
+          cp "$D/signed.apk" "dist/com.mounsokdara.video_player_$(( base * 10 + ${{ matrix.digit }} )).apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-player-fdroid-${{ matrix.abi }}
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
   release:
-    needs: build-apk
+    needs: [build-apk, build-fdroid]
     runs-on: ubuntu-latest
     permissions:
       contents: write
