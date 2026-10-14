@@ -112,7 +112,11 @@ jobs:
   build-fdroid:
     name: F-Droid ${{ matrix.abi }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    env:
+      # F-Droid builds here; absolute paths end up inside libapp.so, so CI must build at the same place.
+      FD_APP: /home/vagrant/build/com.mounsokdara.video_player
+      FD_FLUTTER: /home/vagrant/build/srclib/flutter
     strategy:
       fail-fast: false
       matrix:
@@ -125,47 +129,59 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
-          cache: gradle
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.47.2"
-          channel: stable
-          cache: true
-      - run: flutter pub get --enforce-lockfile
-      - name: Restore signing key
-        env:
-          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          java-version: "21"   # the F-Droid buildserver uses OpenJDK 21
+      - name: Copy the source to the F-Droid build path
         run: |
-          test -n "$KS_B64" || { echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; }
-          echo "$KS_B64" | base64 -d > android/app/upload-keystore.jks
-          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
-      - name: Build (identical to the F-Droid recipe)
+          sudo mkdir -p /home/vagrant/build/srclib
+          sudo chown -R "$USER" /home/vagrant
+          rsync -a --exclude=.github "$GITHUB_WORKSPACE"/ "$FD_APP"/
+      - name: Flutter SDK exactly like the F-Droid recipe (git checkout of the pinned version)
         run: |
-          flutter build apk --release --split-per-abi --target-platform ${{ matrix.platform }} \
+          FV=$(sed -n -E 's/.*flutter-version:[[:space:]]*"?([0-9.]+).*/\1/p' .github/workflows/build-apk.yml | head -n1)
+          [ -n "$FV" ]
+          git clone --branch "$FV" --depth 1 https://github.com/flutter/flutter.git "$FD_FLUTTER"
+          cd "$FD_APP"
+          export PUB_CACHE="$FD_APP/.pub-cache"
+          "$FD_FLUTTER/bin/flutter" config --no-analytics
+          "$FD_FLUTTER/bin/flutter" pub get --enforce-lockfile
+      - name: Build (identical to the F-Droid recipe, no signing key present)
+        working-directory: /home/vagrant/build/com.mounsokdara.video_player
+        run: |
+          export PUB_CACHE="$FD_APP/.pub-cache"
+          "$FD_FLUTTER/bin/flutter" build apk --release --split-per-abi --target-platform ${{ matrix.platform }} \
             --dart-define=FDROID=true --dart-define=APP_VERSION=$(cut -d+ -f1 version.txt)
-      - name: Check versionCode and package
+      - name: Check versionCode and that no runner path leaked into the app
+        working-directory: /home/vagrant/build/com.mounsokdara.video_player
         run: |
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
           base=$(cut -d+ -f2 version.txt | tr -d '[:space:]')
           want=$(( base * 10 + ${{ matrix.digit }} ))
-          out=$("$AAPT" dump badging build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk | grep -m1 "^package:")
+          A=build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk
+          out=$("$AAPT" dump badging "$A" | grep -m1 "^package:")
           echo "$out"
           echo "$out" | grep -q "versionCode='$want'" || { echo "::error::expected versionCode $want"; exit 1; }
+          rm -rf /tmp/chk && mkdir /tmp/chk && unzip -q "$A" 'lib/*' -d /tmp/chk
+          if strings -a /tmp/chk/lib/*/libapp.so | grep -q '/home/runner'; then echo "::error::runner path embedded in libapp.so"; exit 1; fi
+          strings -a /tmp/chk/lib/*/libapp.so | grep -m1 'dart_plugin_registrant' || true
+      - name: Restore signing key (after the build, so the build itself never sees it)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KS_B64" || { echo "::error::ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          echo "$KS_B64" | base64 -d > /tmp/upload-keystore.jks
       - name: Sign + verify APK (apksigner v2/v3)
+        working-directory: /home/vagrant/build/com.mounsokdara.video_player
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           D=build/app/outputs/flutter-apk; A=$D/app-${{ matrix.abi }}-release.apk
-          KS_FILE=android/app/upload-keystore.jks bash scripts/sign-apk.sh "$A" "$D/signed.apk"
+          KS_FILE=/tmp/upload-keystore.jks bash scripts/sign-apk.sh "$A" "$D/signed.apk"
           base=$(cut -d+ -f2 version.txt | tr -d '[:space:]')
-          mkdir -p dist
-          cp "$D/signed.apk" "dist/com.mounsokdara.video_player_$(( base * 10 + ${{ matrix.digit }} )).apk"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$D/signed.apk" "$GITHUB_WORKSPACE/dist/com.mounsokdara.video_player_$(( base * 10 + ${{ matrix.digit }} )).apk"
+          rm -f /tmp/upload-keystore.jks
       - uses: actions/upload-artifact@v4
         with:
           name: video-player-fdroid-${{ matrix.abi }}
