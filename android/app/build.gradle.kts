@@ -103,6 +103,9 @@ android {
             // R8 on, with proguard-rules.pro keeping everything except the unused Google Play wrappers (F-Droid).
             isMinifyEnabled = true
             isShrinkResources = false
+            vcsInfo {
+                include = false
+            }
         }
     }
 }
