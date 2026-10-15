@@ -13,7 +13,7 @@ echo "Using $APKSIGNER"
 "$APKSIGNER" sign \
   --ks "$KS_FILE" --ks-key-alias "$KEY_ALIAS" \
   --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
-  --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+  --v1-signing-enabled "${V1_SIGNING:-true}" --v2-signing-enabled true --v3-signing-enabled true \
   --out "$OUT" "$IN"
 
 REPORT="$("$APKSIGNER" verify --verbose --print-certs "$OUT")"
