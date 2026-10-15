@@ -148,6 +148,7 @@ jobs:
         working-directory: /home/vagrant/build/com.mounsokdara.video_player
         run: |
           export PUB_CACHE="$FD_APP/.pub-cache"
+          bash scripts/patch-jni-build-id.sh
           "$FD_FLUTTER/bin/flutter" build apk --release --split-per-abi --target-platform ${{ matrix.platform }} \
             --dart-define=FDROID=true --dart-define=APP_VERSION=$(cut -d+ -f1 version.txt)
       - name: Check versionCode and that no runner path leaked into the app
