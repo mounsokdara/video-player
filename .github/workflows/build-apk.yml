@@ -173,6 +173,7 @@ jobs:
       - name: Sign + verify APK (apksigner v2/v3)
         working-directory: /home/vagrant/build/com.mounsokdara.video_player
         env:
+          V1_SIGNING: "false"
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
