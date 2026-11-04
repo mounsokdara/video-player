@@ -1,5 +1,5 @@
 v1.0.4 (2026-10-31)
-• New own playback engine (MediaCodec + FFmpeg)
+• New own playback engine (MediaCodec + FFmpeg) due to old engine is too broken
 • Fix green strip on odd-width videos
 • Fix Zoomed full screen stretching
 • Previous / Next switch video in one tap
@@ -7,4 +7,5 @@ v1.0.4 (2026-10-31)
 • Fix screenshot: captures the video frame, faster, no stall
 • Search results: select, select all, actions
 • Screenshot format setting (PNG, JPG, JPEG)
-• Reproducible F-Droid builds, per-ABI APKs
+• Removed Version Tag
+• Added Version code display
