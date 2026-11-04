@@ -439,7 +439,7 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- media_kit texture output renders black on some devices with Impeller -->
+        
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />

@@ -52,6 +52,7 @@ class _RenderSheetState extends State<_RenderSheet> {
     final e = _e;
     final active = e != null && e.hasPlayer;
     final tune = _rs.tuning(sdr: _sdr);
+    final sourceIsHdr = e?.hdrActive ?? false;
 
     return SafeArea(
       child: Padding(
@@ -71,25 +72,28 @@ class _RenderSheetState extends State<_RenderSheet> {
                   ButtonSegment<bool>(value: true, label: Text('SDR')),
                 ],
                 selected: {_sdr},
-                onSelectionChanged: active
+                onSelectionChanged: (active && sourceIsHdr)
                     ? (s) {
-                        setState(() => _sdr = s.first);
-                        e?.setSdrMode(_sdr);
+                        final newSdr = s.first;
+                        setState(() => _sdr = newSdr);
+                        e?.setSdrMode(newSdr);
                       }
                     : null,
               ),
               _hint(active
-                  ? 'Switches the active render mode live. For HDR videos this changes HDR/SDR tone mapping; for SDR videos it applies the selected render tuning.'
+                  ? (sourceIsHdr
+                      ? 'Switches HDR↔SDR tone mapping live for this HDR video.'
+                      : 'This video is SDR — brightness controls apply the SDR tuning profile.')
                   : 'Start a video to change the render mode.'),
               _title('${_sdr ? 'SDR' : 'HDR'} brightness'),
-              Text('White level: ${tune.peak} nits (higher = darker)'),
+              Text('White level: ${tune.peak} nits (higher = brighter)'),
               Slider(
                 value: tune.peak.toDouble().clamp(100.0, 1000.0).toDouble(),
                 min: 100,
                 max: 1000,
-                divisions: 36,
                 onChanged: (v) {
-                  setState(() => _rs.setTuning(sdr: _sdr, peak: v.round()));
+                  final forSdr = _sdr;
+                  setState(() => _rs.setTuning(sdr: forSdr, peak: v.round()));
                   e?.retune();
                 },
                 onChangeEnd: (_) => _rs.save(),
@@ -99,9 +103,9 @@ class _RenderSheetState extends State<_RenderSheet> {
                 value: tune.gamma.toDouble().clamp(-50.0, 50.0).toDouble(),
                 min: -50,
                 max: 50,
-                divisions: 100,
                 onChanged: (v) {
-                  setState(() => _rs.setTuning(sdr: _sdr, gamma: v.round()));
+                  final forSdr = _sdr;
+                  setState(() => _rs.setTuning(sdr: forSdr, gamma: v.round()));
                   e?.retune();
                 },
                 onChangeEnd: (_) => _rs.save(),
@@ -110,7 +114,8 @@ class _RenderSheetState extends State<_RenderSheet> {
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () {
-                    setState(() => _rs.resetTuning(sdr: _sdr));
+                    final forSdr = _sdr;
+                    setState(() => _rs.resetTuning(sdr: forSdr));
                     _rs.save();
                     e?.retune();
                   },

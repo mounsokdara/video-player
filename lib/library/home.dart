@@ -32,7 +32,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   final _snackHost = GlobalKey();
   int tab = 0;
 
-  /// Direction of the last tab change: 1 = to a tab on the right, -1 = to the left (drives the slide).
   int _tabDir = 1;
   bool loading = true;
   String? error;
@@ -191,7 +190,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _lastOpenPath = item.path;
     _lastOpenAt = now;
     if (!File(item.path).existsSync()) {
-      // The media database still lists a file that is gone (moved, renamed or deleted elsewhere).
       library.forgetMissing(item.path);
       if (mounted) {
         setState(() {});
@@ -255,8 +253,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       unawaited(PlaybackSession.onAway());
     } else if (state == AppLifecycleState.resumed) {
       unawaited(PlaybackSession.onBack());
-      // The Settings activity runs in its own engine and saves to prefs;
-      // pick its changes up (tabs, theme, ...) when we come back.
       unawaited(appSettings.load().then((_) {
         if (mounted) setState(() {});
       }));
@@ -457,7 +453,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           items: visible,
           onSearch: (_) {
             Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => SearchPage(onOpen: _open, onToggleSelect: _toggleSelect),
+              builder: (_) => SearchPage(onOpen: _open),
             ));
           },
           onQuery: (v) => setState(() => query = v),
@@ -644,7 +640,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             items: visible,
             onSearch: (_) {
               Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => SearchPage(onOpen: _open, onToggleSelect: _toggleSelect),
+                builder: (_) => SearchPage(onOpen: _open),
               ));
             },
             onQuery: (v) => setState(() => query = v),
@@ -687,8 +683,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       };
     }
 
-    // Switching tabs slides + fades: the new tab comes in from the side it sits on, the old one leaves
-    // the other way (shared-axis style).
     final body = AnimatedSwitcher(
       duration: const Duration(milliseconds: 280),
       switchInCurve: Curves.easeOutCubic,
@@ -710,8 +704,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final pad = SystemBars.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final onTop = ModalRoute.of(context)?.isCurrent ?? true;
-    // The strip behind the system nav bar continues the bottom NavigationBar (M3 surfaceContainer);
-    // with no bottom bar (rail / one tab) it is the page surface.
     SystemBars.homeStrip = (!wide && tabs.length > 1) ? Theme.of(context).colorScheme.surfaceContainer : null;
     if (onTop) {
       SystemBars.setStrip(SystemBars.homeStrip);
@@ -720,9 +712,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
 
     Widget shell(Widget child) {
-      // Everything the mini player draws (including its parked, off-edge state)
-      // is clipped to the content area, so it can never spill over the
-      // navigation rail or past the screen edge.
       return ClipRect(
         child: Stack(
         clipBehavior: Clip.hardEdge,
@@ -735,9 +724,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 ignoring: !onTop,
                 child: MiniPlayerOverlay(
                   pad: pad,
-                  // With the bottom NavigationBar the body already ends above
-                  // it, so nothing extra is needed. Without it (wide layout or a
-                  // single tab) the body runs under the system nav bar.
                   bottomInset: !wide && tabs.length > 1 ? 0.0 : pad.bottom,
                   onExpand: () {
                     final item = PlaybackSession.item;
@@ -786,7 +772,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 destinations: [for (final id in tabs) rail(id)],
               ),
               const VerticalDivider(width: 1),
-              // Mini player is scoped to the content, never over the rail.
               Expanded(child: shell(body)),
             ],
           ),
@@ -925,10 +910,6 @@ class VideosHub extends StatelessWidget {
   final String filter;
   final void Function(String)? onFilter;
 
-  /// Grid sized from the width the grid really gets (not the screen width, which
-  /// includes the navigation rail). Phones keep the original 2-column cards;
-  /// tablets and landscape get as many columns as fit, with shorter thumbnails
-  /// so more rows are visible.
   SliverGridDelegate _gridDelegate(double width) {
     const gap = 12.0;
     if (width < 600) {
@@ -946,7 +927,6 @@ class VideosHub extends StatelessWidget {
       crossAxisCount: cols,
       mainAxisSpacing: gap,
       crossAxisSpacing: gap,
-      // 16:10 thumbnail + the text footer (about 80 dp).
       mainAxisExtent: cardW * 0.625 + 80,
     );
   }
@@ -959,8 +939,6 @@ class VideosHub extends StatelessWidget {
       displacement: 40,
       edgeOffset: pad.top + kToolbarHeight,
       onRefresh: onRefresh,
-      // One scroll view for header + videos: when everything fits there is nothing to scroll
-      // (a NestedScrollView let the header row scroll away even for a short list).
       child: LayoutBuilder(
         builder: (context, box) => CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
@@ -1035,8 +1013,6 @@ class VideosHub extends StatelessWidget {
                       ),
                     ],
                   );
-                  // Wide content: count, filters and view buttons share one row,
-                  // leaving more of the screen for the videos.
                   if (inline) {
                     return Row(
                       children: [
@@ -1064,7 +1040,6 @@ class VideosHub extends StatelessWidget {
     );
   }
 
-  /// The videos area as slivers (loading, empty, no match, list or grid), placed after the header.
   List<Widget> _bodySlivers(BuildContext context, double width) {
     final scheme = Theme.of(context).colorScheme;
     final pad = MediaQuery.viewPaddingOf(context);
@@ -1517,9 +1492,8 @@ class FoldersHub extends StatelessWidget {
 }
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.onOpen, required this.onToggleSelect});
+  const SearchPage({super.key, required this.onOpen});
   final Future<void> Function(VideoItem item, {List<VideoItem>? playlist}) onOpen;
-  final void Function(VideoItem) onToggleSelect;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -1527,7 +1501,10 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final ctrl = TextEditingController();
+  final picked = <String>{};
   String query = '';
+
+  bool get selecting => picked.isNotEmpty;
 
   @override
   void dispose() {
@@ -1535,42 +1512,105 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
+  void _toggle(VideoItem item) {
+    setState(() {
+      if (!picked.remove(item.id)) picked.add(item.id);
+    });
+  }
+
+  void _toggleAll(List<VideoItem> items) {
+    setState(() {
+      final allOn = items.isNotEmpty && items.every((v) => picked.contains(v.id));
+      if (allOn) {
+        picked.removeAll(items.map((v) => v.id));
+      } else {
+        picked.addAll(items.map((v) => v.id));
+      }
+    });
+  }
+
+  Future<void> _menu() {
+    final chosen = library.videos.where((v) => picked.contains(v.id)).toList();
+    return showItemsMenu(
+      context,
+      items: chosen,
+      allowRename: chosen.length == 1,
+      fromSelection: true,
+      onChanged: () {
+        if (!mounted) return;
+        setState(() => picked.removeWhere((id) => library.videos.every((v) => v.id != id)));
+      },
+      onPlay: (list) => widget.onOpen(list.first, playlist: list),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = library.sorted(SortBy.name, desc: false, query: query);
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        title: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Search videos', border: InputBorder.none),
-          onChanged: (v) => setState(() => query = v),
+    final allOn = items.isNotEmpty && items.every((v) => picked.contains(v.id));
+    return PopScope(
+      canPop: !selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && selecting) setState(picked.clear);
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        appBar: AppBar(
+          leading: selecting
+              ? IconButton(icon: const Icon(Icons.close), tooltip: 'Cancel', onPressed: () => setState(picked.clear))
+              : null,
+          title: selecting
+              ? GestureDetector(
+                  onLongPress: () => _menu(),
+                  child: Text('${picked.length} selected'),
+                )
+              : TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: 'Search videos', border: InputBorder.none),
+                  onChanged: (v) => setState(() => query = v),
+                ),
+          actions: [
+            if (selecting) ...[
+              IconButton(
+                icon: Icon(allOn ? Icons.deselect : Icons.select_all),
+                tooltip: allOn ? 'Deselect all' : 'Select all results',
+                onPressed: () => _toggleAll(items),
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'Actions',
+                onPressed: () => _menu(),
+              ),
+            ],
+          ],
         ),
+        body: items.isEmpty
+            ? const Center(child: Text('No matches'))
+            : ListView.builder(
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom + 24),
+                itemCount: items.length,
+                itemBuilder: (_, i) {
+                  final item = items[i];
+                  return VideoListTile(
+                    item: item,
+                    selected: picked.contains(item.id),
+                    selecting: selecting,
+                    onTap: () => selecting ? _toggle(item) : widget.onOpen(item, playlist: items),
+                    onLongPress: () {
+                      FocusScope.of(context).unfocus();
+                      if (selecting) {
+                        if (!picked.contains(item.id)) _toggle(item);
+                        _menu();
+                      } else {
+                        _toggle(item);
+                      }
+                    },
+                  );
+                },
+              ),
       ),
-      body: items.isEmpty
-          ? const Center(child: Text('No matches'))
-          : ListView.builder(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.only(bottom: MediaQuery.viewPaddingOf(context).bottom + 24),
-              itemCount: items.length,
-              itemBuilder: (_, i) {
-                final item = items[i];
-                return VideoListTile(
-                  item: item,
-                  selected: false,
-                  selecting: false,
-                  onTap: () => widget.onOpen(item, playlist: items),
-                  onLongPress: () => showItemsMenu(
-                    context,
-                    items: [item],
-                    allowRename: true,
-                    onChanged: () { if (mounted) setState(() {}); },
-                    onPlay: (picked) => widget.onOpen(picked.first, playlist: items),
-                  ),
-                );
-              },
-            ),
     );
   }
 }

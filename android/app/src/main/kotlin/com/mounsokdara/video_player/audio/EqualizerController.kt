@@ -36,6 +36,8 @@ class EqualizerController(
     }
 
     fun audioSessionId(): Int {
+        val own = com.mounsokdara.video_player.engine.PlayerHolder.player?.audioSessionId() ?: 0
+        if (own > 0) return own
         val exo = findExoPlayer() ?: return 0
         return try {
             val m = exo.javaClass.methods.firstOrNull { it.name == "getAudioSessionId" && it.parameterCount == 0 }
@@ -171,6 +173,11 @@ class EqualizerController(
     fun setStereoVolume(left: Float, right: Float) {
         val l = left.coerceIn(0f, 1f)
         val r = right.coerceIn(0f, 1f)
+        val own = com.mounsokdara.video_player.engine.PlayerHolder.player
+        if (own != null) {
+            own.setBalance(l, r)
+            return
+        }
         val exo = findExoPlayer() ?: return
         try {
             val two = exo.javaClass.methods.firstOrNull {

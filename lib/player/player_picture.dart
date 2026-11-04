@@ -164,7 +164,6 @@ class VideoPicture extends StatelessWidget {
   }
 }
 
-
 class VlcFit extends StatelessWidget {
   const VlcFit({
     super.key,
@@ -261,8 +260,13 @@ class VlcFit extends StatelessWidget {
       child: SizedBox(
         width: sw,
         height: sh,
-        child: Center(
-          child: SizedBox(width: dw, height: dh, child: child),
+        child: OverflowBox(
+          alignment: Alignment.center,
+          minWidth: dw,
+          maxWidth: dw,
+          minHeight: dh,
+          maxHeight: dh,
+          child: child,
         ),
       ),
     );

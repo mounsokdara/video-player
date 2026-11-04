@@ -73,6 +73,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   bool mirror = false;
   bool invert = false;
   bool _lastPlaying = false;
+  int _lastDurMs = -1;
   DateTime _lastUi = DateTime.fromMillisecondsSinceEpoch(0);
   StreamSubscription<Map<String, dynamic>>? events;
   double _zoomScale = 1;
@@ -118,9 +119,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   bool _handedOff = false;
   bool _endedLatch = false;
 
-  /// True once this video has really played (position moved). Until then no "ended" signal is
-  /// trusted: a video still opening (0:00 length, stale position or completed flag) must never
-  /// skip to the next one.
   bool _endArmed = false;
   int _armFromMs = -1;
   DateTime _openedAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -180,7 +178,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       _lastPlaying = vc?.value.isPlaying ?? false;
       _posTick.value = vc?.value.position.inMilliseconds ?? 0;
       _endedLatch = false;
-      _endArmed = true; // returning from the mini player: it was already playing
+      _endArmed = true;
       _openedAt = DateTime.now().subtract(const Duration(seconds: 5));
       _openFails = 0;
       final keptEngine = vc;
@@ -313,7 +311,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     SystemBars.alwaysHide = appSettings.alwaysHideNavBar;
     final sheetOpen = SystemBars.popupCount > 0;
     final hide = !sheetOpen && !_watch && (appSettings.alwaysHideNavBar || !showUi);
-    // Watch layout (not full screen): a solid navigation bar over the page. Full screen: transparent.
     SystemBars.setStrip(null);
     SystemBars.apply(icons: Brightness.light, contrast: _watch, hide: hide);
   }
@@ -450,7 +447,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       _openedAt = DateTime.now();
       await AndroidBridge.requestAudioFocus();
       await engine.play();
-      _lastPlaying = true;
+      _lastPlaying = engine.value.isPlaying;
+      if (mounted) setState(() {});
       _posTick.value = engine.value.position.inMilliseconds;
       _syncPip();
       unawaited(_applySpeed());
@@ -497,7 +495,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       final pos = c.value.position.inMilliseconds.toDouble();
       final posMs = c.value.position.inMilliseconds;
       final durMs = c.value.duration.inMilliseconds;
-      // Only record progress once the real length is known (0:00 at open would read as 100%).
       if (durMs > 0) {
         final p = (pos / durMs).clamp(0.0, 1.0).toDouble();
         item.progress = p;
@@ -508,6 +505,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       }
       final playing = c.value.isPlaying;
       final nowTick = DateTime.now();
+      if (durMs != _lastDurMs) {
+        _lastDurMs = durMs;
+        if (mounted) setState(() {});
+      }
       if (playing != _lastPlaying) {
         _lastPlaying = playing;
         _syncPip();
@@ -520,12 +521,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
         if (_armFromMs < 0) {
           _armFromMs = posMs;
         } else if ((posMs - _armFromMs).abs() >= 500) {
-          _endArmed = true; // the video has really played
+          _endArmed = true;
         }
       }
-      if (!_endedLatch && ready && _endArmed && nowTick.difference(_openedAt) >= const Duration(milliseconds: 1500)) {
+      if (_endedLatch && playing && !c.value.completed && durMs > 0 && posMs < durMs - 1500) {
+        _endedLatch = false;
+        _completedSince = null;
+      }
+      final hardEnd = c.value.completed && !playing && durMs > 0;
+      final gateOk = _endArmed && nowTick.difference(_openedAt) >= const Duration(milliseconds: 1500);
+      if (!_endedLatch && ready && (gateOk || hardEnd)) {
         final nearEnd = durMs > 0 && posMs >= durMs - 400;
-        // A "completed" flag far from the end is only trusted when it stays set (truncated files).
         final completedSane = c.value.completed && (durMs <= 0 || posMs >= durMs - 3000);
         if (c.value.completed && !playing) {
           _completedSince ??= nowTick;
@@ -592,17 +598,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   }
 
   Future<void> _prev() async {
-    if ((vc?.value.position ?? Duration.zero) > const Duration(seconds: 3)) {
+    if (list.isEmpty) return;
+    if (index > 0) {
+      index -= 1;
+    } else if (appSettings.playMode == PlayMode.loopAll) {
+      index = list.length - 1;
+    } else {
       await vc?.seekTo(Duration.zero);
       return;
     }
-    if (index > 0) {
-      index -= 1;
-      await _openCurrent();
-    } else if (appSettings.playMode == PlayMode.loopAll && list.isNotEmpty) {
-      index = list.length - 1;
-      await _openCurrent();
-    }
+    await _openCurrent();
   }
 
   void _setUi(bool on) {
@@ -668,7 +673,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     } catch (_) {}
   }
 
-  /// Preview thumbnail size: fixed long edge, the video's own aspect ratio.
   Size _previewBox() {
     const edge = 168.0;
     final ar = _previewAspect.clamp(0.4, 2.4).toDouble();
@@ -697,8 +701,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
     );
   }
 
-  /// Finish a scrub: show the target position at once (no snap back to the old
-  /// position while the seek runs), then seek.
   Future<void> _commitSeek(PlaybackEngine c, Duration target) async {
     _posTick.value = target.inMilliseconds;
     if (mounted) {
@@ -1206,7 +1208,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               ),
             if (appSettings.liveCaption)
               AnimatedPositioned(
-                // The key keeps the overlay (and its state) when other children come and go.
                 key: const ValueKey('live-caption-overlay'),
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOut,
@@ -1264,7 +1265,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
               HudLayer(
                 fabs: decodeHud(appSettings.hudFabsJson),
                 pad: pad,
-                bottomReserve: 24,
                 onTap: (id) => unawaited(_runAction(id)),
               ),
             if (showUi && !locked) ..._chrome(c, size, watch: watch, pad: pad),
@@ -1304,7 +1304,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
       ),
     );
   }
-
 
   Widget _watchMeta() {
     final scheme = Theme.of(context).colorScheme;
@@ -1571,8 +1570,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
   }
 
   List<Widget> _chrome(PlaybackEngine? c, Size size, {required bool watch, required EdgeInsets pad}) {
-    final dur = c?.value.duration ?? Duration.zero;
-    final playing = c?.value.isPlaying ?? false;
     final iconSize = appSettings.largeControls ? 40.0 : 32.0;
     final playSize = appSettings.largeControls ? 68.0 : 56.0;
     final wide = size.width >= 600;
@@ -1657,6 +1654,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
             valueListenable: _posTick,
             builder: (_, ms, __) {
               final pos = Duration(milliseconds: ms);
+              final dur = vc?.value.duration ?? Duration.zero;
+              final playing = vc?.value.isPlaying ?? false;
               final remain = dur - pos;
               return Container(
           padding: EdgeInsets.fromLTRB(8, 12, 8, 12 + pad.bottom),
@@ -1723,7 +1722,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
                               mark(abB, const Color(0xFFFF7043)),
                             ],
                           ),
-                          // Floating overlay: takes no space, so the bar and the time labels never move.
                           if (_scrub != null && _previewBytes != null && appSettings.showSeekPreview)
                             Positioned(
                               left: previewLeft,

@@ -13,7 +13,6 @@ class AppSettings {
   bool dynamicColor = false;
   PlaylistUiStyle playlistStyle = PlaylistUiStyle.sheet;
 
-  // General
   bool rememberPlayback = true;
   bool confirmDelete = true;
   bool scanOnStart = true;
@@ -21,17 +20,15 @@ class AppSettings {
   bool showHiddenFolders = false;
   bool skipNomedia = true;
 
-  // Display in playback
   bool showRemaining = true;
   bool showClock = true;
   bool showBattery = true;
   bool showSeekPreview = true;
 
-  // Orientation
   RotationLock rotation = RotationLock.none;
 
-  // Playback
   DecoderMode decoder = DecoderMode.hw;
+  ScreenshotFormat screenshotFormat = ScreenshotFormat.jpg;
   bool hwPriority = true;
   int seekStepSeconds = 10;
   bool autoMiniplayer = false;
@@ -57,7 +54,6 @@ class AppSettings {
 
   PlayMode playMode = PlayMode.order;
 
-  // Accessibility
   bool highContrast = false;
   bool reduceMotion = false;
   bool liveCaption = false;
@@ -73,7 +69,6 @@ class AppSettings {
   bool boldText = false;
   double uiScale = 1;
 
-  // Filters
   double contrast = 1;
   double saturation = 1;
   double gamma = 1;
@@ -93,8 +88,6 @@ class AppSettings {
   bool logGestureEvents = false;
   bool logLifecycleEvents = false;
 
-  /// Tab ids hidden from the bottom bar and moved into the overflow menu.
-  /// Valid: videos, folders, settings. At least one tab must stay visible.
   List<String> hiddenTabs = [];
 
   static const tabIds = <String>['videos', 'folders', 'settings'];
@@ -161,7 +154,6 @@ class AppSettings {
     'Electronic': [520, 400, 0, -180, 180, 380, 180, 0, 380, 520],
   };
 
-  // Equalizer
   bool eqEnabled = false;
   List<int> eqBands = List<int>.filled(10, 0);
   String eqPreset = 'Flat';
@@ -226,6 +218,7 @@ class AppSettings {
       rotation = RotationLock.values[(p.getInt('rotation') ?? RotationLock.none.index).clamp(0, RotationLock.values.length - 1)];
     }
     decoder = DecoderMode.values[(p.getInt('decoder') ?? 1).clamp(0, DecoderMode.values.length - 1)];
+    screenshotFormat = ScreenshotFormat.values[(p.getInt('screenshotFormat') ?? ScreenshotFormat.jpg.index).clamp(0, ScreenshotFormat.values.length - 1)];
     hwPriority = p.getBool('hwPriority') ?? true;
     seekStepSeconds = p.getInt('seekStepSeconds') ?? 10;
     autoMiniplayer = p.getBool('autoMiniplayer') ?? false;
@@ -396,6 +389,7 @@ class AppSettings {
     await p.setBool('showSeekPreview', showSeekPreview);
     await p.setInt('rotation', rotation.index);
     await p.setInt('decoder', decoder.index);
+    await p.setInt('screenshotFormat', screenshotFormat.index);
     await p.setBool('hwPriority', hwPriority);
     await p.setInt('seekStepSeconds', seekStepSeconds);
     await p.setBool('autoMiniplayer', autoMiniplayer);

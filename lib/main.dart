@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:video_player_app/about/about_page.dart';
@@ -27,8 +27,6 @@ final library = LibraryService(appSettings);
 
 int? _lastWindowBg;
 
-/// Remembers the app surface color so native activities (Settings) can paint
-/// their window with it before Flutter draws, instead of flashing black.
 void _rememberWindowBg(int argb) {
   if (_lastWindowBg == argb) return;
   _lastWindowBg = argb;
@@ -37,7 +35,16 @@ void _rememberWindowBg(int argb) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    final text = await rootBundle.loadString('assets/licenses/LGPL-2.1.txt');
+    yield LicenseEntryWithLineBreaks(
+      const ['FFmpeg (libavcodec, libavutil)'],
+      'FFmpeg is used only as a decode-only software video decoder (HEVC and H.264), built from '
+      'the unmodified upstream source (tag n7.1, https://github.com/FFmpeg/FFmpeg) with the build '
+      'script scripts/build_ffmpeg.sh in this project. It is licensed under the GNU Lesser General '
+      'Public License, version 2.1 or later, reproduced below. FFmpeg is a trademark of Fabrice Bellard.\n\n$text',
+    );
+  });
   await runZonedGuarded(() async {
     FlutterError.onError = (details) {
       CrashLog.record('FLUTTER', details.exceptionAsString(), details.stack);
@@ -80,7 +87,6 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       SharedPreferences.getInstance().then((p) => p.reload()).then((_) => appSettings.load()).then((_) {
-        // The equalizer may have been changed in its own activity: apply it to this engine's audio.
         AndroidBridge.applyEqualizer(
           enabled: appSettings.eqEnabled,
           bands: appSettings.eqBands,
@@ -99,7 +105,6 @@ class _VideoPlayerAppState extends State<VideoPlayerApp> with WidgetsBindingObse
     appSettings.save();
   }
 
-  /// Pages that also run as their own launchable activity (see the *Activity.kt classes).
   Widget? _standalone(String route) {
     switch (route) {
       case '/about':

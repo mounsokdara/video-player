@@ -9,69 +9,59 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _sheetPlaylist() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) {
-        final pad = SystemBars.rawOf(context);
-        final insets = MediaQuery.viewInsetsOf(ctx);
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          builder: (_, sc) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: pad.bottom + insets.bottom),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-                    child: Row(
-                      children: [
-                        const Expanded(child: Text('Playlist', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
-                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: ChipScroller(
-                      children: [
-                        for (final m in PlayMode.values)
-                          ChoiceChip(
-                            label: Text(_playModeLabel(m)),
-                            selected: appSettings.playMode == m,
-                            onSelected: (_) {
-                              setState(() => appSettings.playMode = m);
-                              appSettings.save();
-                              Navigator.pop(ctx);
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: sc,
-                      itemCount: list.length,
-                      itemBuilder: (_, i) {
-                        final v = list[i];
-                        return ListTile(
-                          selected: i == index,
-                          leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: v, radius: 6)),
-                          title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(formatDuration(v.duration)),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            index = i;
-                            _openCurrent();
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
+        return SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                child: Row(
+                  children: [
+                    Expanded(child: Text('Playlist', style: Theme.of(ctx).textTheme.titleLarge)),
+                    IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                  ],
+                ),
               ),
-            );
-          },
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: ChipScroller(
+                  children: [
+                    for (final m in PlayMode.values)
+                      ChoiceChip(
+                        label: Text(_playModeLabel(m)),
+                        selected: appSettings.playMode == m,
+                        onSelected: (_) {
+                          setState(() => appSettings.playMode = m);
+                          appSettings.save();
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final v = list[i];
+                    return ListTile(
+                      selected: i == index,
+                      leading: SizedBox(width: 64, height: 40, child: VideoThumb(item: v, radius: 6)),
+                      title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(formatDuration(v.duration)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        index = i;
+                        _openCurrent();
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -84,7 +74,6 @@ extension PlayerSheets on _PlayerPageState {
         PlayMode.shuffle => 'Shuffle all',
         PlayMode.noAutoplay => 'No autoplay',
       };
-
 
   IconData _actionIcon(String id) => switch (id) {
         'speed' => Icons.speed,
@@ -137,14 +126,12 @@ extension PlayerSheets on _PlayerPageState {
     final box = TextEditingController(text: speed.toStringAsFixed(2));
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = SystemBars.rawOf(context);
-        return StatefulBuilder(builder: (ctx, ss) {
+        return SafeArea(child: StatefulBuilder(builder: (ctx, ss) {
           return Padding(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -226,7 +213,7 @@ extension PlayerSheets on _PlayerPageState {
               ],
             ),
           );
-        });
+        }));
       },
     );
   }
@@ -236,12 +223,10 @@ extension PlayerSheets on _PlayerPageState {
     final box = TextEditingController(text: local.round().toString());
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = SystemBars.rawOf(context);
-        return StatefulBuilder(builder: (ctx, ss) {
+        return SafeArea(child: StatefulBuilder(builder: (ctx, ss) {
           void apply(double pct) {
             local = pct.clamp(1, 1000).toDouble();
             box.text = local.round().toString();
@@ -257,7 +242,7 @@ extension PlayerSheets on _PlayerPageState {
           }
 
           return Padding(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -295,7 +280,7 @@ extension PlayerSheets on _PlayerPageState {
               ],
             ),
           );
-        });
+        }));
       },
     );
     box.dispose();
@@ -304,7 +289,6 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _brightnessSheet() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
@@ -368,7 +352,6 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _aspectSheet() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
         Widget item(AspectMode m, String t) => RadioListTile<AspectMode>(
               value: m,
@@ -419,7 +402,6 @@ extension PlayerSheets on _PlayerPageState {
     ];
     await showAppSheet<void>(
       context: context,
-      initial: 0.62,
       children: (ctx) => [
         const ListTile(title: Text('Rotation', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
         for (final e in modes)
@@ -441,7 +423,6 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _colorSheet() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
@@ -497,15 +478,13 @@ extension PlayerSheets on _PlayerPageState {
     var right = appSettings.audioBalanceRight.clamp(0.0, 1.0).toDouble();
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (ctx) {
         final insets = MediaQuery.viewInsetsOf(ctx);
-        final pad = SystemBars.rawOf(context);
         return SafeArea(
           child: StatefulBuilder(builder: (ctx, ss) {
             return Padding(
-              padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom + pad.bottom),
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + insets.bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -581,7 +560,6 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _timerSheet() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
         return SafeArea(
           child: Column(
@@ -614,7 +592,6 @@ extension PlayerSheets on _PlayerPageState {
   Future<void> _playOptions() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
         return SafeArea(
           child: Column(
@@ -654,10 +631,19 @@ extension PlayerSheets on _PlayerPageState {
   }
 
   void _screenshot() {
+    final engine = vc;
     final path = item.path;
-    final pos = vc?.value.position.inMilliseconds ?? 0;
+    final title = item.title;
+    final pos = engine?.value.position.inMilliseconds ?? 0;
+    final format = appSettings.screenshotFormat;
+    _flash('Saving');
     unawaited(() async {
-      final saved = await AndroidBridge.screenshotWindow(title: item.title, path: path, positionMs: pos);
+      String? saved;
+      final file = await engine?.screenshotToFile(format);
+      if (file != null) {
+        saved = await AndroidBridge.saveScreenshotFile(file, title: title, format: format);
+      }
+      saved ??= await AndroidBridge.extractFrame(path: path, title: title, positionMs: pos, format: format);
       if (!mounted) return;
       if (saved != null) {
         _flash('Saved to DCIM/Screenshots');
@@ -666,6 +652,5 @@ extension PlayerSheets on _PlayerPageState {
         _flash('Could not capture frame');
       }
     }());
-    _flash('Saving');
   }
 }
