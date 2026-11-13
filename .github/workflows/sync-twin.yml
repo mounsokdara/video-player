@@ -1,0 +1,206 @@
+name: Sync with twin repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: "push = this repo -> other repo, pull = other repo -> this repo"
+        type: choice
+        options: [push, pull]
+        default: push
+      branch:
+        description: "Branch to sync (same name in both repos)"
+        type: string
+        default: main
+      copy_files:
+        description: "Copy files (follows .gitignore, removes leftovers, honours .syncignore)"
+        type: boolean
+        default: true
+      copy_variables:
+        description: "Copy Actions variables"
+        type: boolean
+        default: true
+      copy_secrets:
+        description: "Copy Actions secrets (push only)"
+        type: boolean
+        default: false
+      skip_ci:
+        description: "Add [skip ci] to the commit so the destination does not start a build/release"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Only show what would change, write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: twin-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  REPO_A: mounsokdara/video-player
+  REPO_B: mounsokdara/video-player.Dev
+  GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+  HAVE_PAT: ${{ secrets.SYNC_TOKEN != '' }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Work out source and destination
+        id: r
+        env:
+          DIRECTION: ${{ inputs.direction }}
+        run: |
+          set -euo pipefail
+          if [ "$HAVE_PAT" != true ] && [ "$DIRECTION" = push ]; then
+            echo "::error::Without SYNC_TOKEN this run can only write to its own repo. Use direction = pull, or add SYNC_TOKEN (see the top of this file)."
+            exit 1
+          fi
+          this="${GITHUB_REPOSITORY,,}"
+          if   [ "$this" = "${REPO_A,,}" ]; then twin="$REPO_B"
+          elif [ "$this" = "${REPO_B,,}" ]; then twin="$REPO_A"
+          else echo "::error::$GITHUB_REPOSITORY is neither REPO_A nor REPO_B (edit the env block)."; exit 1
+          fi
+          if [ "$DIRECTION" = push ]; then src="$GITHUB_REPOSITORY"; dst="$twin"
+          else src="$twin"; dst="$GITHUB_REPOSITORY"; fi
+          echo "src=$src" >> "$GITHUB_OUTPUT"
+          echo "dst=$dst" >> "$GITHUB_OUTPUT"
+          echo "pat=$HAVE_PAT" >> "$GITHUB_OUTPUT"
+          [ "$HAVE_PAT" = true ] || echo "::notice::No SYNC_TOKEN: files only, .github/workflows/ untouched, variables and secrets skipped."
+          echo "## $src -> $dst" >> "$GITHUB_STEP_SUMMARY"
+          [ "${{ inputs.dry_run }}" = true ] && echo "_Dry run: nothing is written._" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Log variables and secret names
+        if: steps.r.outputs.pat == 'true'
+        env:
+          SRC: ${{ steps.r.outputs.src }}
+          DST: ${{ steps.r.outputs.dst }}
+        run: |
+          set -euo pipefail
+          for repo in "$SRC" "$DST"; do
+            echo "::group::$repo - variables (name=value)"
+            gh api --paginate "repos/$repo/actions/variables" --jq '.variables[] | "\(.name)=\(.value)"' || echo "(cannot read variables)"
+            echo "::endgroup::"
+            echo "::group::$repo - secrets (names only, GitHub never returns values)"
+            gh api --paginate "repos/$repo/actions/secrets" --jq '.secrets[] | .name' || echo "(cannot read secret names)"
+            echo "::endgroup::"
+            {
+              echo "### $repo"
+              echo "Variables:"; echo '```'
+              gh api --paginate "repos/$repo/actions/variables" --jq '.variables[] | "\(.name)=\(.value)"' || true
+              echo '```'; echo "Secrets (names):"; echo '```'
+              gh api --paginate "repos/$repo/actions/secrets" --jq '.secrets[] | .name' || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Sync files
+        if: inputs.copy_files
+        env:
+          SRC: ${{ steps.r.outputs.src }}
+          DST: ${{ steps.r.outputs.dst }}
+          BRANCH: ${{ inputs.branch }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SKIP_CI: ${{ inputs.skip_ci }}
+          PAT: ${{ steps.r.outputs.pat }}
+        run: |
+          set -euo pipefail
+          BASE="${SYNC_URL_BASE:-https://x-access-token:${GH_TOKEN}@github.com}"
+          SRC_BASE="$BASE"
+          [ "$PAT" = true ] || SRC_BASE="${SYNC_URL_BASE:-https://github.com}"
+          W="${RUNNER_TEMP:-/tmp}/twin"; rm -rf "$W"; mkdir -p "$W"
+          S_DIR="$W/src"; D_DIR="$W/dst"
+          git clone -q --depth 1 --branch "$BRANCH" "$SRC_BASE/$SRC.git" "$S_DIR"
+          git clone -q --depth 1 --branch "$BRANCH" "$BASE/$DST.git" "$D_DIR"
+
+          git init -q "$W/prot"
+          { echo ".syncignore"
+            if [ -f "$D_DIR/.syncignore" ]; then cat "$D_DIR/.syncignore"; echo; fi
+            [ "$PAT" = true ] || echo ".github/workflows/"
+          } > "$W/prot/.gitignore"
+
+          list_files() {
+            git -C "$1" ls-files -z | sort -z > "$W/t"
+            git -C "$1" ls-files -z -c -i --exclude-standard | sort -z > "$W/i"
+            comm -z -23 "$W/t" "$W/i" > "$W/m"
+            { git -C "$W/prot" check-ignore --no-index -z --stdin < "$W/m" || true; } | sort -z > "$W/p"
+            comm -z -23 "$W/m" "$W/p" > "$2"
+          }
+          list_files "$S_DIR" "$W/S"
+          list_files "$D_DIR" "$W/D"
+
+          comm -z -13 "$W/S" "$W/D" > "$W/del"
+          xargs -0 -r git -C "$D_DIR" rm -q -f -- < "$W/del"
+          tar -C "$S_DIR" --null -T "$W/S" -cf - | tar -C "$D_DIR" -xf -
+          git -C "$D_DIR" add -A
+
+          if git -C "$D_DIR" diff --cached --quiet; then
+            echo "Files are already identical."; echo "Files: already identical." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; exit 0
+          fi
+          git -C "$D_DIR" diff --cached --stat | tail -n 30
+          { echo "Files changed in $DST:"; echo '```'; git -C "$D_DIR" diff --cached --shortstat; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          if [ "$DRY_RUN" = true ]; then echo "Dry run: not pushed."; exit 0; fi
+          msg="Sync from $SRC@$(git -C "$S_DIR" rev-parse --short HEAD)"
+          [ "$SKIP_CI" = true ] && msg="$msg [skip ci]"
+          git -C "$D_DIR" -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "$msg"
+          git -C "$D_DIR" push -q origin "HEAD:$BRANCH"
+          echo "Pushed to $DST ($BRANCH)."
+
+      - name: Copy variables
+        if: inputs.copy_variables && steps.r.outputs.pat == 'true'
+        env:
+          SRC: ${{ steps.r.outputs.src }}
+          DST: ${{ steps.r.outputs.dst }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          old=$(gh api --paginate "repos/$DST/actions/variables" --jq '.variables[] | @json' | jq -s 'map({(.name): .value}) | add // {}')
+          log() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          echo '### Variables' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r row; do
+            name=$(jq -r .name <<<"$row"); value=$(jq -r .value <<<"$row")
+            if ! jq -e --arg k "$name" 'has($k)' <<<"$old" >/dev/null; then log "NEW      $name=$value"
+            else
+              prev=$(jq -r --arg k "$name" '.[$k]' <<<"$old")
+              if [ "$prev" = "$value" ]; then log "same     $name"
+              else log "CHANGED  $name: $prev  ->  $value"; fi
+            fi
+            [ "$DRY_RUN" = true ] || gh variable set "$name" --repo "$DST" --body "$value"
+          done < <(gh api --paginate "repos/$SRC/actions/variables" --jq '.variables[] | @json')
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          [ "$DRY_RUN" = true ] && echo "Dry run: variables not written." || true
+
+      - name: Copy secrets
+        if: inputs.copy_secrets && steps.r.outputs.pat == 'true'
+        env:
+          DST: ${{ steps.r.outputs.dst }}
+          DIRECTION: ${{ inputs.direction }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          set -euo pipefail
+          if [ "$DIRECTION" != push ]; then
+            echo "::warning::GitHub never reveals secret values, so pull cannot copy secrets. Run this workflow in the other repo with direction = push."
+            exit 0
+          fi
+          have=$(gh api --paginate "repos/$DST/actions/secrets" --jq '.secrets[] | "\(.name)\t\(.updated_at)"')
+          log() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          echo '### Secrets (values are never logged)' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r name; do
+            case "$name" in github_token|SYNC_TOKEN|GITHUB_*) continue;; esac
+            value=$(jq -j --arg k "$name" '.[$k]' <<<"$ALL_SECRETS")
+            [ -n "$value" ] || { log "skipped  $name (empty)"; continue; }
+            was=$(awk -F'\t' -v k="$name" '$1==k {print $2}' <<<"$have")
+            if [ -n "$was" ]; then log "OVERWRITE $name (destination copy was last changed $was; old value cannot be read)"
+            else log "NEW       $name"; fi
+            [ "$DRY_RUN" = true ] || printf '%s' "$value" | gh secret set "$name" --repo "$DST"
+          done < <(jq -r 'keys[]' <<<"$ALL_SECRETS")
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          [ "$DRY_RUN" = true ] && echo "Dry run: secrets not written." || true
