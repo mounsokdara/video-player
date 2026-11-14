@@ -9,7 +9,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player_app/core/slide_snackbar.dart';
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/insets.dart';
-import 'package:video_player_app/library/entry.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
@@ -337,106 +336,126 @@ Future<void> showItemsMenu(
   required VoidCallback onChanged,
   required void Function(List<VideoItem> items) onPlay,
   bool folderActions = false,
-  bool allowRename = false,
+  bool allowRename = true,
   bool fromSelection = false,
   List<String> folders = const [],
+  List<String> files = const [],
   Future<void> Function()? onDeleteAll,
 }) async {
-  if (items.isEmpty && folders.isEmpty) return;
+  if (items.isEmpty && folders.isEmpty && files.isEmpty) return;
   final scheme = Theme.of(context).colorScheme;
-  final total = items.length + folders.length;
-  final many = total > 1;
-  final hasVideos = items.isNotEmpty;
-  // What Copy and Cut act on: the selected folders, plus videos that are not already inside one of them.
-  final entryPaths = [
-    ...folders,
-    ...items.map((e) => e.path).where((path) => !folders.any((f) => path.startsWith('$f/'))),
-  ];
-  final playLabel = folderActions
-      ? 'Play queue selected'
-      : (fromSelection ? 'Play selected' : 'Play');
-  final allBookmarked = items.isNotEmpty && items.every((e) => e.bookmarked || appSettings.bookmarks.contains(e.path));
-  final allPinned = items.isNotEmpty && items.every((e) => appSettings.pinned.contains(e.path));
+  bool inFolder(String path) => folders.any((f) => path.startsWith('$f/'));
+  // Videos picked on their own (not already covered by a picked folder).
+  final direct = items.where((e) => !inFolder(e.path)).toList();
+  // Every video the action reaches: the picked videos plus all videos inside the picked folders.
+  final seen = <String>{};
+  final all = <VideoItem>[
+    ...items,
+    ...library.videos.where((v) => inFolder(v.path)),
+  ].where((v) => seen.add(v.path)).toList();
+  final total = direct.length + folders.length + files.length;
+  final single = total == 1;
+  final many = !single;
+  final hasVideos = all.isNotEmpty;
+  final size = all.fold<int>(0, (n, v) => n + v.size);
+  final entryPaths = [...folders, ...files, ...direct.map((e) => e.path)];
+  final firstPath = folders.isNotEmpty ? folders.first : (files.isNotEmpty ? files.first : direct.first.path);
+  final title = single ? (direct.isNotEmpty ? direct.first.title : pth.basename(firstPath)) : '$total selected';
+  final subtitle = single && direct.length == 1
+      ? formatBytes(size)
+      : [
+          if (folders.isNotEmpty) '${folders.length} folder${folders.length == 1 ? '' : 's'}',
+          if (files.isNotEmpty) '${files.length} file${files.length == 1 ? '' : 's'}',
+          if (hasVideos) '${all.length} video${all.length == 1 ? '' : 's'}',
+          if (hasVideos) formatBytes(size),
+        ].join(' · ');
+  final playLabel = many ? 'Play queue selected' : (folders.isNotEmpty ? 'Play queue' : 'Play');
+  final allBookmarked = hasVideos && all.every((e) => e.bookmarked || appSettings.bookmarks.contains(e.path));
+  final allPinned = hasVideos && all.every((e) => appSettings.pinned.contains(e.path));
+  // One standard menu for every long press (single item, folder, or multi-select): every action is always listed.
   await showAppSheet<void>(
     context: context,
     children: (ctx) => [
       ListTile(
-        leading: many || !hasVideos
-            ? CircleAvatar(child: Text('$total'))
-            : SizedBox(width: 64, height: 40, child: VideoThumb(item: items.first, radius: 8)),
-        title: Text(
-          many || !hasVideos ? '$total selected' : items.first.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Text(
-          hasVideos
-              ? (many ? formatBytes(items.fold<int>(0, (n, v) => n + v.size)) : formatBytes(items.first.size))
-              : '${folders.length} folder${folders.length == 1 ? '' : 's'}',
-        ),
+        leading: single && direct.length == 1
+            ? SizedBox(width: 64, height: 40, child: VideoThumb(item: direct.first, radius: 8))
+            : CircleAvatar(
+                child: single
+                    ? Icon(folders.isNotEmpty ? Icons.folder : Icons.insert_drive_file_outlined)
+                    : Text('$total'),
+              ),
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(subtitle),
       ),
       const Divider(height: 1),
-      if (hasVideos)
-        ListTile(
-          leading: const Icon(Icons.play_arrow),
-          title: Text(playLabel),
-          onTap: () {
-            Navigator.pop(ctx);
-            onPlay(items);
-          },
-        ),
-      if (allowRename && !many)
-        ListTile(
-          leading: const Icon(Icons.drive_file_rename_outline),
-          title: const Text('Rename'),
-          onTap: () async {
-            Navigator.pop(ctx);
-            await Future<void>.delayed(const Duration(milliseconds: 160));
-            if (!context.mounted) return;
-            final item = items.first;
-            final name = await promptRename(context, item.path);
+      ListTile(
+        enabled: hasVideos,
+        leading: const Icon(Icons.play_arrow),
+        title: Text(playLabel),
+        onTap: () {
+          Navigator.pop(ctx);
+          onPlay(all);
+        },
+      ),
+      ListTile(
+        enabled: allowRename && single,
+        leading: const Icon(Icons.drive_file_rename_outline),
+        title: const Text('Rename'),
+        onTap: () async {
+          Navigator.pop(ctx);
+          await Future<void>.delayed(const Duration(milliseconds: 160));
+          if (!context.mounted) return;
+          if (direct.isNotEmpty) {
+            final name = await promptRename(context, direct.first.path);
             if (name != null) {
-              final next = await library.rename(item, name);
+              final next = await library.rename(direct.first, name);
               if (next == null && context.mounted) showAllFilesFailed(context, 'Rename');
               onChanged();
             }
-          },
-        ),
-      if (folderActions) ...[
-        ListTile(
-          leading: const Icon(Icons.copy),
-          title: const Text('Copy'),
-          onTap: () {
-            Navigator.pop(ctx);
-            library.copyEntries(entryPaths);
-            onChanged();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.content_cut),
-          title: const Text('Cut'),
-          onTap: () {
-            Navigator.pop(ctx);
-            library.cutEntries(entryPaths);
-            onChanged();
-          },
-        ),
-      ],
-      if (hasVideos) ...[
+          } else {
+            final name = await promptRename(context, firstPath, isDir: folders.isNotEmpty);
+            if (name != null) {
+              final dest = await library.renameEntry(firstPath, name);
+              if (dest == null && context.mounted) showAllFilesFailed(context, 'Rename');
+              onChanged();
+            }
+          }
+        },
+      ),
       ListTile(
+        leading: const Icon(Icons.copy),
+        title: const Text('Copy'),
+        onTap: () {
+          Navigator.pop(ctx);
+          library.copyEntries(entryPaths);
+          onChanged();
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.content_cut),
+        title: const Text('Cut'),
+        onTap: () {
+          Navigator.pop(ctx);
+          library.cutEntries(entryPaths);
+          onChanged();
+        },
+      ),
+      ListTile(
+        enabled: hasVideos,
         leading: const Icon(Icons.share_outlined),
         title: const Text('Share'),
         onTap: () async {
           Navigator.pop(ctx);
-          await SharePlus.instance.share(ShareParams(files: items.map((e) => XFile(e.path)).toList()));
+          await SharePlus.instance.share(ShareParams(files: all.map((e) => XFile(e.path)).toList()));
         },
       ),
       ListTile(
+        enabled: hasVideos,
         leading: Icon(allBookmarked ? Icons.bookmark : Icons.bookmark_outline),
         title: Text(allBookmarked ? 'Remove bookmark' : 'Bookmark'),
         onTap: () {
           Navigator.pop(ctx);
-          for (final item in items) {
+          for (final item in all) {
             if (allBookmarked) {
               appSettings.bookmarks.remove(item.path);
               item.bookmarked = false;
@@ -450,11 +469,12 @@ Future<void> showItemsMenu(
         },
       ),
       ListTile(
+        enabled: hasVideos,
         leading: Icon(allPinned ? Icons.push_pin : Icons.push_pin_outlined),
         title: Text(allPinned ? 'Unpin' : 'Pin'),
         onTap: () {
           Navigator.pop(ctx);
-          for (final item in items) {
+          for (final item in all) {
             if (allPinned) {
               appSettings.pinned.remove(item.path);
             } else {
@@ -465,7 +485,6 @@ Future<void> showItemsMenu(
           onChanged();
         },
       ),
-      ],
       ListTile(
         leading: Icon(Icons.delete_outline, color: scheme.error),
         title: Text('Delete', style: TextStyle(color: scheme.error)),
@@ -476,16 +495,26 @@ Future<void> showItemsMenu(
             onChanged();
             return;
           }
+          final fileCount = direct.length + files.length;
+          final what = [
+            if (folders.isNotEmpty) '${folders.length} folder${folders.length == 1 ? '' : 's'}',
+            if (fileCount > 0) '$fileCount ${files.isEmpty ? 'video' : 'file'}${fileCount == 1 ? '' : 's'}',
+          ].join(' and ');
+          final detail = folders.isNotEmpty
+              ? 'Folders are deleted with everything inside them. This cannot be undone.'
+              : (single ? title : 'This cannot be undone.');
           final ok = !appSettings.confirmDelete ||
-              await confirm(context, many ? 'Delete ${items.length} videos?' : 'Delete this video?', many ? 'This cannot be undone.' : items.first.title);
-          if (ok == true) {
-            final done = await library.deleteVideos(items);
-            if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
-            onChanged();
+              await confirm(context, single && folders.isEmpty && files.isEmpty ? 'Delete this video?' : 'Delete $what?', detail);
+          if (ok != true) return;
+          var done = true;
+          for (final path in [...folders, ...files]) {
+            if (!await library.deletePath(path)) done = false;
           }
+          if (direct.isNotEmpty && !await library.deleteVideos(direct)) done = false;
+          if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
+          onChanged();
         },
       ),
-      if (hasVideos)
       ListTile(
         leading: const Icon(Icons.info_outline),
         title: const Text('Properties'),
@@ -493,16 +522,19 @@ Future<void> showItemsMenu(
           Navigator.pop(ctx);
           await Future<void>.delayed(const Duration(milliseconds: 160));
           if (!context.mounted) return;
-          if (!many) {
-            showProperties(context, items.first);
+          if (single && direct.length == 1) {
+            showProperties(context, direct.first);
             return;
           }
           showAppSheet<void>(
             context: context,
             children: (c) => [
               const ListTile(title: Text('Properties')),
-              ListTile(title: const Text('Items'), subtitle: Text('${items.length}')),
-              ListTile(title: const Text('Total size'), subtitle: Text(formatBytes(items.fold<int>(0, (n, v) => n + v.size)))),
+              if (single) ListTile(title: const Text('Path'), subtitle: Text(firstPath)),
+              if (folders.isNotEmpty) ListTile(title: const Text('Folders'), subtitle: Text('${folders.length}')),
+              if (files.isNotEmpty) ListTile(title: const Text('Other files'), subtitle: Text('${files.length}')),
+              ListTile(title: const Text('Videos'), subtitle: Text('${all.length}')),
+              ListTile(title: const Text('Total size'), subtitle: Text(formatBytes(size))),
             ],
           );
         },
@@ -693,79 +725,6 @@ class ChipScroller extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<void> showFolderEntryMenu(
-  BuildContext context, {
-  required String path,
-  required EntryKind kind,
-  required VoidCallback onChanged,
-  VoidCallback? onOpen,
-}) async {
-  final isDir = kind == EntryKind.folder;
-  final scheme = Theme.of(context).colorScheme;
-  final name = path.split(RegExp(r'[/\\]')).last;
-  await showAppSheet<void>(
-    context: context,
-    children: (ctx) => [
-      ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(kind.label)),
-      if (onOpen != null)
-        ListTile(
-          leading: const Icon(Icons.open_in_new),
-          title: Text(kind.openLabel),
-          onTap: () {
-            Navigator.pop(ctx);
-            onOpen();
-          },
-        ),
-      ListTile(
-        leading: const Icon(Icons.drive_file_rename_outline),
-        title: const Text('Rename'),
-        onTap: () async {
-          Navigator.pop(ctx);
-          await Future<void>.delayed(const Duration(milliseconds: 160));
-          if (!context.mounted) return;
-          final next = await promptRename(context, path, isDir: isDir);
-          if (next != null) {
-            final dest = await library.renameEntry(path, next);
-            if (dest == null && context.mounted) showAllFilesFailed(context, 'Rename');
-            onChanged();
-          }
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.copy),
-        title: const Text('Copy'),
-        onTap: () {
-          Navigator.pop(ctx);
-          library.copyEntry(path);
-          onChanged();
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.content_cut),
-        title: const Text('Cut'),
-        onTap: () {
-          Navigator.pop(ctx);
-          library.cutEntry(path);
-          onChanged();
-        },
-      ),
-      ListTile(
-        leading: Icon(Icons.delete_outline, color: scheme.error),
-        title: Text('Delete', style: TextStyle(color: scheme.error)),
-        onTap: () async {
-          Navigator.pop(ctx);
-          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${kind.label.toLowerCase()}?', name);
-          if (ok == true) {
-            final done = await library.deletePath(path);
-            if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
-            onChanged();
-          }
-        },
-      ),
-    ],
-  );
 }
 
 Future<void> openPage(BuildContext context, String route, Widget Function() fallback) async {

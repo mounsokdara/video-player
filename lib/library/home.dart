@@ -470,7 +470,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // With folders in the selection, Delete removes everything selected (same routine as before).
       onDeleteAll: folders.isEmpty ? null : _deleteSelected,
       folderActions: folderActions,
-      allowRename: folderActions && folders.isEmpty && items.length == 1,
+      allowRename: true,
       fromSelection: true,
       onChanged: () {
         if (!mounted) return;
@@ -1386,6 +1386,20 @@ class FoldersHub extends StatelessWidget {
                             onChanged: (_) => onToggleFolder?.call(f.path),
                           )
                         : _pasteHere(f.path),
+                    onLongPress: () async {
+                      if (selecting) {
+                        if (!_folderOn(f.path)) onToggleFolder?.call(f.path);
+                        await onSelectionHold?.call();
+                      } else {
+                        await showItemsMenu(
+                          context,
+                          items: const [],
+                          folders: [f.path],
+                          onChanged: () => (onAutoRefresh ?? onRefresh)(),
+                          onPlay: (list) => onOpen(list.first, playlist: list),
+                        );
+                      }
+                    },
                     onTap: () => selecting ? onToggleFolder?.call(f.path) : onPath(f.path, [f.path]),
                   ),
               ]),
@@ -1513,16 +1527,21 @@ class FoldersHub extends StatelessWidget {
                 subtitle: Text(entry.subtitle),
                 selected: selecting && isOn(),
                 trailing: selecting ? Checkbox(value: isOn(), onChanged: (_) => toggle()) : null,
-                onLongPress: () {
-                  if (entry.kind == EntryKind.video) {
+                onLongPress: () async {
+                  if (selecting && entry.kind != EntryKind.video) {
+                    // Multi-select: hold adds this folder/file and opens the selection menu for everything selected.
+                    if (!isOn()) toggle();
+                    await onSelectionHold?.call();
+                  } else if (entry.kind == EntryKind.video) {
                     onHoldVideo(entry.item!);
                   } else {
-                    showFolderEntryMenu(
+                    showItemsMenu(
                       context,
-                      path: entry.path,
-                      kind: entry.kind,
+                      items: const [],
+                      folders: entry.kind == EntryKind.folder ? [entry.path] : const [],
+                      files: entry.kind == EntryKind.other ? [entry.path] : const [],
                       onChanged: () => (onAutoRefresh ?? onRefresh)(),
-                      onOpen: open,
+                      onPlay: (list) => onOpen(list.first, playlist: list),
                     );
                   }
                 },
