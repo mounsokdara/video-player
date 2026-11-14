@@ -8,6 +8,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/models.dart';
+import 'package:video_player_app/library/file_transfer.dart';
 import 'package:video_player_app/settings/settings.dart';
 
 class LibraryService {
@@ -53,58 +54,50 @@ class LibraryService {
     clipCut = true;
   }
 
-  Future<bool> pasteInto(String dir) async {
-    if (!await requireAllFilesForOperation()) return false;
+  Future<PasteResult> pasteInto(String dir, {PasteJob? job}) async {
     final sources = clipPaths.isNotEmpty
         ? List<String>.from(clipPaths)
         : (clipPath == null || clipPath!.isEmpty ? <String>[] : [clipPath!]);
-    if (sources.isEmpty) return false;
-    var ok = true;
-    for (final src in sources) {
-      if (!await _pasteOne(dir, src)) ok = false;
-    }
-    clearClipboard();
-    return ok;
-  }
+    if (sources.isEmpty) return PasteResult()..failed = 1;
+    final res = await transferAll(sources, dir, job ?? PasteJob(cut: clipCut));
 
-  Future<bool> _pasteOne(String dir, String src) async {
-    if (src.isEmpty) return false;
-    final name = p.basename(src);
-    var dest = p.join(dir, name);
-    if (dest == src) return false;
-    if (File(dest).existsSync() || Directory(dest).existsSync()) {
-      final stem = p.basenameWithoutExtension(name);
-      final ext = p.extension(name);
-      dest = p.join(dir, '${stem}_copy$ext');
+    for (final (from, to) in res.moved) {
+      _movePrefix(from, to);
     }
-    if (clipCut) {
-      final moved = await AndroidBridge.movePath(src, dest);
-      if (moved == null) return false;
-      _movePrefix(src, moved);
-      _rebuildFolders();
-      unawaited(AndroidBridge.scanPaths([src, moved]));
-      return true;
-    }
-    final copied = await AndroidBridge.copyPath(src, dest);
-    if (copied) {
+    for (final (src, dest) in res.copiedFiles) {
+      if (!looksLikeVideo(dest)) continue;
       VideoItem? srcItem;
       for (final v in videos) {
         if (v.path == src) srcItem = v;
       }
+      if (videos.any((v) => v.path == dest)) continue;
       videos.add(
         VideoItem(
           id: dest,
           path: dest,
           title: p.basename(dest),
-          folder: dir,
+          folder: p.dirname(dest),
           size: srcItem?.size ?? File(dest).lengthSync(),
           modified: DateTime.now(),
           duration: srcItem?.duration ?? Duration.zero,
         ),
       );
-      _rebuildFolders();
     }
-    return copied;
+    _rebuildFolders();
+    final touched = [
+      for (final m in res.moved) ...[m.$1, m.$2],
+      for (final c in res.copiedFiles) c.$2,
+    ];
+    if (touched.isNotEmpty) unawaited(AndroidBridge.scanPaths(touched));
+
+    if (res.cancelled) {
+      clipPaths.removeWhere(res.completedSources.contains);
+      clipPath = clipPaths.isEmpty ? null : clipPaths.first;
+      if (clipPaths.isEmpty) clearClipboard();
+    } else {
+      clearClipboard();
+    }
+    return res;
   }
 
   Future<void> requestPermissions() async {

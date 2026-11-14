@@ -10,6 +10,7 @@ import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/crash.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/library/library.dart';
+import 'package:video_player_app/library/paste_dialog.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/mini/mini_player.dart';
 import 'package:video_player_app/core/models.dart';
@@ -507,6 +508,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onSelectMode: () => setState(() => selecting = true),
           onToggleMaster: _toggleMasterFolder,
           onToggleFolder: _toggleFolder,
+          onPasteTo: _paste,
           onClearSelect: () => setState(() {
             selecting = false;
             selected.clear();
@@ -528,19 +530,51 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     ));
   }
 
+  Future<void> _paste(String dir) async {
+    if (!await library.requireAllFilesForOperation()) {
+      if (mounted) showAllFilesFailed(context, 'Paste');
+      return;
+    }
+    if (!mounted) return;
+    final res = await pasteWithProgress(context, dir);
+    if (!mounted) return;
+    setState(() {});
+    if (res.cancelled) {
+      SlideSnackBar.show(context, message: 'Cancelled. Partly copied files were removed.', behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 3));
+    } else if (res.failed > 0) {
+      showAllFilesFailed(context, 'Paste');
+    }
+  }
+
   Widget? _pasteFab({bool forceFolders = false}) {
     final onFolders = forceFolders || (tabs.isNotEmpty && tabs[safeTab] == 'folders');
-    if (!onFolders || folderPath == null || !library.hasClipboard) return null;
-    return FloatingActionButton(
-      onPressed: () async {
-        final dir = folderPath;
-        if (dir == null) return;
-        final ok = await library.pasteInto(dir);
-        if (!ok && mounted) showAllFilesFailed(context, 'Paste');
-        if (mounted) setState(() {});
-      },
-      tooltip: library.clipCut ? 'Move here' : 'Paste',
-      child: Icon(library.clipCut ? Icons.drive_file_move_outline : Icons.content_paste),
+    if (!onFolders || !library.hasClipboard) return null;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        FloatingActionButton.small(
+          heroTag: null,
+          tooltip: 'Clear clipboard',
+          onPressed: () {
+            library.clearClipboard();
+            setState(() {});
+          },
+          child: const Icon(Icons.close),
+        ),
+        if (folderPath != null) ...[
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: null,
+            onPressed: () {
+              final dir = folderPath;
+              if (dir != null) _paste(dir);
+            },
+            tooltip: library.clipCut ? 'Move here' : 'Paste',
+            child: Icon(library.clipCut ? Icons.drive_file_move_outline : Icons.content_paste),
+          ),
+        ],
+      ],
     );
   }
 
@@ -624,6 +658,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               onSelectMode: () => setState(() => selecting = true),
               onToggleMaster: _toggleMasterFolder,
               onToggleFolder: _toggleFolder,
+              onPasteTo: _paste,
               onClearSelect: () => setState(() {
                 selecting = false;
                 selected.clear();
@@ -1209,6 +1244,7 @@ class FoldersHub extends StatelessWidget {
     this.onSelectMode,
     this.onToggleMaster,
     this.onToggleFolder,
+    this.onPasteTo,
     this.onClearSelect,
     this.onShareSelected,
     this.onDeleteSelected,
@@ -1230,6 +1266,7 @@ class FoldersHub extends StatelessWidget {
   final VoidCallback? onSelectMode;
   final VoidCallback? onToggleMaster;
   final void Function(String folderPath)? onToggleFolder;
+  final Future<void> Function(String dir)? onPasteTo;
   final VoidCallback? onClearSelect;
   final Future<void> Function()? onShareSelected;
   final Future<void> Function()? onDeleteSelected;
@@ -1240,6 +1277,16 @@ class FoldersHub extends StatelessWidget {
   bool _folderOn(String folderPath) {
     final ids = library.videos.where((v) => v.folder == folderPath || v.path.startsWith('$folderPath/')).map((v) => v.id);
     return ids.isNotEmpty && ids.every(selected.contains);
+  }
+
+  Widget? _pasteHere(String dir) {
+    final paste = onPasteTo;
+    if (paste == null || !library.hasClipboard) return null;
+    return IconButton(
+      tooltip: library.clipCut ? 'Move here' : 'Paste here',
+      icon: Icon(library.clipCut ? Icons.drive_file_move_outline : Icons.content_paste),
+      onPressed: () => paste(dir),
+    );
   }
 
   @override
@@ -1291,6 +1338,7 @@ class FoldersHub extends StatelessWidget {
                     leading: const Icon(Icons.sd_storage_outlined),
                     title: const Text('Internal storage'),
                     subtitle: const Text('Tap to browse'),
+                    trailing: _pasteHere('/storage/emulated/0'),
                     onTap: () => onPath('/storage/emulated/0', ['/storage/emulated/0']),
                   ),
                 for (final v in roots)
@@ -1306,6 +1354,7 @@ class FoldersHub extends StatelessWidget {
                           v.state,
                         ].join(' · '),
                       ),
+                      trailing: _pasteHere(v.path),
                       onTap: () => onPath(v.path, [v.path]),
                     ),
                   ),
@@ -1330,7 +1379,7 @@ class FoldersHub extends StatelessWidget {
                             value: _folderOn(f.path),
                             onChanged: (_) => onToggleFolder?.call(f.path),
                           )
-                        : null,
+                        : _pasteHere(f.path),
                     onTap: () => selecting ? onToggleFolder?.call(f.path) : onPath(f.path, [f.path]),
                   ),
               ]),

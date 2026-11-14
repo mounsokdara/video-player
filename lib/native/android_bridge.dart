@@ -208,22 +208,6 @@ class AndroidBridge {
     } catch (_) {}
   }
 
-  static Future<bool> copyPath(String src, String dest) async {
-    try {
-      return await _ch.invokeMethod<bool>('copyPath', {'src': src, 'dest': dest}) ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<String?> movePath(String src, String dest) async {
-    try {
-      return await _ch.invokeMethod<String>('movePath', {'src': src, 'dest': dest});
-    } catch (_) {
-      return null;
-    }
-  }
-
   static Future<int> fileSize(String path) async {
     try {
       return await _ch.invokeMethod<int>('fileSize', {'path': path}) ?? 0;

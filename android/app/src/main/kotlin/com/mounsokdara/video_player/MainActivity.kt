@@ -409,20 +409,6 @@ open class MainActivity : FlutterActivity() {
                                 mainHandler.post { result.success(list) }
                             }
                         }
-                        "copyPath" -> {
-                            val src = call.argument<String>("src")
-                                ?: return@setMethodCallHandler result.error("ARG", "src", null)
-                            val dest = call.argument<String>("dest")
-                                ?: return@setMethodCallHandler result.error("ARG", "dest", null)
-                            result.success(copyFileTo(src, dest))
-                        }
-                        "movePath" -> {
-                            val src = call.argument<String>("src")
-                                ?: return@setMethodCallHandler result.error("ARG", "src", null)
-                            val dest = call.argument<String>("dest")
-                                ?: return@setMethodCallHandler result.error("ARG", "dest", null)
-                            result.success(moveFileTo(src, dest))
-                        }
                         "fileSize" -> {
                             val path = call.argument<String>("path") ?: ""
                             val f = File(path)
@@ -975,41 +961,6 @@ open class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
         return out
-    }
-
-    private fun copyFileTo(src: String, dest: String): Boolean {
-        return try {
-            val s = File(src)
-            val d = File(dest)
-            if (!s.exists()) return false
-            d.parentFile?.mkdirs()
-            s.inputStream().use { input -> d.outputStream().use { input.copyTo(it) } }
-            MediaScannerConnection.scanFile(this, arrayOf(d.absolutePath), arrayOf("video/*"), null)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun moveFileTo(src: String, dest: String): String? {
-        return try {
-            val s = File(src)
-            val d = File(dest)
-            if (!s.exists()) return null
-            d.parentFile?.mkdirs()
-            if (s.renameTo(d)) {
-                MediaScannerConnection.scanFile(this, arrayOf(d.absolutePath, s.absolutePath), arrayOf("video/*", "video/*"), null)
-                return d.absolutePath
-            }
-            if (copyFileTo(src, dest)) {
-                tryFileDelete(s)
-                d.absolutePath
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun previewJpeg(path: String, positionMs: Long, longEdge: Int): ByteArray? {
