@@ -339,38 +339,52 @@ Future<void> showItemsMenu(
   bool folderActions = false,
   bool allowRename = false,
   bool fromSelection = false,
+  List<String> folders = const [],
+  Future<void> Function()? onDeleteAll,
 }) async {
-  if (items.isEmpty) return;
+  if (items.isEmpty && folders.isEmpty) return;
   final scheme = Theme.of(context).colorScheme;
-  final many = items.length > 1;
+  final total = items.length + folders.length;
+  final many = total > 1;
+  final hasVideos = items.isNotEmpty;
+  // What Copy and Cut act on: the selected folders, plus videos that are not already inside one of them.
+  final entryPaths = [
+    ...folders,
+    ...items.map((e) => e.path).where((path) => !folders.any((f) => path.startsWith('$f/'))),
+  ];
   final playLabel = folderActions
       ? 'Play queue selected'
       : (fromSelection ? 'Play selected' : 'Play');
-  final allBookmarked = items.every((e) => e.bookmarked || appSettings.bookmarks.contains(e.path));
-  final allPinned = items.every((e) => appSettings.pinned.contains(e.path));
+  final allBookmarked = items.isNotEmpty && items.every((e) => e.bookmarked || appSettings.bookmarks.contains(e.path));
+  final allPinned = items.isNotEmpty && items.every((e) => appSettings.pinned.contains(e.path));
   await showAppSheet<void>(
     context: context,
     children: (ctx) => [
       ListTile(
-        leading: many
-            ? CircleAvatar(child: Text('${items.length}'))
+        leading: many || !hasVideos
+            ? CircleAvatar(child: Text('$total'))
             : SizedBox(width: 64, height: 40, child: VideoThumb(item: items.first, radius: 8)),
         title: Text(
-          many ? '${items.length} selected' : items.first.title,
+          many || !hasVideos ? '$total selected' : items.first.title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Text(many ? formatBytes(items.fold<int>(0, (n, v) => n + v.size)) : formatBytes(items.first.size)),
+        subtitle: Text(
+          hasVideos
+              ? (many ? formatBytes(items.fold<int>(0, (n, v) => n + v.size)) : formatBytes(items.first.size))
+              : '${folders.length} folder${folders.length == 1 ? '' : 's'}',
+        ),
       ),
       const Divider(height: 1),
-      ListTile(
-        leading: const Icon(Icons.play_arrow),
-        title: Text(playLabel),
-        onTap: () {
-          Navigator.pop(ctx);
-          onPlay(items);
-        },
-      ),
+      if (hasVideos)
+        ListTile(
+          leading: const Icon(Icons.play_arrow),
+          title: Text(playLabel),
+          onTap: () {
+            Navigator.pop(ctx);
+            onPlay(items);
+          },
+        ),
       if (allowRename && !many)
         ListTile(
           leading: const Icon(Icons.drive_file_rename_outline),
@@ -394,7 +408,7 @@ Future<void> showItemsMenu(
           title: const Text('Copy'),
           onTap: () {
             Navigator.pop(ctx);
-            library.copyEntries(items.map((e) => e.path));
+            library.copyEntries(entryPaths);
             onChanged();
           },
         ),
@@ -403,11 +417,12 @@ Future<void> showItemsMenu(
           title: const Text('Cut'),
           onTap: () {
             Navigator.pop(ctx);
-            library.cutEntries(items.map((e) => e.path));
+            library.cutEntries(entryPaths);
             onChanged();
           },
         ),
       ],
+      if (hasVideos) ...[
       ListTile(
         leading: const Icon(Icons.share_outlined),
         title: const Text('Share'),
@@ -450,11 +465,17 @@ Future<void> showItemsMenu(
           onChanged();
         },
       ),
+      ],
       ListTile(
         leading: Icon(Icons.delete_outline, color: scheme.error),
         title: Text('Delete', style: TextStyle(color: scheme.error)),
         onTap: () async {
           Navigator.pop(ctx);
+          if (onDeleteAll != null) {
+            await onDeleteAll();
+            onChanged();
+            return;
+          }
           final ok = !appSettings.confirmDelete ||
               await confirm(context, many ? 'Delete ${items.length} videos?' : 'Delete this video?', many ? 'This cannot be undone.' : items.first.title);
           if (ok == true) {
@@ -464,6 +485,7 @@ Future<void> showItemsMenu(
           }
         },
       ),
+      if (hasVideos)
       ListTile(
         leading: const Icon(Icons.info_outline),
         title: const Text('Properties'),

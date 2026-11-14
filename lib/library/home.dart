@@ -460,13 +460,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _openSelectionMenu({required bool folderActions}) async {
+    final folders = selected.where(FileSystemEntity.isDirectorySync).toList();
     final items = _selectedVideos();
-    if (items.isEmpty) return;
+    if (items.isEmpty && folders.isEmpty) return;
     await showItemsMenu(
       context,
       items: items,
+      folders: folders,
+      // With folders in the selection, Delete removes everything selected (same routine as before).
+      onDeleteAll: folders.isEmpty ? null : _deleteSelected,
       folderActions: folderActions,
-      allowRename: folderActions && items.length == 1,
+      allowRename: folderActions && folders.isEmpty && items.length == 1,
       fromSelection: true,
       onChanged: () {
         if (!mounted) return;
