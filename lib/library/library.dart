@@ -576,7 +576,7 @@ class LibraryService {
           return true;
         }
         if (settings.skipNomedia && _underNomedia(e.path)) return false;
-        return looksLikeVideo(e.path);
+        return settings.showUnsupportedFiles || looksLikeVideo(e.path);
       }).toList();
     } catch (_) {
       return [];

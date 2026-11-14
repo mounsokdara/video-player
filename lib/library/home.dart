@@ -349,7 +349,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _toggleMaster(library.videos.map((v) => v.id));
       return;
     }
-    final ids = library.listDir(path).whereType<File>().map((e) {
+    final ids = library.listDir(path).whereType<File>().where((e) => looksLikeVideo(e.path)).map((e) {
       for (final v in library.videos) {
         if (v.path == e.path) return v.id;
       }
@@ -1341,7 +1341,7 @@ class FoldersHub extends StatelessWidget {
     }
 
     final ents = library.listDir(path);
-    final files = ents.whereType<File>().toList();
+    final files = ents.whereType<File>().where((e) => looksLikeVideo(e.path)).toList();
     final fileIds = files.map((e) {
       for (final v in library.videos) {
         if (v.path == e.path) return v.id;
@@ -1422,6 +1422,17 @@ class FoldersHub extends StatelessWidget {
               final e = ents[i - 1];
               final name = p.basename(e.path);
               final isDir = e is Directory;
+              if (!isDir && !looksLikeVideo(e.path)) {
+                return Opacity(
+                  opacity: 0.55,
+                  child: ListTile(
+                    leading: const SizedBox(width: 40, height: 40, child: Icon(Icons.insert_drive_file_outlined)),
+                    title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${formatBytes((e as File).existsSync() ? e.lengthSync() : 0)} · Unsupported file'),
+                    onTap: () => SlideSnackBar.show(context, message: 'Unsupported file', behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
+                  ),
+                );
+              }
               VideoItem? video;
               if (!isDir) {
                 for (final v in library.videos) {
@@ -1491,7 +1502,7 @@ class FoldersHub extends StatelessWidget {
                   if (isDir) {
                     onPath(e.path, [...folderTrail, e.path]);
                   } else if (video != null) {
-                    final vids = ents.whereType<File>().map((f) {
+                    final vids = ents.whereType<File>().where((f) => looksLikeVideo(f.path)).map((f) {
                       VideoItem? found;
                       for (final v in library.videos) {
                         if (v.path == f.path) found = v;

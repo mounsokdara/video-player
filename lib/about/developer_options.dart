@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:video_player_app/about/about_widgets.dart';
 import 'package:video_player_app/about/console_page.dart';
+import 'package:video_player_app/about/data_file_manager.dart';
 import 'package:video_player_app/core/developer_log.dart';
 import 'package:video_player_app/core/widgets.dart';
 import 'package:video_player_app/settings/settings.dart';
@@ -25,6 +26,8 @@ final _options = <_DevOption>[
   _DevOption('Log player events', 'Open, play, pause, seek, repeat and close events', (s) => s.logPlayerEvents, (s, v) => s.logPlayerEvents = v),
   _DevOption('Log gesture events', 'Pinch, seek, brightness, volume and tap gesture events', (s) => s.logGestureEvents, (s, v) => s.logGestureEvents = v),
   _DevOption('Log lifecycle events', 'App/player resume, pause and background transitions', (s) => s.logLifecycleEvents, (s, v) => s.logLifecycleEvents = v),
+  _DevOption('Show Unsupported File', 'List files that are not videos (greyed out) in the Folders tab', (s) => s.showUnsupportedFiles, (s, v) => s.showUnsupportedFiles = v),
+  _DevOption('Show in-app data file manager', 'Browse the app cache, files and data folders from here', (s) => s.showDataFileManager, (s, v) => s.showDataFileManager = v),
 ];
 
 class DeveloperOptionsSection extends StatefulWidget {
@@ -67,6 +70,13 @@ class _DeveloperOptionsSectionState extends State<DeveloperOptionsSection> {
           subtitle: 'Debug log and crash breadcrumbs',
           onTap: () => openPage(context, '/console', () => const ConsolePage()),
         ),
+        if (appSettings.showDataFileManager)
+          AboutItem(
+            icon: Icons.folder_open,
+            title: 'Data file manager',
+            subtitle: 'App cache, files and data folders',
+            onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const DataFileManagerPage())),
+          ),
       ]),
     ]);
   }
