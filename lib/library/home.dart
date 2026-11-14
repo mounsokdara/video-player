@@ -629,6 +629,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               overflow: _overflowItems(includeSelect: false, current: pushed ? 'folders' : null),
               onOverflow: _onOverflow,
               onRefresh: _refreshPull,
+              onAutoRefresh: () => _refresh(),
             ),
           );
         case 'settings':
@@ -1222,6 +1223,7 @@ class FoldersHub extends StatelessWidget {
     this.overflow = const [],
     this.onOverflow,
     required this.onRefresh,
+    this.onAutoRefresh,
   });
 
   final bool loading;
@@ -1244,6 +1246,9 @@ class FoldersHub extends StatelessWidget {
   final List<PopupMenuEntry<String>> overflow;
   final Future<void> Function(String)? onOverflow;
   final Future<void> Function() onRefresh;
+
+  /// Rescan after a folder action (delete, rename, paste...). Silent: no "No video found" message.
+  final Future<void> Function()? onAutoRefresh;
 
   /// Storage roots show their name ("Internal shared storage"), not the last path segment ("0").
   String _titleFor(String path) {
@@ -1512,7 +1517,7 @@ class FoldersHub extends StatelessWidget {
                       context,
                       path: entry.path,
                       kind: entry.kind,
-                      onChanged: () => onRefresh(),
+                      onChanged: () => (onAutoRefresh ?? onRefresh)(),
                       onOpen: open,
                     );
                   }
