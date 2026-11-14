@@ -49,7 +49,16 @@ Future<void> checkForUpdate(BuildContext context) async {
           '${AboutInfo.name} v${AboutInfo.displayVersionWithCpu} is the latest version.'
           '${feed.fromCache ? '\n\n(${feed.error ?? 'Saved copy'} - this may be out of date.)' : ''}',
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              openExternal(kFDroidBuild ? latest.url : (latest.apkUrl ?? latest.url));
+            },
+            child: Text(!kFDroidBuild && latest.apkUrl != null ? 'Redownload' : 'View release'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
       ),
     );
     return;

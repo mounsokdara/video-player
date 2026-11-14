@@ -8,4 +8,4 @@ v1.0.5 (2026-11-14)
 • Fix corrupted strip at the top or bottom of some videos
 • Loading circle stays visible; "no video found" message
 • Improve refresh button
-• Bugs fixes: system statue bar color dosent auto update, etc i have no clue idk bro ✌🏻😔
+• Bugs fixes: system stagus bar color dosent auto update, etc i have no clue idk bro ✌🏻😔
