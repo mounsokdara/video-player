@@ -12,6 +12,9 @@ val versionParts = rootProject.projectDir.parentFile.resolve("version.txt").read
 require(versionParts.size == 2) { "version.txt must look like 1.0.2.1+5" }
 val appVersionName = versionParts[0].trim()
 val appVersionCode = versionParts[1].trim().toInt()
+// CI sets APP_CPU for the GitHub release APKs so the package versionName shows the build type (1.0.5_arm64).
+val appCpu = (System.getenv("APP_CPU") ?: "").trim()
+val packageVersionName = if (appCpu.isEmpty()) appVersionName else "${appVersionName}_$appCpu"
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
@@ -54,7 +57,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = appVersionCode
-        versionName = appVersionName
+        versionName = packageVersionName
 
         if (selectedAbis.isNotEmpty() && !splitPerAbi) {
             ndk {
