@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:video_player_app/accessibility/live_caption/caption_files.dart';
 import 'package:video_player_app/core/insets.dart';
 import 'package:video_player_app/core/models.dart';
 import 'package:video_player_app/settings/settings.dart';
@@ -65,7 +66,7 @@ Future<void> showPlayerMoreSheet({
   const sections = <String, List<String>>{
     'Playback': ['speed', 'lock', 'ab', 'skipBack', 'skipForward', 'playopt', 'decoder', 'timer', 'repeat'],
     'Audio': ['background', 'eq', 'volume'],
-    'Captions': ['caption', 'captionSettings'],
+    'Captions': ['caption'],
     'Picture': ['screenshot', 'aspect', 'brightness', 'rotate', 'night', 'zoom', 'color', 'mirror', 'invert'],
     'System': ['popup', 'navbar', 'cast'],
     'File': ['bookmark', 'share', 'properties', 'delete'],
@@ -90,7 +91,7 @@ Future<void> showPlayerMoreSheet({
                 'bookmark' => item.bookmarked || appSettings.bookmarks.contains(item.path),
                 _ => false,
               };
-          final seen = <String>{};
+          final seen = <String>{'captionSettings'};
           return SafeArea(
             child: ListView(
               padding: const EdgeInsets.only(bottom: 16),
@@ -113,7 +114,22 @@ Future<void> showPlayerMoreSheet({
                   ),
                   for (final id in section.value)
                     if (AppSettings.allQuickActions.containsKey(id) && seen.add(id))
-                      toggles.contains(id)
+                      id == 'caption'
+                          ? _SplitActionTile(
+                              icon: playerActionIcon(id),
+                              title: AppSettings.allQuickActions[id]!,
+                              subtitle: playerActionSub(id, speed: speed, zoomScale: zoomScale),
+                              value: onFor(id),
+                              onOpen: () async {
+                                Navigator.pop(ctx);
+                                await onAction('captionSettings');
+                              },
+                              onToggle: () async {
+                                await onAction(id);
+                                ss(() {});
+                              },
+                            )
+                          : toggles.contains(id)
                           ? SwitchListTile(
                               secondary: Icon(playerActionIcon(id), color: scheme.onSurface),
                               title: Text(AppSettings.allQuickActions[id]!, style: TextStyle(color: scheme.onSurface)),
@@ -143,6 +159,16 @@ Future<void> showPlayerMoreSheet({
                                 await onAction(id);
                               },
                             ),
+                  if (section.key == 'Captions')
+                    ListTile(
+                      leading: Icon(Icons.subtitles_outlined, color: scheme.onSurface),
+                      title: Text('Captions file', style: TextStyle(color: scheme.onSurface)),
+                      subtitle: Text('Export or import .srt', style: TextStyle(color: scheme.onSurfaceVariant)),
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await CaptionFiles.showSheet(context, item, onAction: onAction);
+                      },
+                    ),
                 ],
                 for (final e in AppSettings.allQuickActions.entries)
                   if (seen.add(e.key))
@@ -167,4 +193,45 @@ Future<void> showPlayerMoreSheet({
       },
     ),
   );
+}
+
+
+class _SplitActionTile extends StatelessWidget {
+  const _SplitActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onOpen,
+    required this.onToggle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final Future<void> Function() onOpen;
+  final Future<void> Function() onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: ListTile(
+            leading: Icon(icon, color: scheme.onSurface),
+            title: Text(title, style: TextStyle(color: scheme.onSurface)),
+            subtitle: subtitle == null ? null : Text(subtitle!, style: TextStyle(color: scheme.onSurfaceVariant)),
+            onTap: onOpen,
+          ),
+        ),
+        SizedBox(height: 40, child: VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Switch(value: value, onChanged: (_) => onToggle()),
+        ),
+      ],
+    );
+  }
 }

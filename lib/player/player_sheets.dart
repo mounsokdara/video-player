@@ -159,19 +159,19 @@ extension PlayerSheets on _PlayerPageState {
                         ),
                         onChanged: (t) {
                           final n = double.tryParse(t);
-                          if (n != null) {
+                          if (n != null && n.isFinite && n > 0) {
                             ss(() {
                               custom = true;
-                              local = n.clamp(0.25, 8).toDouble();
+                              local = n;
                             });
                           }
                         },
                         onSubmitted: (t) {
                           final n = double.tryParse(t);
-                          if (n != null) {
+                          if (n != null && n.isFinite && n > 0) {
                             ss(() {
                               custom = true;
-                              local = n.clamp(0.25, 8).toDouble();
+                              local = n;
                             });
                           }
                         },
@@ -201,7 +201,7 @@ extension PlayerSheets on _PlayerPageState {
                 FilledButton(
                   onPressed: () async {
                     final typed = double.tryParse(box.text);
-                    speed = (custom && typed != null) ? typed.clamp(0.25, 8).toDouble() : local;
+                    speed = (custom && typed != null && typed.isFinite && typed > 0) ? typed : local;
                     appSettings.speed = speed;
                     await _applySpeed();
                     await appSettings.save();

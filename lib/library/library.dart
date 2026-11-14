@@ -172,9 +172,10 @@ class LibraryService {
     final seen = <String>{};
     final hidden = settings.showHiddenFolders;
 
+    final foundVolumes = await AndroidBridge.listStorageVolumes();
     volumes
       ..clear()
-      ..addAll(await AndroidBridge.listStorageVolumes());
+      ..addAll(foundVolumes);
 
     try {
       final indexed = await AndroidBridge.listIndexedVideos();

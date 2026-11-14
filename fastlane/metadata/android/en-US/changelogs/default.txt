@@ -39,7 +39,7 @@ An video Player Powerd by flutter
 - Speed with optional pitch shift (off = no chipmunk audio)
 - Long press 2× (optional haptic)
 - Double-tap seek (step 5–30 seconds)
-- Exclusive gestures: pinch zoom, or one-finger seek / brightness / volume — not at the same time
+- Exclusive gestures: pinch zoom, or one-finger seek / brightness / volume, not at the same time
 - Pinch zoom (optional); zoom resets when minimizing
 - Screen modes: Fit, Zoomed full screen, Original size (native pixels, never upscale), Stretch, 16:9, 4:3, 21:9, 2.35:1, 1:1, 9:16
 - Rotation: none, sensor auto, auto to video, lock landscape / portrait and each direction

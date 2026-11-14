@@ -51,7 +51,7 @@ class _LicensesPageState extends State<LicensesPage> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: cs.surfaceContainer, borderRadius: BorderRadius.circular(20)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${AboutInfo.name} ${AboutInfo.displayVersion}',
+                Text('${AboutInfo.name} ${AboutInfo.displayVersionWithCpu}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
                 Text('Created by ${AboutInfo.author}.', style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),

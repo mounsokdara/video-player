@@ -125,6 +125,13 @@ class SystemBarController(private val activity: Activity) {
             val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             controller?.setSystemBarsAppearance(if (lightIcons) 0 else light, light)
+            window.decorView.setOnSystemUiVisibilityChangeListener(null)
+            uiListenerAttached = false
+            if (Build.VERSION.SDK_INT >= 29) {
+                window.isNavigationBarContrastEnforced = false
+                window.isStatusBarContrastEnforced = false
+            }
+            return
         }
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or

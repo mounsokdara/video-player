@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# Builds decode-only FFmpeg (LGPL, static) for Android: just the HEVC and H.264 decoders, no
-# demuxers, filters, network or encoders. Our own engine does demuxing, sync and rendering; this is
-# only the software video decoder used for streams the phone's chip cannot decode (e.g. 10-bit HEVC).
-#
-# Usage: scripts/build_ffmpeg.sh [abi ...]      (default: arm64-v8a armeabi-v7a x86_64)
-# Output: android/app/src/main/cpp/ffmpeg/<abi>/{include,lib}
-# Needs the Android NDK (ANDROID_NDK_LATEST_HOME or ANDROID_NDK_HOME) and git.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,7 +32,7 @@ build_abi() {
   rm -rf "$out" "$build"; mkdir -p "$build"
   cd "$build"
   local asmflags="--enable-neon --enable-asm"
-  [ "$abi" = "x86_64" ] && asmflags="--disable-x86asm"   # avoids needing nasm; x86_64 is only emulators/Chromebooks
+  [ "$abi" = "x86_64" ] && asmflags="--disable-x86asm"
   "$SRC/configure" \
     --prefix="$out" \
     --enable-cross-compile --target-os=android --arch="$arch" --cpu="$cpu" \

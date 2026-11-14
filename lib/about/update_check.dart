@@ -46,7 +46,7 @@ Future<void> checkForUpdate(BuildContext context) async {
       builder: (ctx) => AlertDialog(
         title: const Text("You're up to date"),
         content: Text(
-          '${AboutInfo.name} v${AboutInfo.displayVersion} is the latest version.'
+          '${AboutInfo.name} v${AboutInfo.displayVersionWithCpu} is the latest version.'
           '${feed.fromCache ? '\n\n(${feed.error ?? 'Saved copy'} - this may be out of date.)' : ''}',
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
@@ -62,7 +62,7 @@ Future<void> checkForUpdate(BuildContext context) async {
       title: const Text('Update available'),
       content: SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text('v${latest.version}  (installed: v${AboutInfo.displayVersion})',
+          Text('v${latest.version}  (installed: v${AboutInfo.displayVersionWithCpu})',
               style: const TextStyle(fontWeight: FontWeight.w600)),
           if (notes.isNotEmpty) ...[const SizedBox(height: 12), Text(notes)],
         ]),

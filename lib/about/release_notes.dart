@@ -29,14 +29,22 @@ class ReleaseNote {
 
   factory ReleaseNote.fromJson(Map<String, dynamic> j) {
     String? apk;
+    String? firstApk;
+    String? universalApk;
+    final cpuName = AboutInfo.cpu.isEmpty ? '' : 'videoplayer-${AboutInfo.cpu}.apk';
     for (final a in (j['assets'] as List<dynamic>? ?? const [])) {
       final m = a as Map<String, dynamic>;
       final name = (m['name'] as String? ?? '').toLowerCase();
-      if (name.endsWith('.apk')) {
-        apk = m['browser_download_url'] as String?;
+      if (!name.endsWith('.apk')) continue;
+      final url = m['browser_download_url'] as String?;
+      firstApk ??= url;
+      if (name == 'videoplayer-universal.apk') universalApk = url;
+      if (cpuName.isNotEmpty && name == cpuName) {
+        apk = url;
         break;
       }
     }
+    apk ??= universalApk ?? firstApk;
     final tag = (j['tag_name'] as String?) ?? '';
     final name = (j['name'] as String?)?.trim() ?? '';
     return ReleaseNote(

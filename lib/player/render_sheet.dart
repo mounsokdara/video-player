@@ -72,7 +72,7 @@ class _RenderSheetState extends State<_RenderSheet> {
                   ButtonSegment<bool>(value: true, label: Text('SDR')),
                 ],
                 selected: {_sdr},
-                onSelectionChanged: (active && sourceIsHdr)
+                onSelectionChanged: active
                     ? (s) {
                         final newSdr = s.first;
                         setState(() => _sdr = newSdr);
@@ -83,7 +83,7 @@ class _RenderSheetState extends State<_RenderSheet> {
               _hint(active
                   ? (sourceIsHdr
                       ? 'Switches HDR↔SDR tone mapping live for this HDR video.'
-                      : 'This video is SDR — brightness controls apply the SDR tuning profile.')
+                      : 'This video is SDR. HDR or SDR here only picks which brightness profile is used.')
                   : 'Start a video to change the render mode.'),
               _title('${_sdr ? 'SDR' : 'HDR'} brightness'),
               Text('White level: ${tune.peak} nits (higher = brighter)'),

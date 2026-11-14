@@ -161,17 +161,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (mounted) setState(() => loading = false);
   }
 
-  Future<void> _refresh() async {
+  void _notifyNoVideos() {
+    if (!mounted || library.videos.isNotEmpty) return;
+    if (!(library.allFiles || library.permissionReady)) return;
+    SlideSnackBar.show(context, message: 'No video found during scan', behavior: SnackBarBehavior.floating);
+  }
+
+  Future<void> _refresh({bool notify = false}) async {
     if (_busy) return;
     _busy = true;
+    libraryScanning.value = true;
     try {
       await library.scan();
     } catch (e, s) {
       CrashLog.record('LIBRARY', '$e', s);
     }
+    libraryScanning.value = false;
     _busy = false;
     if (mounted) setState(() {});
+    if (notify) _notifyNoVideos();
   }
+
+  Future<void> _refreshPull() => _refresh(notify: true);
 
   List<VideoItem> get visible => library.sorted(sort, desc: sortDesc, query: query, filter: filter);
 
@@ -471,7 +482,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           }),
           onSelectMode: () => setState(() => selecting = true),
           onToggleMaster: _toggleMasterVisible,
-          onRefresh: _refresh,
+          onRefresh: _refreshPull,
           overflow: _overflowItems(includeSelect: true),
           onOverflow: _onOverflow,
           filter: filter,
@@ -504,7 +515,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onDeleteSelected: _deleteSelected,
           overflow: _overflowItems(includeSelect: false),
           onOverflow: _onOverflow,
-          onRefresh: _refresh,
+          onRefresh: _refreshPull,
         ),
       'settings' => MoreHub(onChanged: widget.onSettingsChanged),
       _ => const SizedBox.shrink(),
@@ -555,7 +566,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         CrashLog.record('EQ', '$e', s);
       }
     } else if (v == 'refresh') {
-      await _refresh();
+      await LibraryRefresh.pullDown();
     } else if (v == 'select') {
       setState(() => selecting = true);
     } else if (v == 'crash') {
@@ -621,7 +632,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               onDeleteSelected: _deleteSelected,
               overflow: _overflowItems(includeSelect: false),
               onOverflow: _onOverflow,
-              onRefresh: _refresh,
+              onRefresh: _refreshPull,
             ),
           );
         case 'settings':
@@ -658,7 +669,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             }),
             onSelectMode: () => setState(() => selecting = true),
             onToggleMaster: _toggleMasterVisible,
-            onRefresh: _refresh,
+            onRefresh: _refreshPull,
             overflow: _overflowItems(includeSelect: true),
             onOverflow: _onOverflow,
             filter: filter,
@@ -1115,6 +1126,8 @@ class VideosHub extends StatelessWidget {
   }
 }
 
+final ValueNotifier<bool> libraryScanning = ValueNotifier<bool>(false);
+
 class _EmptyLibrary extends StatelessWidget {
   const _EmptyLibrary({super.key, required this.onRefresh});
   final Future<void> Function() onRefresh;
@@ -1134,7 +1147,7 @@ class _EmptyLibrary extends StatelessWidget {
               Icon(Icons.movie_filter_outlined, size: 56, color: scheme.outline),
               const SizedBox(height: 12),
               Text(
-                granted ? 'No videos on this device' : 'Need storage access',
+                granted ? 'No video found on your device' : 'Need storage access',
                 style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
@@ -1156,7 +1169,22 @@ class _EmptyLibrary extends StatelessWidget {
                   child: const Text('Grant access'),
                 )
               else
-                FilledButton(onPressed: onRefresh, child: const Text('Scan again')),
+                ValueListenableBuilder<bool>(
+                  valueListenable: libraryScanning,
+                  builder: (context, scanning, _) => FilledButton(
+                    onPressed: scanning ? null : onRefresh,
+                    child: scanning
+                        ? const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4)),
+                              SizedBox(width: 10),
+                              Text('Scanning...'),
+                            ],
+                          )
+                        : const Text('Scan again'),
+                  ),
+                ),
             ],
           ),
         ),

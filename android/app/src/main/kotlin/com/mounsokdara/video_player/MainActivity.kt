@@ -50,6 +50,8 @@ open class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val REQ_PICK_TEXT = 7421
+    private var pendingTextPick: MethodChannel.Result? = null
     private var previewRetriever: MediaMetadataRetriever? = null
     private var previewBoundPath: String? = null
     private lateinit var systemBars: SystemBarController
@@ -57,6 +59,42 @@ open class MainActivity : FlutterActivity() {
     private lateinit var equalizer: EqualizerController
     private lateinit var appNative: AppNative
     private var libraryWatcher: LibraryWatcher? = null
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != REQ_PICK_TEXT) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val r = pendingTextPick ?: return
+        pendingTextPick = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            r.success(null)
+            return
+        }
+        io.execute {
+            try {
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(16 * 1024)
+                var total = 0
+                val stream = contentResolver.openInputStream(uri) ?: throw java.io.IOException("Could not open the file")
+                stream.use { inp ->
+                    while (true) {
+                        val n = inp.read(buf)
+                        if (n < 0) break
+                        total += n
+                        if (total > 8_000_000) throw java.io.IOException("That file is too big for a caption file")
+                        out.write(buf, 0, n)
+                    }
+                }
+                val text = String(out.toByteArray(), Charsets.UTF_8)
+                mainHandler.post { r.success(text) }
+            } catch (t: Throwable) {
+                mainHandler.post { r.error("PICK", t.message ?: "Could not read the file", null) }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         systemBars = SystemBarController(this)
@@ -403,6 +441,23 @@ open class MainActivity : FlutterActivity() {
                         "breadcrumb" -> {
                             NativeCrashLog.breadcrumb(this, call.argument<String>("action") ?: "")
                             result.success(true)
+                        }
+                        "pickTextFile" -> {
+                            if (pendingTextPick != null) {
+                                return@setMethodCallHandler result.error("BUSY", "A file picker is already open", null)
+                            }
+                            pendingTextPick = result
+                            try {
+                                val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = "*/*"
+                                }
+                                @Suppress("DEPRECATION")
+                                startActivityForResult(pick, REQ_PICK_TEXT)
+                            } catch (t: Throwable) {
+                                pendingTextPick = null
+                                result.error("PICK", t.message ?: "Could not open the file picker", null)
+                            }
                         }
                         "pickerAllowMultiple" -> {
                             result.success(intent?.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false) == true)

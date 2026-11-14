@@ -1515,12 +1515,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver, Si
           listenable: Listenable.merge([if (vc != null) vc!]),
           builder: (context, _) {
             final e = vc;
-            final active = e?.hdrActive ?? false;
-            final label = active && !(e?.sdrMode ?? true) ? 'HDR' : 'SDR';
+            final active = e != null && e.hasPlayer;
+            final label = (e?.sdrMode ?? true) ? 'SDR' : 'HDR';
             return TextButton(
               onPressed: () => showRenderSheet(context, e),
               onLongPress: () {
-                if (e != null && e.hdrActive) e.setSdrMode(!e.sdrMode);
+                if (e != null && e.hasPlayer) e.setSdrMode(!e.sdrMode);
               },
               child: Text(
                 label,

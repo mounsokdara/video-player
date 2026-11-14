@@ -439,7 +439,8 @@ class NativePlayer(
 
             val canSoft = SwNative.available && softwareCodecId(mime) >= 0
             val unalignedWidth = w > 0 && w % 16 != 0
-            var wantSw = canSoft && (preferSoftware || noHardwareFor(vf) || unalignedWidth)
+            val unalignedHeight = hgt > 0 && hgt % 8 != 0
+            var wantSw = canSoft && (preferSoftware || noHardwareFor(vf) || unalignedWidth || unalignedHeight)
             if (!wantSw) {
                 createHardwareOutput(w, hgt)
                 try {

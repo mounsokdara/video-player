@@ -85,7 +85,7 @@ void showAllFilesFailed(BuildContext context, String action) {
   SlideSnackBar.show(context, message: 'Failed to $action. Make sure you have all file access Enabled', behavior: SnackBarBehavior.floating);
 }
 
-class LibraryRefresh extends StatelessWidget {
+class LibraryRefresh extends StatefulWidget {
   const LibraryRefresh({
     super.key,
     required this.onRefresh,
@@ -99,18 +99,46 @@ class LibraryRefresh extends StatelessWidget {
   final double edgeOffset;
   final double displacement;
 
+  static final List<_LibraryRefreshState> _live = [];
+
+  /// Pulls the newest on-screen refresh indicator down by itself, same as a finger pull.
+  static Future<void> pullDown() async {
+    if (_live.isEmpty) return;
+    await _live.last._indicator.currentState?.show();
+  }
+
+  @override
+  State<LibraryRefresh> createState() => _LibraryRefreshState();
+}
+
+class _LibraryRefreshState extends State<LibraryRefresh> {
+  final GlobalKey<RefreshIndicatorState> _indicator = GlobalKey<RefreshIndicatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    LibraryRefresh._live.add(this);
+  }
+
+  @override
+  void dispose() {
+    LibraryRefresh._live.remove(this);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return RefreshIndicator(
+      key: _indicator,
       color: scheme.primary,
       backgroundColor: scheme.surfaceContainerHigh,
-      displacement: displacement,
-      edgeOffset: edgeOffset,
+      displacement: widget.displacement,
+      edgeOffset: widget.edgeOffset,
       strokeWidth: 2.4,
       notificationPredicate: (n) => n.depth <= 1,
-      onRefresh: onRefresh,
-      child: child,
+      onRefresh: widget.onRefresh,
+      child: widget.child,
     );
   }
 }

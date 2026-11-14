@@ -219,7 +219,7 @@ class PlaybackEngine extends ChangeNotifier {
 
   Future<void> applyTempo({required double rate, required bool pitchShift}) async {
     DeveloperLog.player('tempo rate=$rate pitchShift=$pitchShift');
-    _rate = rate.clamp(0.25, 8.0).toDouble();
+    _rate = (rate.isFinite && rate > 0) ? rate : 1.0;
     _pitchShift = pitchShift;
     if (_mine) await _pushTempo();
   }
@@ -301,7 +301,7 @@ class PlaybackEngine extends ChangeNotifier {
     final src = _src;
     if (_closed || src == null) return;
     _convert = src.needsConvert;
-    _sdrMode = appSettings.rememberHdr && !appSettings.hdrOn;
+    _sdrMode = !_convert || (appSettings.rememberHdr && !appSettings.hdrOn);
     DeveloperLog.append('video ${src.describe()} decoder=$_decoder');
     await _pushTuning();
     _describe();
@@ -341,8 +341,10 @@ class PlaybackEngine extends ChangeNotifier {
 
   Future<void> setSdrMode(bool sdr) async {
     _sdrMode = sdr;
-    appSettings.hdrOn = !sdr;
-    if (appSettings.rememberHdr) unawaited(appSettings.save());
+    if (_convert) {
+      appSettings.hdrOn = !sdr;
+      if (appSettings.rememberHdr) unawaited(appSettings.save());
+    }
     if (_mine) await _pushTuning();
     notifyListeners();
   }

@@ -52,6 +52,15 @@ class AndroidBridge {
     } catch (_) {}
   }
 
+  static Future<Map<String, dynamic>> captionStyle() async {
+    try {
+      final r = await _ch.invokeMethod<Map<Object?, Object?>>('captionStyle');
+      return r == null ? <String, dynamic>{} : Map<String, dynamic>.from(r);
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
   static Future<Map<String, dynamic>> liveCaptionStatus() async {
     try {
       final r = await _ch.invokeMethod<Map<Object?, Object?>>('liveCaptionStatus');
@@ -153,6 +162,14 @@ class AndroidBridge {
       return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
       return [];
+    }
+  }
+
+  static Future<String?> pickTextFile() async {
+    try {
+      return await _ch.invokeMethod<String>('pickTextFile');
+    } on PlatformException catch (e) {
+      throw e.message ?? 'Could not read the file';
     }
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:video_player_app/accessibility/live_caption/caption_files.dart';
 import 'package:video_player_app/native/android_bridge.dart';
 
 class CaptionCue {
@@ -35,6 +36,9 @@ class LiveCaptionController extends ChangeNotifier {
   int coveredMs = 0;
   int durationMs = 0;
   bool showReady = false;
+  bool imported = false;
+
+  List<CaptionCue> cuesFor(String path) => _path == path ? List<CaptionCue>.unmodifiable(_cues) : const [];
 
   double? get progress => durationMs > 0 ? (coveredMs / durationMs).clamp(0.0, 1.0) : null;
 
@@ -78,8 +82,10 @@ class LiveCaptionController extends ChangeNotifier {
     _lastSent = _lastPos;
     if (_path != path) {
       _path = path;
+      imported = false;
       _reset();
       _running = false;
+      unawaited(_loadImported(path));
     }
     if (!_running) _requestStart(delayMs: 500);
   }
@@ -97,6 +103,37 @@ class LiveCaptionController extends ChangeNotifier {
         unawaited(AndroidBridge.liveCaptionStop(release: true));
       }
     });
+  }
+
+  Future<void> _loadImported(String path) async {
+    final list = await CaptionFiles.loadImported(path);
+    if (list == null || _path != path) return;
+    applyImported(path, list);
+  }
+
+  void applyImported(String path, List<CaptionCue> list) {
+    if (_path != path) return;
+    imported = true;
+    _debounce?.cancel();
+    if (_running) {
+      _running = false;
+      unawaited(AndroidBridge.liveCaptionStop(release: true));
+    }
+    _cues
+      ..clear()
+      ..addAll(list);
+    _keys.clear();
+    state = '';
+    message = '';
+    showReady = false;
+    _queueNotify();
+  }
+
+  void clearImported(String path) {
+    if (_path != path || !imported) return;
+    imported = false;
+    _reset();
+    _requestStart(delayMs: 300);
   }
 
   void _reset() {
@@ -131,7 +168,7 @@ class LiveCaptionController extends ChangeNotifier {
 
   void _start(int ms) {
     final path = _path;
-    if (path == null) return;
+    if (path == null || imported) return;
     _running = true;
     _lastPos = ms;
     _lastSent = ms;
@@ -139,6 +176,7 @@ class LiveCaptionController extends ChangeNotifier {
   }
 
   void _onPosition() {
+    if (imported) return;
     final ms = _position?.value ?? 0;
     final jump = ms - _lastPos;
     _lastPos = ms;

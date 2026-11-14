@@ -1,7 +1,9 @@
 package com.mounsokdara.video_player
 
+import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.view.accessibility.CaptioningManager
 import com.mounsokdara.video_player.accessibility.livecaption.LiveCaptionActivity
 import com.mounsokdara.video_player.accessibility.livecaption.LiveCaptionEngine
 import com.mounsokdara.video_player.accessibility.livecaption.aimodeltranscribe.AiModelTranscribeActivity
@@ -84,6 +86,24 @@ class AppNative(
                     }
                 }
                 result.success(true)
+                return true
+            }
+            "captionStyle" -> {
+                val cm = activity.getSystemService(Context.CAPTIONING_SERVICE) as CaptioningManager
+                val s = cm.userStyle
+                val face = s.typeface
+                result.success(
+                    mapOf(
+                        "fontScale" to cm.fontScale.toDouble(),
+                        "foreground" to s.foregroundColor,
+                        "background" to s.backgroundColor,
+                        "window" to s.windowColor,
+                        "edgeType" to s.edgeType,
+                        "edgeColor" to s.edgeColor,
+                        "bold" to (face?.isBold ?: false),
+                        "italic" to (face?.isItalic ?: false)
+                    )
+                )
                 return true
             }
             "liveCaptionStart" -> {

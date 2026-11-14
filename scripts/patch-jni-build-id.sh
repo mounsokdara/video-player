@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Reproducible builds: the jni package links libdartjni.so with a GNU build-id that is a hash of the
-# UNSTRIPPED binary, which embeds the NDK's absolute path (differs between CI and the F-Droid buildserver).
-# Linking with --build-id=none removes that environment-dependent stamp.
-# Called by the F-Droid recipe and by the GitHub Actions F-Droid job, so both build identically.
 set -euo pipefail
 PUB_CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
 patched=0

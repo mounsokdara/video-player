@@ -273,7 +273,7 @@ class MoreHub extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About'),
-              subtitle: Text('Video Player ${AboutInfo.displayVersion}'),
+              subtitle: Text('Video Player ${AboutInfo.displayVersionWithCpu}'),
               onTap: () async {
                 await openPage(context, '/about', () => const AboutPage());
                 onChanged();

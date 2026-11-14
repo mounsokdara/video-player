@@ -79,7 +79,7 @@ class _LiveCaptionPageState extends State<LiveCaptionPage> with WidgetsBindingOb
             const Divider(height: 1),
             ListTile(
               title: const Text('Caption preferences'),
-              subtitle: const Text('Open system settings'),
+              subtitle: const Text('Caption text size, color and style follow the system settings'),
               trailing: const Icon(Icons.chevron_right),
               onTap: AndroidBridge.openCaptionSettings,
             ),

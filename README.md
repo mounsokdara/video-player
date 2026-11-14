@@ -12,7 +12,7 @@ Local-only Material 3 Android player. Playback uses its own engine (Android Medi
 
 [Download APK][download]
 
-[download]: https://github.com/mounsokdara/video-player/releases/latest/download/com.mounsokdara.video_player.apk
+[download]: https://github.com/mounsokdara/video-player/releases/latest/download/VideoPlayer-universal.apk
 
 ## Library
 
@@ -53,7 +53,7 @@ Local-only Material 3 Android player. Playback uses its own engine (Android Medi
 - Speed with optional pitch shift
 - Long press 2×
 - Double-tap seek
-- Exclusive gestures: pinch zoom, or one-finger seek / brightness / volume — not at the same time
+- Exclusive gestures: pinch zoom, or one-finger seek / brightness / volume, not at the same time
 - Pinch zoom; zoom resets when minimizing
 - Screen modes: Fit, Zoomed full screen, Original size, Stretch, 16:9, 4:3, 21:9, 2.35:1, 1:1, 9:16
 - Rotation: none, sensor auto, auto to video, lock landscape / portrait each direction
@@ -99,7 +99,7 @@ Local-only Material 3 Android player. Playback uses its own engine (Android Medi
 - Reduce motion, large controls, bold text, focus highlight
 - Interface scale
 - Haptic feedback
-- Live Caption (Settings > Accessibility): AI captions of the spoken words while a video plays, fully offline, extracted phrase by phrase as spoken with progress shown, and cached per video so replays are instant. Quick toggle and shortcut in the player's More sheet. The speech engine and Whisper models (Base or Small) are downloaded from Manage AI model, with default model and language settings
+- Live Caption (Settings > Accessibility): AI captions of the spoken words while a video plays, fully offline, extracted phrase by phrase as spoken with progress shown, and cached per video so replays are instant. Caption text size, color, background and edge follow the system caption preferences. Captions can be edited in the app (text and timing, add or delete) from the Captions file sheet. Quick toggle and shortcut in the player's More sheet. The speech engine and Whisper models (Base or Small) are downloaded from Manage AI model, with default model and language settings
 
 ## System
 
