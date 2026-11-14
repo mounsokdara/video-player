@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -492,7 +493,7 @@ class LibraryService {
   }
 
   Future<String?> renameEntry(String path, String newName) async {
-    if (!await requireAllFilesForOperation()) return null;
+    if (!isAppDataPath(path) && !await requireAllFilesForOperation()) return null;
     final dest = await AndroidBridge.renamePath(path, newName);
     if (dest == null) return null;
     _movePrefix(path, dest);
@@ -543,9 +544,9 @@ class LibraryService {
   }
 
   Future<bool> deletePath(String path) async {
-    if (!await requireAllFilesForOperation()) return false;
+    if (!isAppDataPath(path) && !await requireAllFilesForOperation()) return false;
     final ok = await AndroidBridge.deletePath(path);
-    videos.removeWhere((v) => v.path == path);
+    videos.removeWhere((v) => v.path == path || v.path.startsWith('$path/'));
     _rebuildFolders();
     return ok;
   }
@@ -561,8 +562,11 @@ class LibraryService {
         if (ad != bd) return ad ? -1 : 1;
         return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
       });
+      // App data is not media: show everything in it regardless of the media filters.
+      final all = isAppDataPath(path);
       return ents.where((e) {
         final name = p.basename(e.path);
+        if (all) return true;
         if (!settings.showHiddenFolders && name.startsWith('.')) return false;
         if (e is Directory) {
           if (settings.skipNomedia && File(p.join(e.path, '.nomedia')).existsSync()) return false;
@@ -575,6 +579,26 @@ class LibraryService {
       return [];
     }
   }
+}
+
+/// The app's own data folder (parent of its cache dir), shown as a root in the Folders tab.
+String? appDataPath;
+
+final Future<String?> appDataRoot = _loadAppDataRoot();
+
+Future<String?> _loadAppDataRoot() async {
+  try {
+    final dir = Directory((await getTemporaryDirectory()).path).parent;
+    appDataPath = dir.path;
+    return dir.path;
+  } catch (_) {
+    return null;
+  }
+}
+
+bool isAppDataPath(String path) {
+  final root = appDataPath;
+  return root != null && (path == root || path.startsWith('$root/'));
 }
 
 const invalidNameMessage = 'Invalid file formatting, double check your file name';

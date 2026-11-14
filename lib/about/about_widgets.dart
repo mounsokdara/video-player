@@ -51,25 +51,6 @@ class AboutSection extends StatelessWidget {
   }
 }
 
-class AboutChip extends StatelessWidget {
-  const AboutChip(this.text, {super.key, this.icon});
-  final String text;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: cs.secondaryContainer, borderRadius: BorderRadius.circular(100)),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (icon != null) ...[Icon(icon, size: 14, color: cs.onSecondaryContainer), const SizedBox(width: 5)],
-        Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSecondaryContainer)),
-      ]),
-    );
-  }
-}
-
 class AboutItem {
   const AboutItem({required this.icon, required this.title, required this.subtitle, this.onTap, this.link = false, this.chevron = true});
   final IconData icon;

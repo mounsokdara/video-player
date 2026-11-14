@@ -9,6 +9,7 @@ import 'package:video_player_app/core/slide_snackbar.dart';
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/crash.dart';
 import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/entry.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/library/paste_dialog.dart';
 import 'package:video_player_app/main.dart';
@@ -31,6 +32,15 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   final _snackHost = GlobalKey();
+  // Bumped on every setState so pushed routes (hidden tabs) rebuild with the shell's state.
+  final _rebuild = ValueNotifier<int>(0);
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _rebuild.value++;
+  }
+
   int tab = 0;
 
   int _tabDir = 1;
@@ -80,6 +90,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       PlaybackSession.controller?.removeListener(_onSessionTick);
     } catch (_) {}
     searchCtrl.dispose();
+    _rebuild.dispose();
     super.dispose();
   }
 
@@ -334,11 +345,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         .toList();
     setState(() {
       selecting = true;
-      if (ids.isEmpty) return;
-      final allOn = ids.every(selected.contains);
-      if (allOn) {
+      if (selected.contains(folderPath)) {
+        selected.remove(folderPath);
         selected.removeAll(ids);
       } else {
+        selected.add(folderPath);
         selected.addAll(ids);
       }
     });
@@ -370,11 +381,34 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _deleteSelected() async {
-    final items = library.videos.where((v) => selected.contains(v.id)).toList();
-    if (items.isEmpty) return;
-    final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${items.length} videos?', 'This cannot be undone.');
+    final folders = selected.where(FileSystemEntity.isDirectorySync).toList();
+    final items = library.videos
+        .where((v) => selected.contains(v.id) && !folders.any((f) => v.path.startsWith('$f/')))
+        .toList();
+    final loose = selected
+        .where((id) => FileSystemEntity.isFileSync(id) && library.videos.every((v) => v.id != id) && !folders.any((f) => id.startsWith('$f/')))
+        .toList();
+    if (items.isEmpty && folders.isEmpty && loose.isEmpty) return;
+    final fileCount = items.length + loose.length;
+    final what = [
+      if (folders.isNotEmpty) '${folders.length} folder${folders.length == 1 ? '' : 's'}',
+      if (fileCount > 0) '$fileCount ${loose.isEmpty ? 'video' : 'file'}${fileCount == 1 ? '' : 's'}',
+    ].join(' and ');
+    final ok = !appSettings.confirmDelete ||
+        await confirm(
+          context,
+          'Delete $what?',
+          folders.isEmpty ? 'This cannot be undone.' : 'Folders are deleted with everything inside them. This cannot be undone.',
+        );
     if (ok != true) return;
-    final done = await library.deleteVideos(items);
+    var done = true;
+    for (final f in folders) {
+      if (!await library.deletePath(f)) done = false;
+    }
+    for (final f in loose) {
+      if (!await library.deletePath(f)) done = false;
+    }
+    if (items.isNotEmpty && !await library.deleteVideos(items)) done = false;
     if (!done && mounted) showAllFilesFailed(context, 'Delete');
     setState(() {
       selected.clear();
@@ -391,6 +425,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   List<VideoItem> _selectedVideos() {
     final out = <VideoItem>[];
     for (final id in selected) {
+      if (FileSystemEntity.isDirectorySync(id)) continue;
       VideoItem? found;
       for (final v in library.videos) {
         if (v.id == id || v.path == id) found = v;
@@ -436,7 +471,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       onChanged: () {
         if (!mounted) return;
         setState(() {
-          selected.removeWhere((id) => library.videos.every((v) => v.id != id && v.path != id));
+          selected.removeWhere((id) => !FileSystemEntity.isDirectorySync(id) && library.videos.every((v) => v.id != id && v.path != id));
           if (selected.isEmpty) selecting = false;
         });
       },
@@ -451,81 +486,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   void _openHiddenTab(String id) {
-    final dest = switch (id) {
-      'videos' => VideosHub(
-          loading: loading,
-          layout: layout,
-          sort: sort,
-          sortDesc: sortDesc,
-          query: query,
-          searching: searching,
-          searchCtrl: searchCtrl,
-          selecting: selecting,
-          selected: selected,
-          items: visible,
-          onSearch: (_) {
-            Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => SearchPage(onOpen: _open),
-            ));
-          },
-          onQuery: (v) => setState(() => query = v),
-          onLayout: (v) => setState(() => layout = v),
-          onSort: _sortSheet,
-          onOpen: _open,
-          onToggleSelect: _toggleSelect,
-          onHold: (item) => _holdVideo(item, folderActions: false),
-          onSelectionHold: () => _openSelectionMenu(folderActions: false),
-          onShareSelected: _shareSelected,
-          onDeleteSelected: _deleteSelected,
-          onClearSelect: () => setState(() {
-            selecting = false;
-            selected.clear();
-          }),
-          onSelectMode: () => setState(() => selecting = true),
-          onToggleMaster: _toggleMasterVisible,
-          onRefresh: _refreshPull,
-          overflow: _overflowItems(includeSelect: true, current: 'videos'),
-          onOverflow: _onOverflow,
-          filter: filter,
-          onFilter: (v) => setState(() => filter = v),
-        ),
-      'folders' => FoldersHub(
-          loading: loading,
-          folderPath: folderPath,
-          folderTrail: folderTrail,
-          onPath: (path, trail) => setState(() {
-            folderPath = path;
-            folderTrail
-              ..clear()
-              ..addAll(trail);
-          }),
-          onOpen: _open,
-          onToggleSelect: _toggleSelect,
-          onHoldVideo: (item) => _holdVideo(item, folderActions: true),
-          onSelectionHold: () => _openSelectionMenu(folderActions: true),
-          selecting: selecting,
-          selected: selected,
-          onSelectMode: () => setState(() => selecting = true),
-          onToggleMaster: _toggleMasterFolder,
-          onToggleFolder: _toggleFolder,
-          onPasteTo: _paste,
-          onClearSelect: () => setState(() {
-            selecting = false;
-            selected.clear();
-          }),
-          onShareSelected: _shareSelected,
-          onDeleteSelected: _deleteSelected,
-          overflow: _overflowItems(includeSelect: false, current: 'folders'),
-          onOverflow: _onOverflow,
-          onRefresh: _refreshPull,
-        ),
-      'settings' => MoreHub(onChanged: widget.onSettingsChanged),
-      _ => const SizedBox.shrink(),
-    };
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        body: dest,
-        floatingActionButton: id == 'folders' ? _pasteFab(forceFolders: true) : null,
+      builder: (_) => ValueListenableBuilder<int>(
+        valueListenable: _rebuild,
+        builder: (_, __, ___) => Scaffold(
+          body: _pageFor(id, pushed: true),
+          floatingActionButton: id == 'folders' ? _pasteFab(forceFolders: true) : null,
+        ),
       ),
     ));
   }
@@ -610,14 +577,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final size = MediaQuery.sizeOf(context);
-    final wide = size.width >= 840;
-    final current = tabs.isEmpty ? 'videos' : tabs[safeTab];
-
-    Widget pageFor(String id) {
+  /// The one place a tab page is built. The tab bar and the pushed (hidden-tab) route both use it.
+  Widget _pageFor(String id, {bool pushed = false}) {
       switch (id) {
         case 'folders':
           return PopScope(
@@ -665,7 +626,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               }),
               onShareSelected: _shareSelected,
               onDeleteSelected: _deleteSelected,
-              overflow: _overflowItems(includeSelect: false),
+              overflow: _overflowItems(includeSelect: false, current: pushed ? 'folders' : null),
               onOverflow: _onOverflow,
               onRefresh: _refreshPull,
             ),
@@ -705,13 +666,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             onSelectMode: () => setState(() => selecting = true),
             onToggleMaster: _toggleMasterVisible,
             onRefresh: _refreshPull,
-            overflow: _overflowItems(includeSelect: true),
+            overflow: _overflowItems(includeSelect: true, current: pushed ? 'videos' : null),
             onOverflow: _onOverflow,
             filter: filter,
             onFilter: (v) => setState(() => filter = v),
           );
       }
     }
+
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width >= 840;
+    final current = tabs.isEmpty ? 'videos' : tabs[safeTab];
+
+    Widget pageFor(String id) => _pageFor(id);
 
     NavigationDestination dest(String id) {
       return switch (id) {
@@ -1274,9 +1245,18 @@ class FoldersHub extends StatelessWidget {
   final Future<void> Function(String)? onOverflow;
   final Future<void> Function() onRefresh;
 
+  /// Storage roots show their name ("Internal shared storage"), not the last path segment ("0").
+  String _titleFor(String path) {
+    if (path == appDataPath) return 'App data';
+    for (final v in library.volumes) {
+      if (v.path == path) return v.description;
+    }
+    final base = p.basename(path);
+    return base.isEmpty ? path : base;
+  }
+
   bool _folderOn(String folderPath) {
-    final ids = library.videos.where((v) => v.folder == folderPath || v.path.startsWith('$folderPath/')).map((v) => v.id);
-    return ids.isNotEmpty && ids.every(selected.contains);
+    return selected.contains(folderPath);
   }
 
   Widget? _pasteHere(String dir) {
@@ -1358,6 +1338,23 @@ class FoldersHub extends StatelessWidget {
                       onTap: () => onPath(v.path, [v.path]),
                     ),
                   ),
+                if (appSettings.showAppData)
+                  FutureBuilder<String?>(
+                  future: appDataRoot,
+                  builder: (context, snap) {
+                    final root = snap.data;
+                    if (root == null) return const SizedBox.shrink();
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.folder_special_outlined),
+                        title: const Text('App data'),
+                        subtitle: Text(root),
+                        trailing: _pasteHere(root),
+                        onTap: () => onPath(root, [root]),
+                      ),
+                    );
+                  },
+                ),
                 const SizedBox(height: 12),
                 Text('Libraries', style: TextStyle(color: scheme.onSurfaceVariant, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
@@ -1407,7 +1404,7 @@ class FoldersHub extends StatelessWidget {
                   onLongPress: onSelectionHold,
                   child: Text('${selected.length} selected'),
                 )
-              : Text(p.basename(path).isEmpty ? path : p.basename(path)),
+              : Text(_titleFor(path)),
           actions: [
             if (selecting)
               IconButton(onPressed: onClearSelect, icon: const Icon(Icons.close), tooltip: 'Cancel')
@@ -1468,108 +1465,67 @@ class FoldersHub extends StatelessWidget {
                   },
                 );
               }
-              final e = ents[i - 1];
-              final name = p.basename(e.path);
-              final isDir = e is Directory;
-              if (!isDir && !looksLikeVideo(e.path)) {
-                return Opacity(
-                  opacity: 0.55,
-                  child: ListTile(
-                    leading: const SizedBox(width: 40, height: 40, child: Icon(Icons.insert_drive_file_outlined)),
-                    title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text('${formatBytes((e as File).existsSync() ? e.lengthSync() : 0)} · Unsupported file'),
-                    onTap: () => SlideSnackBar.show(context, message: 'Unsupported file', behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
-                  ),
-                );
-              }
-              VideoItem? video;
-              if (!isDir) {
-                for (final v in library.videos) {
-                  if (v.path == e.path) video = v;
+              final entry = Entry(ents[i - 1], parent: path);
+              bool isOn() => entry.isFolder ? _folderOn(entry.path) : selected.contains(entry.selectionId);
+              void toggle() {
+                if (entry.isFolder) {
+                  onToggleFolder?.call(entry.path);
+                } else {
+                  onToggleSelect(entry.item!);
                 }
-                video ??= VideoItem(
-                  id: e.path,
-                  path: e.path,
-                  title: name,
-                  folder: path,
-                  size: (e as File).existsSync() ? e.lengthSync() : 0,
-                  modified: e.statSync().modified,
-                );
               }
-              return ListTile(
+
+              Future<void> open() async {
+                switch (entry.kind) {
+                  case EntryKind.folder:
+                    onPath(entry.path, [...folderTrail, entry.path]);
+                  case EntryKind.video:
+                    final playlist = ents.whereType<File>().where((f) => looksLikeVideo(f.path)).map((f) => Entry(f, parent: path).item!).toList();
+                    await onOpen(entry.item!, playlist: playlist);
+                  case EntryKind.other:
+                    await openInOtherApp(context, entry.path);
+                }
+              }
+
+              final tile = ListTile(
                 leading: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () {
                     onSelectMode?.call();
-                    if (isDir) {
-                      onToggleFolder?.call(e.path);
-                    } else if (video != null) {
-                      onToggleSelect(video);
-                    }
+                    toggle();
                   },
-                  child: isDir
-                      ? const SizedBox(width: 40, height: 40, child: Icon(Icons.folder))
-                      : SizedBox(width: 56, height: 36, child: video != null ? VideoThumb(item: video, radius: 6) : const Icon(Icons.movie_outlined)),
+                  child: switch (entry.kind) {
+                    EntryKind.folder => const SizedBox(width: 40, height: 40, child: Icon(Icons.folder)),
+                    EntryKind.video => SizedBox(width: 56, height: 36, child: VideoThumb(item: entry.item!, radius: 6)),
+                    EntryKind.other => const SizedBox(width: 40, height: 40, child: Icon(Icons.insert_drive_file_outlined)),
+                  },
                 ),
-                title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: isDir ? const Text('Folder') : Text(formatBytes(video?.size ?? 0)),
-                selected: isDir ? selecting && _folderOn(e.path) : video != null && selected.contains(video.id),
-                trailing: selecting
-                    ? Checkbox(
-                        value: isDir ? _folderOn(e.path) : video != null && selected.contains(video.id),
-                        onChanged: (_) {
-                          if (isDir) {
-                            onToggleFolder?.call(e.path);
-                          } else if (video != null) {
-                            onToggleSelect(video);
-                          }
-                        },
-                      )
-                    : null,
+                title: Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(entry.subtitle),
+                selected: selecting && isOn(),
+                trailing: selecting ? Checkbox(value: isOn(), onChanged: (_) => toggle()) : null,
                 onLongPress: () {
-                  if (isDir) {
+                  if (entry.kind == EntryKind.video) {
+                    onHoldVideo(entry.item!);
+                  } else {
                     showFolderEntryMenu(
                       context,
-                      path: e.path,
-                      isDir: true,
+                      path: entry.path,
+                      kind: entry.kind,
                       onChanged: () => onRefresh(),
-                      onOpen: () => onPath(e.path, [...folderTrail, e.path]),
+                      onOpen: open,
                     );
-                    return;
                   }
-                  if (video != null) onHoldVideo(video);
                 },
                 onTap: () {
                   if (selecting) {
-                    if (isDir) {
-                      onToggleFolder?.call(e.path);
-                    } else if (video != null) {
-                      onToggleSelect(video);
-                    }
-                    return;
-                  }
-                  if (isDir) {
-                    onPath(e.path, [...folderTrail, e.path]);
-                  } else if (video != null) {
-                    final vids = ents.whereType<File>().where((f) => looksLikeVideo(f.path)).map((f) {
-                      VideoItem? found;
-                      for (final v in library.videos) {
-                        if (v.path == f.path) found = v;
-                      }
-                      return found ??
-                          VideoItem(
-                            id: f.path,
-                            path: f.path,
-                            title: p.basename(f.path),
-                            folder: path,
-                            size: f.lengthSync(),
-                            modified: f.statSync().modified,
-                          );
-                    }).toList();
-                    onOpen(video, playlist: vids);
+                    toggle();
+                  } else {
+                    open();
                   }
                 },
               );
+              return entry.kind == EntryKind.other ? Opacity(opacity: 0.55, child: tile) : tile;
             },
           ),
           ),

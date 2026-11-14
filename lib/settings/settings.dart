@@ -88,7 +88,7 @@ class AppSettings {
   bool logGestureEvents = false;
   bool logLifecycleEvents = false;
   bool showUnsupportedFiles = false;
-  bool showDataFileManager = false;
+  bool showAppData = false;
 
   List<String> hiddenTabs = [];
 
@@ -282,7 +282,7 @@ class AppSettings {
     logGestureEvents = p.getBool('logGestureEvents') ?? false;
     logLifecycleEvents = p.getBool('logLifecycleEvents') ?? false;
     showUnsupportedFiles = p.getBool('showUnsupportedFiles') ?? false;
-    showDataFileManager = p.getBool('showDataFileManager') ?? false;
+    showAppData = p.getBool('showAppData') ?? false;
     hiddenTabs = List<String>.from(p.getStringList('hiddenTabs') ?? const []);
     hiddenTabs.removeWhere((t) => !tabIds.contains(t));
     if (hiddenTabs.length >= tabIds.length) {
@@ -450,7 +450,7 @@ class AppSettings {
     await p.setBool('logGestureEvents', logGestureEvents);
     await p.setBool('logLifecycleEvents', logLifecycleEvents);
     await p.setBool('showUnsupportedFiles', showUnsupportedFiles);
-    await p.setBool('showDataFileManager', showDataFileManager);
+    await p.setBool('showAppData', showAppData);
     await p.setStringList('hiddenTabs', hiddenTabs);
     await p.setStringList('quickActions', quickActions);
     await p.setStringList('titleActions', titleActions);

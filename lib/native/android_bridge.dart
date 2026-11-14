@@ -46,6 +46,14 @@ class AndroidBridge {
     return _captionEvents!;
   }
 
+  static Future<bool> openWithOtherApp(String path) async {
+    try {
+      return await _ch.invokeMethod<bool>('openWithOtherApp', {'path': path}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> openCaptionSettings() async {
     try {
       await _ch.invokeMethod<bool>('openCaptionSettings');

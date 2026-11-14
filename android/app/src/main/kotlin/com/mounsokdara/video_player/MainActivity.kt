@@ -184,6 +184,7 @@ open class MainActivity : FlutterActivity() {
                     when (call.method) {
                         "sdkInt" -> result.success(Build.VERSION.SDK_INT)
                         "installApk" -> result.success(installApk(call.argument<String>("path")))
+                        "openWithOtherApp" -> result.success(openWithOtherApp(call.argument<String>("path")))
                         "hasAllFilesAccess" -> {
                             result.success(
                                 if (Build.VERSION.SDK_INT >= 30)
@@ -513,6 +514,15 @@ open class MainActivity : FlutterActivity() {
     private fun tryFileDelete(file: File): Boolean {
         return try {
             if (!file.exists()) return true
+            if (file.isDirectory) {
+                val inside = file.walkBottomUp().filter { it.isFile }.map { it.absolutePath }.toList()
+                val removed = file.deleteRecursively()
+                try {
+                    if (inside.isNotEmpty()) MediaScannerConnection.scanFile(this, inside.toTypedArray(), null, null)
+                } catch (_: Exception) {
+                }
+                return removed || !file.exists()
+            }
             if (file.delete()) {
                 try {
                     MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf("video/*"), null)
@@ -1150,6 +1160,24 @@ open class MainActivity : FlutterActivity() {
             "started"
         } catch (_: Throwable) {
             "failed"
+        }
+    }
+
+    /** Opens any file in another app (chooser). Returns false if the file is missing or no app can open it. */
+    private fun openWithOtherApp(path: String?): Boolean {
+        if (path == null) return false
+        return try {
+            val file = File(path)
+            if (!file.isFile) return false
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+            val view = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, mime)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            startActivity(Intent.createChooser(view, file.name).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            true
+        } catch (_: Throwable) {
+            false
         }
     }
 

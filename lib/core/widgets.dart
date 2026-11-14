@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player_app/core/slide_snackbar.dart';
 import 'package:video_player_app/native/android_bridge.dart';
 import 'package:video_player_app/core/insets.dart';
+import 'package:video_player_app/library/entry.dart';
 import 'package:video_player_app/library/library.dart';
 import 'package:video_player_app/main.dart';
 import 'package:video_player_app/core/models.dart';
@@ -675,20 +676,21 @@ class ChipScroller extends StatelessWidget {
 Future<void> showFolderEntryMenu(
   BuildContext context, {
   required String path,
-  required bool isDir,
+  required EntryKind kind,
   required VoidCallback onChanged,
   VoidCallback? onOpen,
 }) async {
+  final isDir = kind == EntryKind.folder;
   final scheme = Theme.of(context).colorScheme;
   final name = path.split(RegExp(r'[/\\]')).last;
   await showAppSheet<void>(
     context: context,
     children: (ctx) => [
-      ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(isDir ? 'Folder' : 'Video')),
+      ListTile(title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(kind.label)),
       if (onOpen != null)
         ListTile(
           leading: const Icon(Icons.open_in_new),
-          title: Text(isDir ? 'Open' : 'Play'),
+          title: Text(kind.openLabel),
           onTap: () {
             Navigator.pop(ctx);
             onOpen();
@@ -732,7 +734,7 @@ Future<void> showFolderEntryMenu(
         title: Text('Delete', style: TextStyle(color: scheme.error)),
         onTap: () async {
           Navigator.pop(ctx);
-          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${isDir ? 'folder' : 'video'}?', name);
+          final ok = !appSettings.confirmDelete || await confirm(context, 'Delete ${kind.label.toLowerCase()}?', name);
           if (ok == true) {
             final done = await library.deletePath(path);
             if (!done && context.mounted) showAllFilesFailed(context, 'Delete');
