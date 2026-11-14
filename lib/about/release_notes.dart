@@ -31,15 +31,18 @@ class ReleaseNote {
     String? apk;
     String? firstApk;
     String? universalApk;
-    final cpuName = AboutInfo.cpu.isEmpty ? '' : 'videoplayer-${AboutInfo.cpu}.apk';
+    // Releases are named <package>-<cpu>.apk; older releases used VideoPlayer-<cpu>.apk.
+    final cpuNames = AboutInfo.cpu.isEmpty
+        ? const <String>[]
+        : ['com.mounsokdara.video_player-${AboutInfo.cpu}.apk', 'videoplayer-${AboutInfo.cpu}.apk'];
     for (final a in (j['assets'] as List<dynamic>? ?? const [])) {
       final m = a as Map<String, dynamic>;
       final name = (m['name'] as String? ?? '').toLowerCase();
       if (!name.endsWith('.apk')) continue;
       final url = m['browser_download_url'] as String?;
       firstApk ??= url;
-      if (name == 'videoplayer-universal.apk') universalApk = url;
-      if (cpuName.isNotEmpty && name == cpuName) {
+      if (name == 'com.mounsokdara.video_player-universal.apk' || name == 'videoplayer-universal.apk') universalApk = url;
+      if (cpuNames.contains(name)) {
         apk = url;
         break;
       }

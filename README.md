@@ -12,7 +12,7 @@ Local-only Material 3 Android player. Playback uses its own engine (Android Medi
 
 [Download APK][download]
 
-[download]: https://github.com/mounsokdara/video-player/releases/latest/download/VideoPlayer-universal.apk
+[download]: https://github.com/mounsokdara/video-player/releases/latest/download/com.mounsokdara.video_player-universal.apk
 
 ## Library
 
