@@ -183,6 +183,7 @@ open class MainActivity : FlutterActivity() {
                     if (appNative.handleLocal(call.method, call, result)) return@setMethodCallHandler
                     when (call.method) {
                         "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+                        "installApk" -> result.success(installApk(call.argument<String>("path")))
                         "hasAllFilesAccess" -> {
                             result.success(
                                 if (Build.VERSION.SDK_INT >= 30)
@@ -1175,6 +1176,30 @@ open class MainActivity : FlutterActivity() {
         setResult(Activity.RESULT_OK, reply)
         finish()
         return true
+    }
+
+    /** Returns "started", "permission" (unknown-sources screen opened) or "failed". */
+    private fun installApk(path: String?): String {
+        if (path == null) return "failed"
+        return try {
+            // Only files inside our own cache/updates folder may be handed to the installer.
+            val dir = File(cacheDir, "updates").canonicalFile
+            val file = File(path).canonicalFile
+            if (!file.path.startsWith(dir.path + File.separator) || !file.isFile) return "failed"
+            if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).setData(Uri.parse("package:$packageName")))
+                return "permission"
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            )
+            "started"
+        } catch (_: Throwable) {
+            "failed"
+        }
     }
 
     private fun shareUri(file: File): Uri? {

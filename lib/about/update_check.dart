@@ -2,9 +2,19 @@ import 'package:flutter/material.dart';
 
 import 'package:video_player_app/about/about_info.dart';
 import 'package:video_player_app/about/about_widgets.dart';
+import 'package:video_player_app/about/apk_installer.dart';
 import 'package:video_player_app/about/release_notes.dart';
 
 const bool kFDroidBuild = bool.fromEnvironment('FDROID');
+
+void _openRelease(BuildContext context, ReleaseNote latest) {
+  final apk = latest.apkUrl;
+  if (kFDroidBuild || apk == null) {
+    openExternal(latest.url);
+  } else {
+    downloadAndInstallApk(context, apk);
+  }
+}
 
 Future<void> checkForUpdate(BuildContext context) async {
   final rootNav = Navigator.of(context, rootNavigator: true);
@@ -53,9 +63,9 @@ Future<void> checkForUpdate(BuildContext context) async {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              openExternal(kFDroidBuild ? latest.url : (latest.apkUrl ?? latest.url));
+              _openRelease(context, latest);
             },
-            child: Text(!kFDroidBuild && latest.apkUrl != null ? 'Redownload' : 'View release'),
+            child: Text(!kFDroidBuild && latest.apkUrl != null ? 'ReInstall' : 'View release'),
           ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
         ],
@@ -81,7 +91,7 @@ Future<void> checkForUpdate(BuildContext context) async {
         FilledButton(
           onPressed: () {
             Navigator.pop(ctx);
-            openExternal(kFDroidBuild ? latest.url : (latest.apkUrl ?? latest.url));
+            _openRelease(context, latest);
           },
           child: Text(!kFDroidBuild && latest.apkUrl != null ? 'Download' : 'View release'),
         ),
