@@ -484,7 +484,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onSelectMode: () => setState(() => selecting = true),
           onToggleMaster: _toggleMasterVisible,
           onRefresh: _refreshPull,
-          overflow: _overflowItems(includeSelect: true),
+          overflow: _overflowItems(includeSelect: true, current: 'videos'),
           onOverflow: _onOverflow,
           filter: filter,
           onFilter: (v) => setState(() => filter = v),
@@ -515,7 +515,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           }),
           onShareSelected: _shareSelected,
           onDeleteSelected: _deleteSelected,
-          overflow: _overflowItems(includeSelect: false),
+          overflow: _overflowItems(includeSelect: false, current: 'folders'),
           onOverflow: _onOverflow,
           onRefresh: _refreshPull,
         ),
@@ -578,7 +578,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     );
   }
 
-  List<PopupMenuEntry<String>> _overflowItems({bool includeSelect = false}) {
+  List<PopupMenuEntry<String>> _overflowItems({bool includeSelect = false, String? current}) {
     final hidden = appSettings.hiddenTabs;
     return [
       const PopupMenuItem(value: 'eq', child: Text('Equalizer')),
@@ -586,7 +586,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (includeSelect) const PopupMenuItem(value: 'select', child: Text('Select')),
       const PopupMenuItem(value: 'crash', child: Text('Crash report')),
       for (final id in hidden)
-        PopupMenuItem(value: 'tab:$id', child: Text(AppSettings.tabLabels[id] ?? id)),
+        if (id != current) PopupMenuItem(value: 'tab:$id', child: Text(AppSettings.tabLabels[id] ?? id)),
     ];
   }
 
