@@ -584,7 +584,7 @@ class LibraryService {
   }
 }
 
-const invalidNameMessage = 'Invalid File Formating double check your file name';
+const invalidNameMessage = 'Invalid file formatting, double check your file name';
 
 String? renameError(String name, String original, {bool isDir = false}) {
   if (name.isEmpty || name == '.' || name == '..') return invalidNameMessage;

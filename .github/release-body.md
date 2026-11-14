@@ -10,4 +10,4 @@
 - Any playback speed allowed
 - Fix corrupted strip at the top or bottom of some videos
 - Improve refresh button
-- Bugs fixes: system stagus bar color dosent auto update, etc i have no clue idk bro ✌🏻😔
+- Bug fixes: system status bar color doesn't auto update, etc i have no clue idk bro ✌🏻😔
