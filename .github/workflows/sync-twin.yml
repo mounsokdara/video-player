@@ -118,21 +118,29 @@ jobs:
           git clone -q --depth 1 --branch "$BRANCH" "$SRC_BASE/$SRC.git" "$S_DIR"
           git clone -q --depth 1 --branch "$BRANCH" "$BASE/$DST.git" "$D_DIR"
 
-          git init -q "$W/prot"
+          # .syncignore (gitignore syntax) lists files that stay in one repo only.
+          #   prot_d: destination files left alone (not overwritten, not deleted) = destination's .syncignore
+          #   prot_s: source files that are not copied = source's AND destination's .syncignore
+          # A file listed only in the source's .syncignore is never copied, and a stray copy already in the
+          # destination is removed by the cleanup below.
+          git init -q "$W/prot_s"; git init -q "$W/prot_d"
           { echo ".syncignore"
             if [ -f "$D_DIR/.syncignore" ]; then cat "$D_DIR/.syncignore"; echo; fi
             [ "$PAT" = true ] || echo ".github/workflows/"
-          } > "$W/prot/.gitignore"
+          } > "$W/prot_d/.gitignore"
+          { cat "$W/prot_d/.gitignore"
+            if [ -f "$S_DIR/.syncignore" ]; then cat "$S_DIR/.syncignore"; echo; fi
+          } > "$W/prot_s/.gitignore"
 
-          list_files() {
+          list_files() { # dir, output list, protect repo
             git -C "$1" ls-files -z | sort -z > "$W/t"
             git -C "$1" ls-files -z -c -i --exclude-standard | sort -z > "$W/i"
             comm -z -23 "$W/t" "$W/i" > "$W/m"
-            { git -C "$W/prot" check-ignore --no-index -z --stdin < "$W/m" || true; } | sort -z > "$W/p"
+            { git -C "$3" check-ignore --no-index -z --stdin < "$W/m" || true; } | sort -z > "$W/p"
             comm -z -23 "$W/m" "$W/p" > "$2"
           }
-          list_files "$S_DIR" "$W/S"
-          list_files "$D_DIR" "$W/D"
+          list_files "$S_DIR" "$W/S" "$W/prot_s"
+          list_files "$D_DIR" "$W/D" "$W/prot_d"
 
           comm -z -13 "$W/S" "$W/D" > "$W/del"
           xargs -0 -r git -C "$D_DIR" rm -q -f -- < "$W/del"
