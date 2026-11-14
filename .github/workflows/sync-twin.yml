@@ -1,36 +1,5 @@
 name: Sync with twin repo
 
-# Put this file at .github/workflows/sync-twin.yml in BOTH repos.
-# Run it from the Actions tab (Run workflow) in whichever repo you are standing in:
-#   direction = push  ->  this repo  ->  the other repo
-#   direction = pull  ->  the other repo  ->  this repo
-#
-# Files:     copies tracked files only. Anything matching the source's .gitignore is never copied
-#            (even if it was force-added), and files that exist in the destination but not in the
-#            source are removed ("no leftovers") unless they match .syncignore.
-# .syncignore: gitignore syntax, one per repo, lists files that stay in that repo only (for example
-#            wrangler.toml, dev-build.yml). Both repos' lists apply in both directions: a listed file is
-#            never copied out of the repo that lists it and never overwritten or deleted in it. A copy that
-#            already sits in the other repo is removed as a leftover. The .syncignore file itself is never
-#            copied, overwritten or deleted, whatever it contains. If the destination has no .syncignore,
-#            wrangler.toml is protected.
-# Variables: copied in either direction (GitHub lets a token read variable values).
-# Secrets:   push only. GitHub never reveals a secret's value, so the only secrets this workflow can
-#            send are the ones available to the repo it runs in. To get secrets from repo A into B,
-#            run the workflow in A with direction = push.
-#
-# Logging: every run prints all Actions variables (name=value) and all secret NAMES of both repos.
-#          Secret values are never printed: GitHub masks them as *** in logs, and in a public repo the
-#          logs are readable by anyone.
-#
-# Token: SYNC_TOKEN is optional, but without it GitHub only lets the run write to THIS repo:
-#   - with SYNC_TOKEN (recommended): push and pull, files + variables + secrets, workflow files too.
-#       Add it in BOTH repos: Settings > Secrets and variables > Actions > New repository secret.
-#       Classic PAT scopes "repo" + "workflow"; fine-grained: Contents, Workflows, Secrets and
-#       Variables = read/write on both repos. SYNC_TOKEN itself is never copied.
-#   - without it: pull only, files only (the other repo must be public), and .github/workflows/ is
-#       left untouched. Variables and secrets of the other repo cannot be read or written.
-
 on:
   workflow_dispatch:
     inputs:
