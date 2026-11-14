@@ -361,12 +361,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _toggleMaster(library.videos.map((v) => v.id));
       return;
     }
-    final ids = library.listDir(path).whereType<File>().where((e) => looksLikeVideo(e.path)).map((e) {
-      for (final v in library.videos) {
-        if (v.path == e.path) return v.id;
-      }
-      return e.path;
-    });
+    final listed = library.listDir(path);
+    final ids = <String>[
+      ...listed.whereType<Directory>().map((e) => e.path),
+      ...listed.whereType<File>().where((e) => looksLikeVideo(e.path)).map((e) {
+        for (final v in library.videos) {
+          if (v.path == e.path) return v.id;
+        }
+        return e.path;
+      }),
+    ];
     _toggleMaster(ids);
   }
 
@@ -472,6 +476,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       folderActions: folderActions,
       allowRename: true,
       fromSelection: true,
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          selecting = false;
+          selected.clear();
+        });
+      },
       onChanged: () {
         if (!mounted) return;
         setState(() {
@@ -1417,7 +1428,9 @@ class FoldersHub extends StatelessWidget {
       }
       return e.path;
     }).toList();
-    final allOn = fileIds.isNotEmpty && fileIds.every(selected.contains);
+    final dirIds = ents.whereType<Directory>().map((e) => e.path).toList();
+    final masterIds = [...dirIds, ...fileIds];
+    final allOn = masterIds.isNotEmpty && masterIds.every(selected.contains);
     return Column(
       children: [
         AppBar(
@@ -1452,13 +1465,13 @@ class FoldersHub extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    '${files.length} videos',
+                    '${dirIds.length} folders · ${files.length} videos',
                     style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
                   ),
                 ),
                 Checkbox(
                   value: allOn,
-                  onChanged: files.isEmpty ? null : (_) => onToggleMaster?.call(),
+                  onChanged: (_) => onToggleMaster?.call(),
                 ),
               ],
             ),
@@ -1608,6 +1621,9 @@ class _SearchPageState extends State<SearchPage> {
       items: chosen,
       allowRename: chosen.length == 1,
       fromSelection: true,
+      onDone: () {
+        if (mounted) setState(picked.clear);
+      },
       onChanged: () {
         if (!mounted) return;
         setState(() => picked.removeWhere((id) => library.videos.every((v) => v.id != id)));

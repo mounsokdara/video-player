@@ -341,6 +341,7 @@ Future<void> showItemsMenu(
   List<String> folders = const [],
   List<String> files = const [],
   Future<void> Function()? onDeleteAll,
+  VoidCallback? onDone,
 }) async {
   if (items.isEmpty && folders.isEmpty && files.isEmpty) return;
   final scheme = Theme.of(context).colorScheme;
@@ -357,6 +358,7 @@ Future<void> showItemsMenu(
   final single = total == 1;
   final many = !single;
   final hasVideos = all.isNotEmpty;
+  void noVideos() => ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('No videos in the selection')));
   final size = all.fold<int>(0, (n, v) => n + v.size);
   final entryPaths = [...folders, ...files, ...direct.map((e) => e.path)];
   final firstPath = folders.isNotEmpty ? folders.first : (files.isNotEmpty ? files.first : direct.first.path);
@@ -389,20 +391,24 @@ Future<void> showItemsMenu(
       ),
       const Divider(height: 1),
       ListTile(
-        enabled: hasVideos,
         leading: const Icon(Icons.play_arrow),
         title: Text(playLabel),
         onTap: () {
           Navigator.pop(ctx);
+          if (!hasVideos) return noVideos();
           onPlay(all);
+          onDone?.call();
         },
       ),
       ListTile(
-        enabled: allowRename && single,
         leading: const Icon(Icons.drive_file_rename_outline),
         title: const Text('Rename'),
         onTap: () async {
           Navigator.pop(ctx);
+          if (!(allowRename && single)) {
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Select one item to rename')));
+            return;
+          }
           await Future<void>.delayed(const Duration(milliseconds: 160));
           if (!context.mounted) return;
           if (direct.isNotEmpty) {
@@ -429,6 +435,7 @@ Future<void> showItemsMenu(
           Navigator.pop(ctx);
           library.copyEntries(entryPaths);
           onChanged();
+          onDone?.call();
         },
       ),
       ListTile(
@@ -438,23 +445,25 @@ Future<void> showItemsMenu(
           Navigator.pop(ctx);
           library.cutEntries(entryPaths);
           onChanged();
+          onDone?.call();
         },
       ),
       ListTile(
-        enabled: hasVideos,
         leading: const Icon(Icons.share_outlined),
         title: const Text('Share'),
         onTap: () async {
           Navigator.pop(ctx);
+          if (!hasVideos) return noVideos();
           await SharePlus.instance.share(ShareParams(files: all.map((e) => XFile(e.path)).toList()));
+          onDone?.call();
         },
       ),
       ListTile(
-        enabled: hasVideos,
         leading: Icon(allBookmarked ? Icons.bookmark : Icons.bookmark_outline),
         title: Text(allBookmarked ? 'Remove bookmark' : 'Bookmark'),
         onTap: () {
           Navigator.pop(ctx);
+          if (!hasVideos) return noVideos();
           for (final item in all) {
             if (allBookmarked) {
               appSettings.bookmarks.remove(item.path);
@@ -466,14 +475,15 @@ Future<void> showItemsMenu(
           }
           appSettings.save();
           onChanged();
+          onDone?.call();
         },
       ),
       ListTile(
-        enabled: hasVideos,
         leading: Icon(allPinned ? Icons.push_pin : Icons.push_pin_outlined),
         title: Text(allPinned ? 'Unpin' : 'Pin'),
         onTap: () {
           Navigator.pop(ctx);
+          if (!hasVideos) return noVideos();
           for (final item in all) {
             if (allPinned) {
               appSettings.pinned.remove(item.path);
@@ -483,6 +493,7 @@ Future<void> showItemsMenu(
           }
           appSettings.save();
           onChanged();
+          onDone?.call();
         },
       ),
       ListTile(
