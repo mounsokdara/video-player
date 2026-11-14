@@ -7,6 +7,16 @@ import 'package:path_provider/path_provider.dart';
 
 const _channel = MethodChannel('app.videoplayer/android');
 
+String _fileName(String url) {
+  final segs = Uri.parse(url).pathSegments;
+  return segs.isEmpty || segs.last.isEmpty ? 'update.apk' : Uri.decodeComponent(segs.last);
+}
+
+String _size(int bytes) {
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
 enum _Install { started, needsPermission, failed }
 
 class _Cancelled implements Exception {
@@ -17,7 +27,8 @@ class _Cancelled implements Exception {
 /// Errors and the unknown-sources prompt are shown in a dialog with Try again.
 Future<void> downloadAndInstallApk(BuildContext context, String url) async {
   while (context.mounted) {
-    final progress = ValueNotifier<double?>(null);
+    final name = _fileName(url);
+    final progress = ValueNotifier<(int, int)>((0, 0));
     var cancelled = false;
     final rootNav = Navigator.of(context, rootNavigator: true);
     showDialog<void>(
@@ -27,13 +38,20 @@ Future<void> downloadAndInstallApk(BuildContext context, String url) async {
         canPop: false,
         child: AlertDialog(
           title: const Text('Downloading update'),
-          content: ValueListenableBuilder<double?>(
+          content: ValueListenableBuilder<(int, int)>(
             valueListenable: progress,
-            builder: (_, v, _) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              LinearProgressIndicator(value: v),
-              const SizedBox(height: 12),
-              Text(v == null ? 'Starting...' : '${(v * 100).round()}%'),
-            ]),
+            builder: (_, v, _) {
+              final (received, total) = v;
+              return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: total > 0 ? received / total : null),
+                const SizedBox(height: 12),
+                Text(total > 0
+                    ? '${_size(received)} / ${_size(total)}  (${(received * 100 ~/ total)}%)'
+                    : (received > 0 ? _size(received) : 'Starting...')),
+              ]);
+            },
           ),
           actions: [TextButton(onPressed: () => cancelled = true, child: const Text('Cancel'))],
         ),
@@ -43,7 +61,7 @@ Future<void> downloadAndInstallApk(BuildContext context, String url) async {
     String? error;
     _Install? result;
     try {
-      final file = await _download(url, (v) => progress.value = v, () => cancelled);
+      final file = await _download(url, name, (r, t) => progress.value = (r, t), () => cancelled);
       result = await _install(file.path);
     } on _Cancelled {
       result = null;
@@ -73,11 +91,11 @@ Future<void> downloadAndInstallApk(BuildContext context, String url) async {
   }
 }
 
-Future<File> _download(String url, void Function(double?) onProgress, bool Function() isCancelled) async {
+Future<File> _download(String url, String name, void Function(int, int) onProgress, bool Function() isCancelled) async {
   final dir = Directory('${(await getTemporaryDirectory()).path}/updates');
   if (dir.existsSync()) dir.deleteSync(recursive: true);
   dir.createSync(recursive: true);
-  final target = File('${dir.path}/update.apk');
+  final target = File('${dir.path}/$name');
   final part = File('${target.path}.part');
 
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
@@ -93,7 +111,7 @@ Future<File> _download(String url, void Function(double?) onProgress, bool Funct
       if (isCancelled()) throw const _Cancelled();
       sink.add(chunk);
       received += chunk.length;
-      onProgress(total > 0 ? received / total : null);
+      onProgress(received, total);
     }
     await sink.flush();
     await sink.close();
