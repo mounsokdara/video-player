@@ -1,5 +1,36 @@
 name: Sync with twin repo
 
+# Put this file at .github/workflows/sync-twin.yml in BOTH repos.
+# Run it from the Actions tab (Run workflow) in whichever repo you are standing in:
+#   direction = push  ->  this repo  ->  the other repo
+#   direction = pull  ->  the other repo  ->  this repo
+#
+# Files:     copies tracked files only. Anything matching the source's .gitignore is never copied
+#            (even if it was force-added), and files that exist in the destination but not in the
+#            source are removed ("no leftovers") unless they match .syncignore.
+# .syncignore: gitignore syntax, one per repo, lists files that stay in that repo only (for example
+#            wrangler.toml, dev-build.yml). Both repos' lists apply in both directions: a listed file is
+#            never copied out of the repo that lists it and never overwritten or deleted in it. A copy that
+#            already sits in the other repo is removed as a leftover. The .syncignore file itself is never
+#            copied, overwritten or deleted, whatever it contains. If the destination has no .syncignore,
+#            wrangler.toml is protected.
+# Variables: copied in either direction (GitHub lets a token read variable values).
+# Secrets:   push only. GitHub never reveals a secret's value, so the only secrets this workflow can
+#            send are the ones available to the repo it runs in. To get secrets from repo A into B,
+#            run the workflow in A with direction = push.
+#
+# Logging: every run prints all Actions variables (name=value) and all secret NAMES of both repos.
+#          Secret values are never printed: GitHub masks them as *** in logs, and in a public repo the
+#          logs are readable by anyone.
+#
+# Token: SYNC_TOKEN is optional, but without it GitHub only lets the run write to THIS repo:
+#   - with SYNC_TOKEN (recommended): push and pull, files + variables + secrets, workflow files too.
+#       Add it in BOTH repos: Settings > Secrets and variables > Actions > New repository secret.
+#       Classic PAT scopes "repo" + "workflow"; fine-grained: Contents, Workflows, Secrets and
+#       Variables = read/write on both repos. SYNC_TOKEN itself is never copied.
+#   - without it: pull only, files only (the other repo must be public), and .github/workflows/ is
+#       left untouched. Variables and secrets of the other repo cannot be read or written.
+
 on:
   workflow_dispatch:
     inputs:
@@ -41,8 +72,8 @@ permissions:
   contents: write
 
 env:
-  REPO_A: mounsokdara/video-player
-  REPO_B: mounsokdara/video-player.Dev
+  REPO_A: mounsokdara/video-player          # public
+  REPO_B: mounsokdara/video-player.Dev      # dev
   GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
   HAVE_PAT: ${{ secrets.SYNC_TOKEN != '' }}
 
@@ -112,26 +143,30 @@ jobs:
           set -euo pipefail
           BASE="${SYNC_URL_BASE:-https://x-access-token:${GH_TOKEN}@github.com}"
           SRC_BASE="$BASE"
-          [ "$PAT" = true ] || SRC_BASE="${SYNC_URL_BASE:-https://github.com}"
+          [ "$PAT" = true ] || SRC_BASE="${SYNC_URL_BASE:-https://github.com}"   # other repo is read anonymously
           W="${RUNNER_TEMP:-/tmp}/twin"; rm -rf "$W"; mkdir -p "$W"
           S_DIR="$W/src"; D_DIR="$W/dst"
           git clone -q --depth 1 --branch "$BRANCH" "$SRC_BASE/$SRC.git" "$S_DIR"
           git clone -q --depth 1 --branch "$BRANCH" "$BASE/$DST.git" "$D_DIR"
 
-          # .syncignore (gitignore syntax) lists files that stay in one repo only.
-          #   prot_d: destination files left alone (not overwritten, not deleted) = destination's .syncignore
-          #   prot_s: source files that are not copied = source's AND destination's .syncignore
-          # A file listed only in the source's .syncignore is never copied, and a stray copy already in the
-          # destination is removed by the cleanup below.
+          # .syncignore (gitignore syntax): one per repo, lists files that stay in that repo only (for example
+          # wrangler.toml, dev-build.yml). Both lists apply, in both directions:
+          #   prot_d, destination files left alone (not overwritten, not deleted): the destination's list
+          #   prot_s, source files that are not copied: the destination's list plus the source's list
+          # A file only the source lists is never copied, and a stray copy already in the destination is
+          # removed as a leftover. The fixed rules come last, so nothing above can un-ignore them:
+          # .syncignore itself is never copied, overwritten or deleted.
           git init -q "$W/prot_s"; git init -q "$W/prot_d"
-          { echo ".syncignore"
-            if [ -f "$D_DIR/.syncignore" ]; then cat "$D_DIR/.syncignore"; echo; fi
-            [ "$PAT" = true ] || echo ".github/workflows/"
-          } > "$W/prot_d/.gitignore"
-          { cat "$W/prot_d/.gitignore"
-            if [ -f "$S_DIR/.syncignore" ]; then cat "$S_DIR/.syncignore"; echo; fi
-          } > "$W/prot_s/.gitignore"
+          { if [ -f "$D_DIR/.syncignore" ]; then cat "$D_DIR/.syncignore"; echo; else echo "wrangler.toml"; fi; } > "$W/rules_d"
+          { if [ -f "$S_DIR/.syncignore" ]; then cat "$S_DIR/.syncignore"; echo; fi; } > "$W/rules_s"
+          fixed_rules() {
+            [ "$PAT" = true ] || echo ".github/workflows/"   # GITHUB_TOKEN may not change workflow files
+            echo ".syncignore"
+          }
+          { cat "$W/rules_d"; fixed_rules; } > "$W/prot_d/.gitignore"
+          { cat "$W/rules_d" "$W/rules_s"; fixed_rules; } > "$W/prot_s/.gitignore"
 
+          # Tracked files, minus anything the checkout's own .gitignore says to ignore, minus protected.
           list_files() { # dir, output list, protect repo
             git -C "$1" ls-files -z | sort -z > "$W/t"
             git -C "$1" ls-files -z -c -i --exclude-standard | sort -z > "$W/i"
@@ -142,10 +177,10 @@ jobs:
           list_files "$S_DIR" "$W/S" "$W/prot_s"
           list_files "$D_DIR" "$W/D" "$W/prot_d"
 
-          comm -z -13 "$W/S" "$W/D" > "$W/del"
+          comm -z -13 "$W/S" "$W/D" > "$W/del"          # in destination, not in source = leftovers
           xargs -0 -r git -C "$D_DIR" rm -q -f -- < "$W/del"
-          tar -C "$S_DIR" --null -T "$W/S" -cf - | tar -C "$D_DIR" -xf -
-          git -C "$D_DIR" add -A
+          tar -C "$S_DIR" --null -T "$W/S" -cf - | tar -C "$D_DIR" -xf -   # keeps modes and symlinks
+          git -C "$D_DIR" add -A                          # destination's .gitignore still applies here
 
           if git -C "$D_DIR" diff --cached --quiet; then
             echo "Files are already identical."; echo "Files: already identical." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; exit 0
@@ -169,6 +204,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
+          # What the destination has right now, as {"NAME": "value"}
           old=$(gh api --paginate "repos/$DST/actions/variables" --jq '.variables[] | @json' | jq -s 'map({(.name): .value}) | add // {}')
           log() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
           echo '### Variables' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -198,6 +234,7 @@ jobs:
             echo "::warning::GitHub never reveals secret values, so pull cannot copy secrets. Run this workflow in the other repo with direction = push."
             exit 0
           fi
+          # Names and last-changed times already in the destination (values cannot be read by anyone)
           have=$(gh api --paginate "repos/$DST/actions/secrets" --jq '.secrets[] | "\(.name)\t\(.updated_at)"')
           log() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
           echo '### Secrets (values are never logged)' >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
